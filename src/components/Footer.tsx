@@ -52,7 +52,7 @@ export const Footer: React.FC<FooterProps> = ({ currentLocale, onTabChange, onOp
               className="w-8 h-8 object-cover rounded-lg shadow-xs border border-slate-700" 
             />
             <span className="font-serif text-2xl font-bold text-white tracking-tight">
-              Startup <span className="bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">Crème</span>
+              Startup <span className="text-emerald-400">Crème</span>
             </span>
           </div>
 

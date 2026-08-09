@@ -25,9 +25,9 @@ export const DualHero: React.FC<DualHeroProps> = ({
             <Sparkles className="w-3.5 h-3.5 text-cyan-600" />
             <span>Topical Authority Subpath Siloing • <code className="text-cyan-700 font-bold">/{currentLocale}</code></span>
           </div>
-          <h1 className="font-serif text-4xl sm:text-5xl font-extrabold tracking-tight text-slate-900 mb-4 leading-tight">
-            Where High-Value Capital Meets <br />
-            <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 bg-clip-text text-transparent">
+          <h1 className="font-serif text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900 mb-4 leading-tight">
+            Where High-Value Capital Meets <br className="hidden sm:inline" />
+            <span className="text-teal-700 block sm:inline mt-1 sm:mt-0">
               Deep Technology Engineering
             </span>
           </h1>
