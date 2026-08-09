@@ -77,13 +77,6 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="text-slate-900">Startup</span>
               <span className="bg-gradient-to-r from-emerald-600 to-cyan-600 bg-clip-text text-transparent">Crème</span>
             </div>
-            <div className="text-[10px] text-slate-500 font-mono tracking-wider uppercase flex items-center gap-1">
-              <span>Finance</span>
-              <span className="text-emerald-600">•</span>
-              <span>Tech</span>
-              <span className="text-cyan-600">•</span>
-              <span>Global Intelligence</span>
-            </div>
           </div>
         </a>
 
@@ -159,7 +152,7 @@ export const Header: React.FC<HeaderProps> = ({
             {currentUser ? (
               <button
                 onClick={() => setShowRoleMenu(!showRoleMenu)}
-                className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-800 px-2.5 py-1.5 rounded-lg text-xs border border-slate-200 transition-colors"
+                className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-800 p-2 sm:px-2.5 sm:py-1.5 rounded-lg text-xs border border-slate-200 transition-colors"
               >
                 {currentUser.avatar_url ? (
                   <img src={currentUser.avatar_url} alt={currentUser.full_name} className="w-5 h-5 rounded-full object-cover" />
@@ -167,7 +160,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <UserIcon className="w-4 h-4 text-cyan-600" />
                 )}
                 <span className="hidden sm:inline font-medium max-w-[100px] truncate">{currentUser.full_name}</span>
-                <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono uppercase font-semibold ${
+                <span className={`hidden sm:inline-block px-1.5 py-0.5 rounded text-[9px] font-mono uppercase font-semibold ${
                   currentUser.role === 'admin' ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-200 text-slate-700'
                 }`}>
                   {currentUser.role}
@@ -176,10 +169,11 @@ export const Header: React.FC<HeaderProps> = ({
             ) : (
               <button
                 onClick={onOpenAuth}
-                className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-semibold px-3 py-1.5 rounded-lg text-xs shadow transition-all"
+                className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-semibold p-2 sm:px-3 sm:py-1.5 rounded-lg text-xs shadow transition-all"
+                title="Sign In"
               >
-                <UserIcon className="w-3.5 h-3.5" />
-                <span>Sign In</span>
+                <UserIcon className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                <span className="hidden sm:inline">Sign In</span>
               </button>
             )}
 
