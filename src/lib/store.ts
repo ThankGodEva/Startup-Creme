@@ -524,7 +524,30 @@ class StartupCremeStore {
   }
 
   public getPostBySlug(slug: string, locale = 'en-us', vertical?: ContentVertical): Post | undefined {
-    return this.posts.find(p => p.slug === slug && (!vertical || p.vertical === vertical));
+    if (!slug) return undefined;
+    const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
+
+    // 1. Exact or case-insensitive match with vertical constraint or dual_silo
+    let found = this.posts.find(p => {
+      const matchSlug = p.slug.toLowerCase() === decodedSlug || p.id.toLowerCase() === decodedSlug;
+      const matchVert = !vertical || p.vertical === vertical || p.dual_silo;
+      return matchSlug && matchVert;
+    });
+
+    // 2. Fallback: match by slug regardless of vertical
+    if (!found) {
+      found = this.posts.find(p => p.slug.toLowerCase() === decodedSlug || p.id.toLowerCase() === decodedSlug);
+    }
+
+    // 3. Fallback: fuzzy/partial match if slug contains unique base slug or hash
+    if (!found && decodedSlug.length > 8) {
+      found = this.posts.find(p => {
+        const pSlug = p.slug.toLowerCase();
+        return decodedSlug.includes(pSlug) || pSlug.includes(decodedSlug);
+      });
+    }
+
+    return found;
   }
 
   public getPostComments(postId: string): PostComment[] {
@@ -786,7 +809,17 @@ class StartupCremeStore {
   }
 
   public getDiscussionTopicBySlug(slug: string): DiscussionTopic | undefined {
-    return this.topics.find(t => t.slug === slug);
+    if (!slug) return undefined;
+    const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
+
+    let found = this.topics.find(t => t.slug.toLowerCase() === decodedSlug || t.id.toLowerCase() === decodedSlug);
+    if (!found && decodedSlug.length > 8) {
+      found = this.topics.find(t => {
+        const tSlug = t.slug.toLowerCase();
+        return decodedSlug.includes(tSlug) || tSlug.includes(decodedSlug);
+      });
+    }
+    return found;
   }
 
   public async createDiscussionTopic(data: {

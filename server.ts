@@ -110,7 +110,7 @@ async function startServer() {
     app.use(vite.middlewares);
 
     // Catch-all SPA route for dev server (serves index.html for non-API GET requests)
-    app.use('*', async (req, res, next) => {
+    app.get('*', async (req, res, next) => {
       if (req.originalUrl.startsWith('/api')) {
         return next();
       }
@@ -127,7 +127,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.use('*', (req, res, next) => {
+    app.get('*', (req, res, next) => {
       if (req.originalUrl.startsWith('/api')) {
         return next();
       }
