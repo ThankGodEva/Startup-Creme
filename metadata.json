@@ -1,0 +1,6 @@
+{
+  "name": "StartupCrème",
+  "description": "Premier digital publication positioned at the intersection of Finance and Technology, with localized topical siloing, editorial publishing, and community discussion forums.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
