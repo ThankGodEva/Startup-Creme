@@ -58,13 +58,13 @@ export const ArticleCard: React.FC<ArticleCardProps> = ({
 
         <div className="md:col-span-5 p-6 sm:p-8 flex flex-col justify-between bg-white">
           <div>
-            <div className="flex items-center justify-between text-xs text-slate-500 mb-3 font-mono">
-              <span className="uppercase text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-700 font-bold border border-slate-200">
-                {postUrl}
-              </span>
-              <span className="flex items-center gap-1 font-medium">
+            <div className="flex items-center justify-between text-xs text-slate-500 mb-3 font-sans">
+              <span className="flex items-center gap-1 font-medium text-slate-600">
                 <Clock className="w-3.5 h-3.5" />
                 {post.reading_time_minutes} min read
+              </span>
+              <span className="text-[11px] text-slate-400">
+                {new Date(post.created_at).toLocaleDateString()}
               </span>
             </div>
 
@@ -154,10 +154,12 @@ export const ArticleCard: React.FC<ArticleCardProps> = ({
 
         {/* Content */}
         <div className="p-5">
-          <div className="flex items-center justify-between text-[11px] text-slate-500 mb-2 font-mono">
-            <span>{postUrl}</span>
+          <div className="flex items-center justify-between text-[11px] text-slate-500 mb-2 font-sans">
+            <span className="text-[11px] text-slate-400">
+              {new Date(post.created_at).toLocaleDateString()}
+            </span>
             <span className="flex items-center gap-1">
-              <Clock className="w-3 h-3" />
+              <Clock className="w-3 h-3 text-slate-400" />
               {post.reading_time_minutes} min
             </span>
           </div>
