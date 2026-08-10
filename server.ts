@@ -4,6 +4,7 @@ import fs from 'fs';
 import multer from 'multer';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { createServer as createViteServer } from 'vite';
+import { createClient } from '@supabase/supabase-js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -11,6 +12,111 @@ const upload = multer({
     fileSize: 10 * 1024 * 1024, // 10MB limit
   },
 });
+
+async function injectDynamicMetaTags(html: string, reqPath: string, host: string, protocol: string): Promise<string> {
+  let title = "StartupCrème | Financial & Technology Intelligence";
+  let description = "StartupCrème is the premier digital publication for Finance, Macro-economics, and Deep Technology.";
+  let coverImage = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630";
+  let pageType = "website";
+
+  const fullUrl = `${protocol}://${host}${reqPath}`;
+
+  const cleanPath = reqPath.split('?')[0].split('#')[0];
+  const segments = cleanPath.split('/').filter(Boolean);
+
+  if (segments.length > 0) {
+    const rawSlug = segments[segments.length - 1];
+    const excluded = ['finance', 'tech', 'discussion', 'discussions', 'admin', 'sitemap.xml', 'robots.txt'];
+
+    if (rawSlug && !excluded.includes(rawSlug.toLowerCase())) {
+      const decodedSlug = decodeURIComponent(rawSlug).trim().toLowerCase();
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+      const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+
+      if (supabaseUrl && supabaseAnonKey) {
+        try {
+          const client = createClient(supabaseUrl, supabaseAnonKey, {
+            db: { schema: 'startupcreme' }
+          });
+
+          // Query posts
+          const { data: posts } = await client
+            .from('posts')
+            .select('title, excerpt, meta_description, cover_image, slug, id')
+            .or(`slug.ilike.${decodedSlug},id.ilike.${decodedSlug}`);
+
+          let foundPost = posts && posts.length > 0 ? posts[0] : null;
+
+          if (!foundPost && decodedSlug.length > 8) {
+            const shortSlug = decodedSlug.slice(-20);
+            const { data: partialPosts } = await client
+              .from('posts')
+              .select('title, excerpt, meta_description, cover_image, slug, id')
+              .ilike('slug', `%${shortSlug}%`);
+            if (partialPosts && partialPosts.length > 0) {
+              foundPost = partialPosts[0];
+            }
+          }
+
+          if (foundPost) {
+            title = `${foundPost.title} | StartupCrème`;
+            description = foundPost.excerpt || foundPost.meta_description || description;
+            if (foundPost.cover_image) {
+              coverImage = foundPost.cover_image;
+            }
+            pageType = "article";
+          } else {
+            // Try querying topics
+            const { data: topics } = await client
+              .from('discussion_topics')
+              .select('title, content, slug, id')
+              .or(`slug.ilike.${decodedSlug},id.ilike.${decodedSlug}`);
+
+            if (topics && topics.length > 0) {
+              const topic = topics[0];
+              title = `${topic.title} | StartupCrème Discussion`;
+              description = topic.content ? topic.content.slice(0, 200) + '...' : description;
+              pageType = "article";
+            }
+          }
+        } catch (e) {
+          console.warn('Server meta tag lookup warning:', e);
+        }
+      }
+    }
+  }
+
+  const escapeHtml = (str: string) => str.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const safeTitle = escapeHtml(title);
+  const safeDesc = escapeHtml(description);
+  const safeImage = escapeHtml(coverImage);
+  const safeUrl = escapeHtml(fullUrl);
+
+  const dynamicMeta = `
+    <title>${safeTitle}</title>
+    <meta name="description" content="${safeDesc}" />
+
+    <!-- Open Graph / Facebook / WhatsApp / LinkedIn / iMessage -->
+    <meta property="og:type" content="${pageType}" />
+    <meta property="og:site_name" content="StartupCrème" />
+    <meta property="og:title" content="${safeTitle}" />
+    <meta property="og:description" content="${safeDesc}" />
+    <meta property="og:image" content="${safeImage}" />
+    <meta property="og:url" content="${safeUrl}" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@startupcreme" />
+    <meta name="twitter:title" content="${safeTitle}" />
+    <meta name="twitter:description" content="${safeDesc}" />
+    <meta name="twitter:image" content="${safeImage}" />
+  `;
+
+  let updatedHtml = html.replace(/<title>.*?<\/title>/gi, '');
+  updatedHtml = updatedHtml.replace(/<meta\s+(property|name)=["'](og:|twitter:|description).*?>/gi, '');
+
+  return updatedHtml.replace('</head>', `${dynamicMeta}\n</head>`);
+}
 
 async function startServer() {
   const app = express();
@@ -118,6 +224,11 @@ async function startServer() {
         const indexPath = path.resolve(process.cwd(), 'index.html');
         let template = fs.readFileSync(indexPath, 'utf-8');
         template = await vite.transformIndexHtml(req.originalUrl, template);
+
+        const host = req.get('host') || 'www.startupcreme.com';
+        const protocol = req.protocol || 'https';
+        template = await injectDynamicMetaTags(template, req.originalUrl, host, protocol);
+
         res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
       } catch (e) {
         vite.ssrFixStacktrace(e as Error);
@@ -127,11 +238,22 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res, next) => {
+    app.get('*', async (req, res, next) => {
       if (req.originalUrl.startsWith('/api')) {
         return next();
       }
-      res.sendFile(path.join(distPath, 'index.html'));
+      try {
+        const indexPath = path.join(distPath, 'index.html');
+        let template = fs.readFileSync(indexPath, 'utf-8');
+
+        const host = req.get('host') || 'www.startupcreme.com';
+        const protocol = req.protocol || 'https';
+        template = await injectDynamicMetaTags(template, req.originalUrl, host, protocol);
+
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        next(e);
+      }
     });
   }
 

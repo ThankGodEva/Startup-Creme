@@ -1,4 +1,15 @@
 import { Post, DiscussionTopic } from '../types';
+import { normalizeImageUrl } from './router';
+
+function setMetaTag(selector: string, attrName: string, attrVal: string, content: string) {
+  let el = document.querySelector(selector);
+  if (!el) {
+    el = document.createElement('meta');
+    el.setAttribute(attrName, attrVal);
+    document.head.appendChild(el);
+  }
+  el.setAttribute('content', content);
+}
 
 export function updatePageSEO(options: {
   title: string;
@@ -7,37 +18,33 @@ export function updatePageSEO(options: {
   ogImage?: string;
   type?: string;
 }) {
-  const fullTitle = `${options.title} | StartupCrème - Finance & Tech Intelligence`;
+  const fullTitle = options.title.includes('StartupCrème')
+    ? options.title
+    : `${options.title} | StartupCrème - Finance & Tech Intelligence`;
+
   document.title = fullTitle;
 
-  // Description
-  let metaDesc = document.querySelector('meta[name="description"]');
-  if (!metaDesc) {
-    metaDesc = document.createElement('meta');
-    metaDesc.setAttribute('name', 'description');
-    document.head.appendChild(metaDesc);
-  }
-  metaDesc.setAttribute('content', options.description || 'StartupCrème is the premier digital publication for Finance, Macro-economics, and Deep Technology.');
+  const desc = options.description || 'StartupCrème is the premier digital publication for Finance, Macro-economics, and Deep Technology.';
+  const defaultImage = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630';
+  const imgUrl = options.ogImage ? normalizeImageUrl(options.ogImage) : defaultImage;
+  const currentUrl = options.canonicalUrl || window.location.href;
 
-  // OpenGraph Title
-  let ogTitle = document.querySelector('meta[property="og:title"]');
-  if (!ogTitle) {
-    ogTitle = document.createElement('meta');
-    ogTitle.setAttribute('property', 'og:title');
-    document.head.appendChild(ogTitle);
-  }
-  ogTitle.setAttribute('content', fullTitle);
+  setMetaTag('meta[name="description"]', 'name', 'description', desc);
 
-  // OpenGraph Image
-  if (options.ogImage) {
-    let ogImg = document.querySelector('meta[property="og:image"]');
-    if (!ogImg) {
-      ogImg = document.createElement('meta');
-      ogImg.setAttribute('property', 'og:image');
-      document.head.appendChild(ogImg);
-    }
-    ogImg.setAttribute('content', options.ogImage);
-  }
+  // OpenGraph
+  setMetaTag('meta[property="og:site_name"]', 'property', 'og:site_name', 'StartupCrème');
+  setMetaTag('meta[property="og:type"]', 'property', 'og:type', options.type || 'article');
+  setMetaTag('meta[property="og:title"]', 'property', 'og:title', fullTitle);
+  setMetaTag('meta[property="og:description"]', 'property', 'og:description', desc);
+  setMetaTag('meta[property="og:image"]', 'property', 'og:image', imgUrl);
+  setMetaTag('meta[property="og:url"]', 'property', 'og:url', currentUrl);
+
+  // Twitter Card
+  setMetaTag('meta[name="twitter:card"]', 'name', 'twitter:card', 'summary_large_image');
+  setMetaTag('meta[name="twitter:site"]', 'name', 'twitter:site', '@startupcreme');
+  setMetaTag('meta[name="twitter:title"]', 'name', 'twitter:title', fullTitle);
+  setMetaTag('meta[name="twitter:description"]', 'name', 'twitter:description', desc);
+  setMetaTag('meta[name="twitter:image"]', 'name', 'twitter:image', imgUrl);
 }
 
 export function generateSitemapXML(posts: Post[], topics: DiscussionTopic[]): string {
