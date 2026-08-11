@@ -77,6 +77,8 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
   const [uploadingCover, setUploadingCover] = useState(false);
   const [uploadCoverError, setUploadCoverError] = useState<string | null>(null);
   const [uploadCoverSuccess, setUploadCoverSuccess] = useState(false);
+  const [uploadCoverStorage, setUploadCoverStorage] = useState<'r2' | 'local' | null>(null);
+  const [uploadCoverMessage, setUploadCoverMessage] = useState<string | null>(null);
   const [uploadingInline, setUploadingInline] = useState(false);
 
   // Initialize Tiptap Editor
@@ -197,7 +199,12 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
     }
   };
 
-  const uploadFileToR2 = async (file: File): Promise<{ url: string; isR2: boolean; note?: string }> => {
+  const uploadFileToR2 = async (file: File): Promise<{
+    url: string;
+    isR2: boolean;
+    storage: 'r2' | 'local';
+    note?: string;
+  }> => {
     try {
       const formData = new FormData();
       formData.append('image', file);
@@ -215,7 +222,12 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
       }
 
       if (response.ok && data.success && data.url) {
-        return { url: data.url, isR2: true };
+        return {
+          url: data.url,
+          isR2: data.storage === 'r2',
+          storage: data.storage === 'r2' ? 'r2' : 'local',
+          note: data.message || (data.storage === 'r2' ? 'Uploaded to Cloudflare R2' : 'Uploaded to server storage'),
+        };
       }
 
       const serverError = data.error || (response.status !== 200 ? `Server status ${response.status}` : 'Upload failed');
@@ -228,6 +240,7 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
           resolve({
             url: dataUrl,
             isR2: false,
+            storage: 'local',
             note: serverError,
           });
         };
@@ -235,6 +248,7 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
           resolve({
             url: URL.createObjectURL(file),
             isR2: false,
+            storage: 'local',
             note: serverError,
           });
         };
@@ -249,13 +263,15 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
           resolve({
             url: dataUrl,
             isR2: false,
-            note: err?.message || 'Network error attempting to reach Cloudflare R2 endpoint',
+            storage: 'local',
+            note: err?.message || 'Network error attempting to reach upload endpoint',
           });
         };
         reader.onerror = () => {
           resolve({
             url: URL.createObjectURL(file),
             isR2: false,
+            storage: 'local',
             note: err?.message || 'Error processing local file',
           });
         };
@@ -271,16 +287,15 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
     setUploadingCover(true);
     setUploadCoverError(null);
     setUploadCoverSuccess(false);
+    setUploadCoverMessage(null);
 
     try {
       const res = await uploadFileToR2(file);
       setCoverImage(res.url);
-      if (res.isR2) {
-        setUploadCoverSuccess(true);
-        setTimeout(() => setUploadCoverSuccess(false), 4000);
-      } else {
-        setUploadCoverError(`R2 storage not configured (${res.note}). Using local image preview.`);
-      }
+      setUploadCoverStorage(res.storage);
+      setUploadCoverMessage(res.note || null);
+      setUploadCoverSuccess(true);
+      setTimeout(() => setUploadCoverSuccess(false), 8000);
     } catch (err: any) {
       setUploadCoverError(err.message || 'Error uploading file');
     } finally {
@@ -813,9 +828,20 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
 
             {/* Upload Feedback */}
             {uploadCoverSuccess && (
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center gap-2 text-emerald-800 text-xs font-medium">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Image successfully uploaded to Cloudflare R2!</span>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 space-y-0.5">
+                <div className="flex items-center gap-2 text-emerald-800 text-xs font-semibold">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    {uploadCoverStorage === 'r2'
+                      ? 'Image successfully uploaded to Cloudflare R2!'
+                      : 'Cover image uploaded and ready!'}
+                  </span>
+                </div>
+                {uploadCoverMessage && uploadCoverStorage !== 'r2' && (
+                  <p className="text-[11px] text-emerald-700 pl-6 leading-relaxed">
+                    {uploadCoverMessage}
+                  </p>
+                )}
               </div>
             )}
 
@@ -823,7 +849,7 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
               <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-rose-900 text-xs space-y-1">
                 <div className="flex items-center gap-1.5 font-bold text-rose-800">
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                  <span>R2 Upload Failed</span>
+                  <span>Upload Failed</span>
                 </div>
                 <p className="text-[11px] leading-relaxed text-rose-700">{uploadCoverError}</p>
                 <p className="text-[10px] text-slate-500 font-mono pt-1">

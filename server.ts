@@ -118,18 +118,96 @@ async function injectDynamicMetaTags(html: string, reqPath: string, host: string
   return updatedHtml.replace('</head>', `${dynamicMeta}\n</head>`);
 }
 
+function getR2Config() {
+  const getEnv = (...keys: string[]) => {
+    for (const k of keys) {
+      const val = process.env[k];
+      if (val && typeof val === 'string' && val.trim().length > 0) {
+        return val.trim().replace(/^["']|["']$/g, '');
+      }
+    }
+    return '';
+  };
+
+  const rawAccountId = getEnv(
+    'R2_ACCOUNT_ID',
+    'CLOUDFLARE_R2_ACCOUNT_ID',
+    'CLOUDFLARE_ACCOUNT_ID',
+    'CF_R2_ACCOUNT_ID',
+    'CF_ACCOUNT_ID',
+    'VITE_R2_ACCOUNT_ID',
+    'VITE_CLOUDFLARE_R2_ACCOUNT_ID'
+  );
+
+  const accountId = rawAccountId
+    .replace(/^https?:\/\//i, '')
+    .replace(/\.r2\.cloudflarestorage\.com.*$/i, '')
+    .replace(/\/.*$/, '')
+    .trim();
+
+  const accessKeyId = getEnv(
+    'R2_ACCESS_KEY_ID',
+    'CLOUDFLARE_R2_ACCESS_KEY_ID',
+    'CF_R2_ACCESS_KEY_ID',
+    'R2_ACCESS_KEY',
+    'VITE_R2_ACCESS_KEY_ID',
+    'VITE_CLOUDFLARE_R2_ACCESS_KEY_ID'
+  );
+
+  const secretAccessKey = getEnv(
+    'R2_SECRET_ACCESS_KEY',
+    'CLOUDFLARE_R2_SECRET_ACCESS_KEY',
+    'CF_R2_SECRET_ACCESS_KEY',
+    'R2_SECRET_KEY',
+    'R2_SECRET',
+    'VITE_R2_SECRET_ACCESS_KEY',
+    'VITE_CLOUDFLARE_R2_SECRET_ACCESS_KEY'
+  );
+
+  const bucketName = getEnv(
+    'R2_BUCKET_NAME',
+    'CLOUDFLARE_R2_BUCKET_NAME',
+    'CF_R2_BUCKET_NAME',
+    'R2_BUCKET',
+    'CF_R2_BUCKET',
+    'VITE_R2_BUCKET_NAME',
+    'VITE_CLOUDFLARE_R2_BUCKET_NAME'
+  );
+
+  const publicUrl = getEnv(
+    'R2_PUBLIC_URL',
+    'CLOUDFLARE_R2_PUBLIC_URL',
+    'CF_R2_PUBLIC_URL',
+    'R2_PUBLIC_DOMAIN',
+    'R2_DOMAIN',
+    'VITE_R2_PUBLIC_URL',
+    'VITE_CLOUDFLARE_R2_PUBLIC_URL'
+  );
+
+  const isConfigured = Boolean(accountId && accessKeyId && secretAccessKey && bucketName);
+
+  return { accountId, accessKeyId, secretAccessKey, bucketName, publicUrl, isConfigured };
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json({ limit: '10mb' }));
 
+  // Static uploads directory middleware
+  const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+  app.use('/uploads', express.static(uploadsDir));
+
   // API Route: Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
   });
 
-  // API Route: Cloudflare R2 Image Upload
+  // API Route: Cloudflare R2 Image Upload (with server local storage fallback)
   app.post('/api/upload-image', upload.single('image'), async (req, res) => {
     try {
       const file = req.file;
@@ -137,72 +215,91 @@ async function startServer() {
         return res.status(400).json({ error: 'No image file provided in request.' });
       }
 
-      const accountId = process.env.R2_ACCOUNT_ID;
-      const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-      const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-      const bucketName = process.env.R2_BUCKET_NAME;
-      const publicUrl = process.env.R2_PUBLIC_URL;
+      const r2Config = getR2Config();
 
-      if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
-        return res.status(400).json({
-          error: 'Cloudflare R2 credentials (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME) are not configured in environment variables.',
-          missingKeys: {
-            R2_ACCOUNT_ID: !accountId,
-            R2_ACCESS_KEY_ID: !accessKeyId,
-            R2_SECRET_ACCESS_KEY: !secretAccessKey,
-            R2_BUCKET_NAME: !bucketName,
-          },
-        });
-      }
-
-      // Construct S3Client for Cloudflare R2
-      const endpoint = `https://${accountId}.r2.cloudflarestorage.com`;
-      const s3Client = new S3Client({
-        region: 'auto',
-        endpoint,
-        credentials: {
-          accessKeyId,
-          secretAccessKey,
-        },
-      });
-
-      // Generate unique file path in bucket
       const fileExt = path.extname(file.originalname) || '.jpg';
       const cleanBaseName = path.basename(file.originalname, fileExt).replace(/[^a-zA-Z0-9_-]/g, '_');
       const objectKey = `articles/${Date.now()}-${cleanBaseName}${fileExt}`;
 
-      // Upload to R2 Bucket
-      const command = new PutObjectCommand({
-        Bucket: bucketName,
-        Key: objectKey,
-        Body: file.buffer,
-        ContentType: file.mimetype || 'image/jpeg',
-      });
-
-      await s3Client.send(command);
-
-      // Determine Public URL
-      let imageUrl = '';
-      if (publicUrl) {
-        let cleanPublicUrl = publicUrl.replace(/\/+$/, '');
-        if (!/^https?:\/\//i.test(cleanPublicUrl)) {
-          cleanPublicUrl = `https://${cleanPublicUrl}`;
+      const saveLocally = () => {
+        const articleUploadsDir = path.join(process.cwd(), 'public', 'uploads', 'articles');
+        if (!fs.existsSync(articleUploadsDir)) {
+          fs.mkdirSync(articleUploadsDir, { recursive: true });
         }
-        imageUrl = `${cleanPublicUrl}/${objectKey}`;
-      } else {
-        imageUrl = `https://${bucketName}.${accountId}.r2.cloudflarestorage.com/${objectKey}`;
+        const localFilename = `${Date.now()}-${cleanBaseName}${fileExt}`;
+        const localFilePath = path.join(articleUploadsDir, localFilename);
+        fs.writeFileSync(localFilePath, file.buffer);
+        return `/uploads/articles/${localFilename}`;
+      };
+
+      if (!r2Config.isConfigured) {
+        const localUrl = saveLocally();
+        console.log('R2 storage credentials not fully configured. Saved image locally:', localUrl);
+        return res.json({
+          success: true,
+          url: localUrl,
+          key: objectKey,
+          storage: 'local',
+          message: 'Saved to server storage. (To route uploads to Cloudflare R2 CDN, configure R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET_NAME in Settings).',
+        });
       }
 
-      console.log('Successfully uploaded image to Cloudflare R2:', imageUrl);
-      return res.json({
-        success: true,
-        url: imageUrl,
-        key: objectKey,
-      });
+      // Construct S3Client for Cloudflare R2
+      try {
+        const endpoint = `https://${r2Config.accountId}.r2.cloudflarestorage.com`;
+        const s3Client = new S3Client({
+          region: 'auto',
+          endpoint,
+          credentials: {
+            accessKeyId: r2Config.accessKeyId,
+            secretAccessKey: r2Config.secretAccessKey,
+          },
+        });
+
+        const command = new PutObjectCommand({
+          Bucket: r2Config.bucketName,
+          Key: objectKey,
+          Body: file.buffer,
+          ContentType: file.mimetype || 'image/jpeg',
+        });
+
+        await s3Client.send(command);
+
+        let imageUrl = '';
+        if (r2Config.publicUrl) {
+          let cleanPublicUrl = r2Config.publicUrl.replace(/\/+$/, '');
+          if (!/^https?:\/\//i.test(cleanPublicUrl)) {
+            cleanPublicUrl = `https://${cleanPublicUrl}`;
+          }
+          imageUrl = `${cleanPublicUrl}/${objectKey}`;
+        } else {
+          imageUrl = `https://${r2Config.bucketName}.${r2Config.accountId}.r2.cloudflarestorage.com/${objectKey}`;
+        }
+
+        console.log('Successfully uploaded image to Cloudflare R2:', imageUrl);
+        return res.json({
+          success: true,
+          url: imageUrl,
+          key: objectKey,
+          storage: 'r2',
+          message: 'Successfully uploaded to Cloudflare R2',
+        });
+      } catch (r2Err: any) {
+        console.warn('Cloudflare R2 upload error, using server local storage fallback:', r2Err);
+        const localUrl = saveLocally();
+        return res.json({
+          success: true,
+          url: localUrl,
+          key: objectKey,
+          storage: 'local',
+          message: `R2 Upload warning (${r2Err?.message || 'Error communicating with R2'}). Saved to server local storage as fallback.`,
+          r2Error: r2Err?.message,
+        });
+      }
     } catch (err: any) {
-      console.error('Error uploading image to Cloudflare R2:', err);
+      console.error('Fatal error during image upload:', err);
       return res.status(500).json({
-        error: err?.message || 'Failed to upload image to Cloudflare R2 storage',
+        error: err?.message || 'Failed to process image upload.',
       });
     }
   });
