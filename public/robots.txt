@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+Allow: /en-us/
+Allow: /en-gb/
+Allow: /de-de/
+Allow: /ja-jp/
+Allow: /fr-fr/
+Allow: /discussion
+
+Disallow: /admin
+Disallow: /api/
+
+Sitemap: https://www.startupcreme.com/sitemap.xml

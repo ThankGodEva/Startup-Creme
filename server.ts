@@ -207,6 +207,120 @@ async function startServer() {
     res.json({ status: 'ok' });
   });
 
+  // Dynamic XML Sitemap for Google Search Console
+  app.get(['/sitemap.xml', '/sitemap', '/sitemap_index.xml'], async (req, res) => {
+    res.setHeader('Content-Type', 'text/xml; charset=utf-8');
+    res.setHeader('X-Robots-Tag', 'noindex');
+
+    try {
+      let host = req.get('x-forwarded-host') || req.get('host') || 'www.startupcreme.com';
+      if (!host.includes('startupcreme.com')) {
+        host = 'www.startupcreme.com';
+      }
+      let protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
+      if (host.includes('startupcreme.com')) {
+        protocol = 'https';
+      }
+      const baseUrl = `${protocol}://${host}`;
+
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+      const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+
+      let posts: any[] = [];
+      let topics: any[] = [];
+
+      if (supabaseUrl && supabaseAnonKey) {
+        try {
+          const client = createClient(supabaseUrl, supabaseAnonKey, {
+            db: { schema: 'startupcreme' }
+          });
+          const { data: postsData } = await client
+            .from('posts')
+            .select('*')
+            .eq('status', 'published');
+          if (postsData) posts = postsData;
+
+          const { data: topicsData } = await client
+            .from('discussion_topics')
+            .select('*');
+          if (topicsData) topics = topicsData;
+        } catch (e) {
+          console.warn('Error fetching sitemap data from Supabase:', e);
+        }
+      }
+
+      const locales = ['en-us', 'en-gb', 'de-de', 'ja-jp', 'fr-fr'];
+
+      let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+      xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
+
+      // Root & Locales
+      locales.forEach(loc => {
+        xml += `  <url>\n    <loc>${baseUrl}/${loc}</loc>\n    <changefreq>daily</changefreq>\n    <priority>1.0</priority>\n  </url>\n`;
+        xml += `  <url>\n    <loc>${baseUrl}/${loc}/finance</loc>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n  </url>\n`;
+        xml += `  <url>\n    <loc>${baseUrl}/${loc}/tech</loc>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n  </url>\n`;
+      });
+
+      xml += `  <url>\n    <loc>${baseUrl}/discussion</loc>\n    <changefreq>hourly</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
+
+      posts.forEach(post => {
+        const loc = post.locale || 'en-us';
+        const postUrl = `${baseUrl}/${loc}/${post.vertical}/${post.slug}`;
+        const lastMod = post.updated_at ? new Date(post.updated_at).toISOString() : new Date().toISOString();
+
+        xml += `  <url>\n    <loc>${postUrl}</loc>\n    <lastmod>${lastMod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.85</priority>\n  </url>\n`;
+      });
+
+      topics.forEach(t => {
+        const topicUrl = `${baseUrl}/discussion/${t.slug}`;
+        const lastMod = t.updated_at ? new Date(t.updated_at).toISOString() : new Date().toISOString();
+
+        xml += `  <url>\n    <loc>${topicUrl}</loc>\n    <lastmod>${lastMod}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.7</priority>\n  </url>\n`;
+      });
+
+      xml += `</urlset>`;
+
+      return res.status(200).send(xml);
+    } catch (err) {
+      console.error('Sitemap generation error, serving static sitemap.xml fallback:', err);
+      const fallbackPath = path.resolve(process.cwd(), 'public', 'sitemap.xml');
+      if (fs.existsSync(fallbackPath)) {
+        return res.status(200).sendFile(fallbackPath);
+      }
+      return res.status(500).send('Error generating sitemap');
+    }
+  });
+
+  // Dynamic robots.txt
+  app.get('/robots.txt', (req, res) => {
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+
+    let host = req.get('x-forwarded-host') || req.get('host') || 'www.startupcreme.com';
+    if (!host.includes('startupcreme.com')) {
+      host = 'www.startupcreme.com';
+    }
+    let protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
+    if (host.includes('startupcreme.com')) {
+      protocol = 'https';
+    }
+
+    const robots = `User-agent: *
+Allow: /
+Allow: /en-us/
+Allow: /en-gb/
+Allow: /de-de/
+Allow: /ja-jp/
+Allow: /fr-fr/
+Allow: /discussion
+
+Disallow: /admin
+Disallow: /api/
+
+Sitemap: ${protocol}://${host}/sitemap.xml
+`;
+    return res.status(200).send(robots);
+  });
+
   // API Route: Cloudflare R2 Image Upload (with server local storage fallback)
   app.post('/api/upload-image', upload.single('image'), async (req, res) => {
     try {
@@ -314,7 +428,8 @@ async function startServer() {
 
     // Catch-all SPA route for dev server (serves index.html for non-API GET requests)
     app.get('*', async (req, res, next) => {
-      if (req.originalUrl.startsWith('/api')) {
+      const p = req.path.toLowerCase();
+      if (req.originalUrl.startsWith('/api') || p === '/sitemap.xml' || p === '/sitemap' || p === '/sitemap_index.xml' || p === '/robots.txt') {
         return next();
       }
       try {
@@ -336,7 +451,8 @@ async function startServer() {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', async (req, res, next) => {
-      if (req.originalUrl.startsWith('/api')) {
+      const p = req.path.toLowerCase();
+      if (req.originalUrl.startsWith('/api') || p === '/sitemap.xml' || p === '/sitemap' || p === '/sitemap_index.xml' || p === '/robots.txt') {
         return next();
       }
       try {
