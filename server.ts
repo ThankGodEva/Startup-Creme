@@ -375,6 +375,7 @@ Sitemap: ${protocol}://${host}/sitemap.xml
           Key: objectKey,
           Body: file.buffer,
           ContentType: file.mimetype || 'image/jpeg',
+          CacheControl: 'public, max-age=31536000, immutable',
         });
 
         await s3Client.send(command);

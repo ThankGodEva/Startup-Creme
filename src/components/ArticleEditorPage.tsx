@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { Post, ContentVertical, PublicationStatus, UserProfile } from '../types';
 import { normalizeImageUrl } from '../lib/router';
+import { compressImage, formatBytes } from '../lib/imageCompression';
 
 interface ArticleEditorPageProps {
   post: Partial<Post> | null;
@@ -199,15 +200,36 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
     }
   };
 
-  const uploadFileToR2 = async (file: File): Promise<{
+  const uploadFileToR2 = async (rawFile: File): Promise<{
     url: string;
     isR2: boolean;
     storage: 'r2' | 'local';
     note?: string;
   }> => {
+    let fileToUpload = rawFile;
+    let compressionInfo = '';
+
+    // Automatically resize & compress image before network upload (WebP, max 1920x1920)
+    try {
+      const compressed = await compressImage(rawFile, {
+        maxWidth: 1920,
+        maxHeight: 1920,
+        quality: 0.82,
+        mimeType: 'image/webp',
+      });
+      fileToUpload = compressed.file;
+
+      if (compressed.originalSize > compressed.compressedSize) {
+        compressionInfo = `Optimized image (${compressed.ratio}): ${formatBytes(compressed.originalSize)} → ${formatBytes(compressed.compressedSize)}`;
+        console.log(`[Image Optimization] ${compressionInfo}`);
+      }
+    } catch (compressErr) {
+      console.warn('Image compression skipped, proceeding with original file:', compressErr);
+    }
+
     try {
       const formData = new FormData();
-      formData.append('image', file);
+      formData.append('image', fileToUpload);
 
       const response = await fetch('/api/upload-image', {
         method: 'POST',
@@ -222,11 +244,14 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
       }
 
       if (response.ok && data.success && data.url) {
+        const serverMsg = data.message || (data.storage === 'r2' ? 'Uploaded to Cloudflare R2' : 'Uploaded to server storage');
+        const finalNote = compressionInfo ? `${compressionInfo}. ${serverMsg}` : serverMsg;
+
         return {
           url: data.url,
           isR2: data.storage === 'r2',
           storage: data.storage === 'r2' ? 'r2' : 'local',
-          note: data.message || (data.storage === 'r2' ? 'Uploaded to Cloudflare R2' : 'Uploaded to server storage'),
+          note: finalNote,
         };
       }
 
@@ -241,18 +266,18 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
             url: dataUrl,
             isR2: false,
             storage: 'local',
-            note: serverError,
+            note: compressionInfo ? `${compressionInfo}. ${serverError}` : serverError,
           });
         };
         reader.onerror = () => {
           resolve({
-            url: URL.createObjectURL(file),
+            url: URL.createObjectURL(fileToUpload),
             isR2: false,
             storage: 'local',
             note: serverError,
           });
         };
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(fileToUpload);
       });
     } catch (err: any) {
       // Network error or server unreachable: fallback to local Data URL
@@ -269,13 +294,13 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
         };
         reader.onerror = () => {
           resolve({
-            url: URL.createObjectURL(file),
+            url: URL.createObjectURL(fileToUpload),
             isR2: false,
             storage: 'local',
             note: err?.message || 'Error processing local file',
           });
         };
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(fileToUpload);
       });
     }
   };
@@ -833,12 +858,12 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                   <span>
                     {uploadCoverStorage === 'r2'
-                      ? 'Image successfully uploaded to Cloudflare R2!'
+                      ? 'Image optimized & uploaded to Cloudflare R2!'
                       : 'Cover image uploaded and ready!'}
                   </span>
                 </div>
-                {uploadCoverMessage && uploadCoverStorage !== 'r2' && (
-                  <p className="text-[11px] text-emerald-700 pl-6 leading-relaxed">
+                {uploadCoverMessage && (
+                  <p className="text-[11px] text-emerald-700 pl-6 leading-relaxed font-mono">
                     {uploadCoverMessage}
                   </p>
                 )}
