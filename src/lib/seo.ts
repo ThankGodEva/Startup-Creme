@@ -73,7 +73,31 @@ export function generateSitemapXML(posts: Post[], topics: DiscussionTopic[]): st
     xml += `    <changefreq>daily</changefreq>\n`;
     xml += `    <priority>0.9</priority>\n`;
     xml += `  </url>\n`;
+
+    xml += `  <url>\n`;
+    xml += `    <loc>${baseUrl}/${loc}/privacy</loc>\n`;
+    xml += `    <changefreq>monthly</changefreq>\n`;
+    xml += `    <priority>0.5</priority>\n`;
+    xml += `  </url>\n`;
+
+    xml += `  <url>\n`;
+    xml += `    <loc>${baseUrl}/${loc}/terms</loc>\n`;
+    xml += `    <changefreq>monthly</changefreq>\n`;
+    xml += `    <priority>0.5</priority>\n`;
+    xml += `  </url>\n`;
   });
+
+  xml += `  <url>\n`;
+  xml += `    <loc>${baseUrl}/privacy</loc>\n`;
+  xml += `    <changefreq>monthly</changefreq>\n`;
+  xml += `    <priority>0.5</priority>\n`;
+  xml += `  </url>\n`;
+
+  xml += `  <url>\n`;
+  xml += `    <loc>${baseUrl}/terms</loc>\n`;
+  xml += `    <changefreq>monthly</changefreq>\n`;
+  xml += `    <priority>0.5</priority>\n`;
+  xml += `  </url>\n`;
 
   // Forum
   xml += `  <url>\n`;
@@ -121,6 +145,8 @@ Allow: /en-gb/
 Allow: /de-de/
 Allow: /ja-jp/
 Allow: /fr-fr/
+Allow: /privacy
+Allow: /terms
 Allow: /discussion
 Disallow: /admin
 Disallow: /api/

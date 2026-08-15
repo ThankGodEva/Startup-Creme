@@ -26,9 +26,18 @@ async function injectDynamicMetaTags(html: string, reqPath: string, host: string
 
   if (segments.length > 0) {
     const rawSlug = segments[segments.length - 1];
-    const excluded = ['finance', 'tech', 'discussion', 'discussions', 'admin', 'sitemap.xml', 'robots.txt'];
+    const lowerSlug = rawSlug.toLowerCase();
+    const excluded = ['finance', 'tech', 'discussion', 'discussions', 'admin', 'sitemap.xml', 'robots.txt', 'privacy', 'privacy-policy', 'terms', 'terms-of-service', 'terms-of-editorial-service'];
 
-    if (rawSlug && !excluded.includes(rawSlug.toLowerCase())) {
+    if (lowerSlug === 'privacy' || lowerSlug === 'privacy-policy') {
+      title = "Privacy Policy | StartupCrème";
+      description = "StartupCrème Privacy Policy: Learn how we protect personal data, handle cookies, manage newsletter subscriptions, and ensure GDPR/CCPA compliance.";
+      pageType = "article";
+    } else if (lowerSlug === 'terms' || lowerSlug === 'terms-of-service' || lowerSlug === 'terms-of-editorial-service') {
+      title = "Terms of Editorial Service | StartupCrème";
+      description = "StartupCrème Terms of Service: Institutional intelligence disclaimers, intellectual property rules, forum community standards, and YMYL non-financial advice notices.";
+      pageType = "article";
+    } else if (rawSlug && !excluded.includes(lowerSlug)) {
       const decodedSlug = decodeURIComponent(rawSlug).trim().toLowerCase();
       const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
       const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
@@ -259,8 +268,12 @@ async function startServer() {
         xml += `  <url>\n    <loc>${baseUrl}/${loc}</loc>\n    <changefreq>daily</changefreq>\n    <priority>1.0</priority>\n  </url>\n`;
         xml += `  <url>\n    <loc>${baseUrl}/${loc}/finance</loc>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n  </url>\n`;
         xml += `  <url>\n    <loc>${baseUrl}/${loc}/tech</loc>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n  </url>\n`;
+        xml += `  <url>\n    <loc>${baseUrl}/${loc}/privacy</loc>\n    <changefreq>monthly</changefreq>\n    <priority>0.5</priority>\n  </url>\n`;
+        xml += `  <url>\n    <loc>${baseUrl}/${loc}/terms</loc>\n    <changefreq>monthly</changefreq>\n    <priority>0.5</priority>\n  </url>\n`;
       });
 
+      xml += `  <url>\n    <loc>${baseUrl}/privacy</loc>\n    <changefreq>monthly</changefreq>\n    <priority>0.5</priority>\n  </url>\n`;
+      xml += `  <url>\n    <loc>${baseUrl}/terms</loc>\n    <changefreq>monthly</changefreq>\n    <priority>0.5</priority>\n  </url>\n`;
       xml += `  <url>\n    <loc>${baseUrl}/discussion</loc>\n    <changefreq>hourly</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
 
       posts.forEach(post => {
@@ -311,6 +324,8 @@ Allow: /en-gb/
 Allow: /de-de/
 Allow: /ja-jp/
 Allow: /fr-fr/
+Allow: /privacy
+Allow: /terms
 Allow: /discussion
 
 Disallow: /admin

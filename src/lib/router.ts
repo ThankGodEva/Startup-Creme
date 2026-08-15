@@ -1,5 +1,7 @@
 import { Post, DiscussionTopic } from '../types';
 
+export type NavigationTab = 'home' | 'finance' | 'tech' | 'discussion' | 'admin' | 'privacy' | 'terms';
+
 export function getPostUrl(post: Post): string {
   const loc = post.locale || 'en-us';
   const vert = post.vertical || 'finance';
@@ -12,10 +14,12 @@ export function getTopicUrl(topic: DiscussionTopic, locale = 'en-us'): string {
   return `/${locale}/discussions/${slug}`;
 }
 
-export function getTabUrl(tab: 'home' | 'finance' | 'tech' | 'discussion' | 'admin', locale = 'en-us'): string {
+export function getTabUrl(tab: NavigationTab, locale = 'en-us'): string {
   if (tab === 'admin') return '/admin';
   if (tab === 'home') return `/${locale}`;
   if (tab === 'discussion') return `/${locale}/discussions`;
+  if (tab === 'privacy') return `/${locale}/privacy`;
+  if (tab === 'terms') return `/${locale}/terms`;
   return `/${locale}/${tab}`;
 }
 

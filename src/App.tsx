@@ -9,10 +9,11 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { AuthModal } from './components/AuthModal';
 import { BookmarksDrawer } from './components/BookmarksDrawer';
 import { Footer } from './components/Footer';
+import { LegalPage, LegalDocType } from './components/LegalPage';
 
 import { store } from './lib/store';
 import { Post, DiscussionTopic, UserProfile, ContentVertical } from './types';
-import { getPostUrl, getTopicUrl, getTabUrl, VALID_LOCALES } from './lib/router';
+import { getPostUrl, getTopicUrl, getTabUrl, VALID_LOCALES, NavigationTab } from './lib/router';
 import { TrendingUp, Cpu, MessageSquare, Sparkles, SlidersHorizontal, ArrowRight, BarChart2, ThumbsUp } from 'lucide-react';
 
 export default function App() {
@@ -20,7 +21,7 @@ export default function App() {
 
   // App State
   const [currentLocale, setCurrentLocale] = useState('en-us');
-  const [activeTab, setActiveTab] = useState<'home' | 'finance' | 'tech' | 'discussion' | 'admin'>('home');
+  const [activeTab, setActiveTab] = useState<NavigationTab>('home');
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<DiscussionTopic | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -48,6 +49,20 @@ export default function App() {
       return;
     }
 
+    if (parts[0] === 'privacy' || parts[0] === 'privacy-policy') {
+      setActiveTab('privacy');
+      setSelectedPost(null);
+      setSelectedTopic(null);
+      return;
+    }
+
+    if (parts[0] === 'terms' || parts[0] === 'terms-of-service' || parts[0] === 'terms-of-editorial-service') {
+      setActiveTab('terms');
+      setSelectedPost(null);
+      setSelectedTopic(null);
+      return;
+    }
+
     let loc = 'en-us';
     let rest = parts;
     if (VALID_LOCALES.includes(parts[0])) {
@@ -63,7 +78,7 @@ export default function App() {
       return;
     }
 
-    const first = rest[0]; // 'finance', 'tech', 'discussions', 'discussion'
+    const first = rest[0]; // 'finance', 'tech', 'discussions', 'discussion', 'privacy', 'terms'
 
     if (rest.length === 1) {
       if (first === 'finance') {
@@ -76,6 +91,14 @@ export default function App() {
         setSelectedTopic(null);
       } else if (first === 'discussions' || first === 'discussion') {
         setActiveTab('discussion');
+        setSelectedPost(null);
+        setSelectedTopic(null);
+      } else if (first === 'privacy' || first === 'privacy-policy') {
+        setActiveTab('privacy');
+        setSelectedPost(null);
+        setSelectedTopic(null);
+      } else if (first === 'terms' || first === 'terms-of-service' || first === 'terms-of-editorial-service') {
+        setActiveTab('terms');
         setSelectedPost(null);
         setSelectedTopic(null);
       } else {
@@ -106,6 +129,14 @@ export default function App() {
           setSelectedTopic(null);
           setSelectedPost(null);
         }
+      } else if (first === 'privacy' || first === 'privacy-policy') {
+        setActiveTab('privacy');
+        setSelectedPost(null);
+        setSelectedTopic(null);
+      } else if (first === 'terms' || first === 'terms-of-service' || first === 'terms-of-editorial-service') {
+        setActiveTab('terms');
+        setSelectedPost(null);
+        setSelectedTopic(null);
       } else {
         const post = store.getPostBySlug(slug, loc, first as ContentVertical) || store.getPostBySlug(slug);
         if (post) {
@@ -160,7 +191,7 @@ export default function App() {
   const bookmarkedPosts = allPosts.filter(p => store.isBookmarked(p.id));
 
   // Navigation handlers with browser URL updates
-  const handleTabChange = (tab: 'home' | 'finance' | 'tech' | 'discussion' | 'admin') => {
+  const handleTabChange = (tab: NavigationTab) => {
     setActiveTab(tab);
     setSelectedPost(null);
     setSelectedTopic(null);
@@ -390,6 +421,14 @@ export default function App() {
               )}
             </div>
           </div>
+        ) : (activeTab === 'privacy' || activeTab === 'terms') ? (
+          /* LEGAL PAGES (Privacy Policy / Terms of Service) */
+          <LegalPage
+            initialDoc={activeTab}
+            currentLocale={currentLocale}
+            onNavigateHome={() => handleTabChange('home')}
+            onSelectDoc={(doc) => handleTabChange(doc)}
+          />
         ) : (
           /* HOME PORTAL (/[locale]) */
           <div>

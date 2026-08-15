@@ -13,13 +13,13 @@ import {
 } from 'lucide-react';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { UserProfile } from '../types';
-import { getTabUrl } from '../lib/router';
+import { getTabUrl, NavigationTab } from '../lib/router';
 
 interface HeaderProps {
   currentLocale: string;
   onLocaleChange: (locale: string) => void;
-  activeTab: 'home' | 'finance' | 'tech' | 'discussion' | 'admin';
-  onTabChange: (tab: 'home' | 'finance' | 'tech' | 'discussion' | 'admin') => void;
+  activeTab: NavigationTab;
+  onTabChange: (tab: NavigationTab) => void;
   currentUser: UserProfile | null;
   onOpenAuth: () => void;
   onSwitchRole: (role: 'admin' | 'user' | 'guest') => void;
