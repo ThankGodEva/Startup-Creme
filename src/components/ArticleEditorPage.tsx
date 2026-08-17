@@ -715,13 +715,23 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
                 }
                 .tiptap ul {
                   list-style-type: disc;
+                  list-style-position: outside;
                   padding-left: 1.5rem;
                   margin-bottom: 1.25rem;
                 }
                 .tiptap ol {
                   list-style-type: decimal;
+                  list-style-position: outside;
                   padding-left: 1.5rem;
                   margin-bottom: 1.25rem;
+                }
+                .tiptap li {
+                  margin-bottom: 0.35rem;
+                  padding-left: 0.25rem;
+                }
+                .tiptap li p {
+                  margin-bottom: 0;
+                  display: inline;
                 }
                 .tiptap blockquote {
                   border-left: 4px solid #0891b2;

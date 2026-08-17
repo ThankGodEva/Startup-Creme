@@ -27,6 +27,105 @@ interface ArticleViewProps {
   onOpenAuth: () => void;
 }
 
+// Helper to format inline markdown like bold, italics, and code
+function formatInlineMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900">$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
+    .replace(/`([^`]+)`/g, '<code class="bg-slate-100 px-1.5 py-0.5 rounded text-sm font-mono text-cyan-800">$1</code>');
+}
+
+// Helper to render plain text / markdown with proper bullet lists and headings
+function renderPlainTextContent(text: string) {
+  const lines = text.split('\n');
+  const blocks: React.ReactNode[] = [];
+  let currentList: { type: 'ul' | 'ol'; items: string[] } | null = null;
+
+  const flushList = (key: string | number) => {
+    if (!currentList) return;
+    if (currentList.type === 'ul') {
+      blocks.push(
+        <ul key={`list-${key}`} className="list-disc list-outside pl-6 my-5 space-y-2 text-slate-800 font-serif text-lg">
+          {currentList.items.map((item, i) => (
+            <li key={i} className="leading-relaxed pl-1">
+              <span dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(item) }} />
+            </li>
+          ))}
+        </ul>
+      );
+    } else {
+      blocks.push(
+        <ol key={`list-${key}`} className="list-decimal list-outside pl-6 my-5 space-y-2 text-slate-800 font-serif text-lg">
+          {currentList.items.map((item, i) => (
+            <li key={i} className="leading-relaxed pl-1">
+              <span dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(item) }} />
+            </li>
+          ))}
+        </ol>
+      );
+    }
+    currentList = null;
+  };
+
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushList(index);
+      return;
+    }
+
+    // Check bullet list: •, -, * or numbered 1.
+    const bulletMatch = trimmed.match(/^([•\-\*]|\d+\.)\s+(.+)$/);
+    if (bulletMatch) {
+      const isNum = /^\d+\./.test(bulletMatch[1]);
+      const listType = isNum ? 'ol' : 'ul';
+      if (!currentList || currentList.type !== listType) {
+        flushList(index);
+        currentList = { type: listType, items: [] };
+      }
+      currentList.items.push(bulletMatch[2]);
+      return;
+    }
+
+    flushList(index);
+
+    if (trimmed.startsWith('### ')) {
+      blocks.push(
+        <h3 key={index} className="font-serif text-xl sm:text-2xl font-bold text-slate-900 mt-8 mb-3">
+          {trimmed.replace(/^###\s+/, '')}
+        </h3>
+      );
+    } else if (trimmed.startsWith('## ')) {
+      blocks.push(
+        <h2 key={index} className="font-serif text-2xl sm:text-3xl font-bold text-slate-900 mt-10 mb-4 border-b border-slate-200 pb-2">
+          {trimmed.replace(/^##\s+/, '')}
+        </h2>
+      );
+    } else if (trimmed.startsWith('# ')) {
+      blocks.push(
+        <h1 key={index} className="font-serif text-3xl sm:text-4xl font-bold text-slate-900 mt-10 mb-4">
+          {trimmed.replace(/^#\s+/, '')}
+        </h1>
+      );
+    } else if (trimmed.startsWith('> ')) {
+      blocks.push(
+        <blockquote key={index} className="border-l-4 border-cyan-600 pl-4 italic text-slate-700 my-5 font-serif text-lg">
+          {trimmed.replace(/^>\s+/, '')}
+        </blockquote>
+      );
+    } else {
+      blocks.push(
+        <p key={index} className="mb-5 leading-relaxed font-serif text-lg text-slate-800">
+          <span dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(trimmed) }} />
+        </p>
+      );
+    }
+  });
+
+  flushList('end');
+  return blocks;
+}
+
 export const ArticleView: React.FC<ArticleViewProps> = ({
   post,
   comments,
@@ -99,9 +198,9 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
 
     if (node.type === 'bulletList') {
       return (
-        <ul key={idx} className="list-disc list-inside mb-6 space-y-2 text-slate-800 font-serif text-base pl-2">
+        <ul key={idx} className="list-disc list-outside pl-6 mb-6 space-y-2 text-slate-800 font-serif text-lg">
           {node.content?.map((li, lIdx) => (
-            <li key={lIdx} className="leading-relaxed">
+            <li key={lIdx} className="leading-relaxed pl-1">
               {li.content?.map((p, pIdx) => (
                 <span key={pIdx}>
                   {p.content?.map((txt, tIdx) => txt.text).join('')}
@@ -110,6 +209,22 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
             </li>
           ))}
         </ul>
+      );
+    }
+
+    if (node.type === 'orderedList') {
+      return (
+        <ol key={idx} className="list-decimal list-outside pl-6 mb-6 space-y-2 text-slate-800 font-serif text-lg">
+          {node.content?.map((li, lIdx) => (
+            <li key={lIdx} className="leading-relaxed pl-1">
+              {li.content?.map((p, pIdx) => (
+                <span key={pIdx}>
+                  {p.content?.map((txt, tIdx) => txt.text).join('')}
+                </span>
+              ))}
+            </li>
+          ))}
+        </ol>
       );
     }
 
@@ -231,20 +346,35 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
         )}
 
         {/* Render Content */}
-        <div className="prose prose-slate max-w-none text-slate-800">
+        <div className="max-w-none text-slate-800">
           {typeof post.content === 'string' ? (
             post.content.trim().startsWith('<') ? (
               <div 
-                className="space-y-4 font-serif text-lg leading-relaxed text-slate-800 [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:mt-8 [&_h1]:mb-4 [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mt-8 [&_h2]:mb-3 [&_h2]:border-b [&_h2]:border-slate-200 [&_h2]:pb-2 [&_h3]:text-xl [&_h3]:font-bold [&_h3]:mt-6 [&_h3]:mb-2 [&_ul]:list-disc [&_ul]:list-inside [&_ul]:space-y-2 [&_ol]:list-decimal [&_ol]:list-inside [&_ol]:space-y-2 [&_blockquote]:border-l-4 [&_blockquote]:border-cyan-600 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-slate-700"
+                className="font-serif text-lg leading-relaxed text-slate-800 space-y-5
+                  [&_h1]:text-3xl sm:[&_h1]:text-4xl [&_h1]:font-bold [&_h1]:text-slate-900 [&_h1]:mt-10 [&_h1]:mb-4
+                  [&_h2]:text-2xl sm:[&_h2]:text-3xl [&_h2]:font-bold [&_h2]:text-slate-900 [&_h2]:mt-10 [&_h2]:mb-4 [&_h2]:border-b [&_h2]:border-slate-200 [&_h2]:pb-2
+                  [&_h3]:text-xl sm:[&_h3]:text-2xl [&_h3]:font-bold [&_h3]:text-slate-900 [&_h3]:mt-8 [&_h3]:mb-3
+                  [&_p]:mb-5 [&_p]:leading-relaxed
+                  [&_ul]:list-disc [&_ul]:list-outside [&_ul]:pl-6 [&_ul]:my-5 [&_ul]:space-y-2
+                  [&_ol]:list-decimal [&_ol]:list-outside [&_ol]:pl-6 [&_ol]:my-5 [&_ol]:space-y-2
+                  [&_li]:leading-relaxed [&_li]:text-slate-800 [&_li]:pl-1
+                  [&_li>p]:inline [&_li>p]:m-0 [&_li>p]:leading-relaxed
+                  [&_blockquote]:border-l-4 [&_blockquote]:border-cyan-600 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-slate-700 [&_blockquote]:my-6
+                  [&_strong]:font-bold [&_strong]:text-slate-900
+                  [&_a]:text-cyan-600 [&_a]:underline [&_a]:hover:text-cyan-700
+                  [&_img]:rounded-xl [&_img]:border [&_img]:border-slate-200 [&_img]:my-6 [&_img]:shadow-sm [&_img]:max-w-full [&_img]:h-auto
+                  [&_code]:bg-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-sm [&_code]:font-mono [&_code]:text-cyan-800"
                 dangerouslySetInnerHTML={{ __html: post.content }} 
               />
             ) : (
-              <div className="space-y-4 font-serif text-lg leading-relaxed whitespace-pre-line text-slate-800">
-                {post.content}
+              <div className="font-serif text-lg leading-relaxed text-slate-800">
+                {renderPlainTextContent(post.content)}
               </div>
             )
           ) : (
-            post.content?.content?.map((node, idx) => renderContentNode(node, idx))
+            <div className="space-y-5">
+              {post.content?.content?.map((node, idx) => renderContentNode(node, idx))}
+            </div>
           )}
         </div>
 
