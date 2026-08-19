@@ -18,6 +18,7 @@ async function injectDynamicMetaTags(html: string, reqPath: string, host: string
   let description = "StartupCrème is the premier digital publication for Finance, Macro-economics, and Deep Technology.";
   let coverImage = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630";
   let pageType = "website";
+  let ssrPayloadScript = "";
 
   const fullUrl = `${protocol}://${host}${reqPath}`;
 
@@ -44,26 +45,35 @@ async function injectDynamicMetaTags(html: string, reqPath: string, host: string
 
       if (supabaseUrl && supabaseAnonKey) {
         try {
-          const client = createClient(supabaseUrl, supabaseAnonKey, {
+          const scClient = createClient(supabaseUrl, supabaseAnonKey, {
             db: { schema: 'startupcreme' }
           });
+          const defaultClient = createClient(supabaseUrl, supabaseAnonKey);
+
+          const executeQuery = async (queryFn: (client: any) => PromiseLike<any>) => {
+            try {
+              const res = await queryFn(scClient);
+              if (!res.error && res.data) return res;
+            } catch (e) {
+              // ignore
+            }
+            return await queryFn(defaultClient);
+          };
 
           // Query posts
-          const { data: posts } = await client
-            .from('posts')
-            .select('title, excerpt, meta_description, cover_image, slug, id')
-            .or(`slug.ilike.${decodedSlug},id.ilike.${decodedSlug}`);
+          const postsRes = await executeQuery((client) =>
+            client.from('posts').select('*').or(`slug.ilike.${decodedSlug},id.ilike.${decodedSlug}`)
+          );
 
-          let foundPost = posts && posts.length > 0 ? posts[0] : null;
+          let foundPost = postsRes?.data && postsRes.data.length > 0 ? postsRes.data[0] : null;
 
           if (!foundPost && decodedSlug.length > 8) {
             const shortSlug = decodedSlug.slice(-20);
-            const { data: partialPosts } = await client
-              .from('posts')
-              .select('title, excerpt, meta_description, cover_image, slug, id')
-              .ilike('slug', `%${shortSlug}%`);
-            if (partialPosts && partialPosts.length > 0) {
-              foundPost = partialPosts[0];
+            const partialRes = await executeQuery((client) =>
+              client.from('posts').select('*').ilike('slug', `%${shortSlug}%`)
+            );
+            if (partialRes?.data && partialRes.data.length > 0) {
+              foundPost = partialRes.data[0];
             }
           }
 
@@ -74,23 +84,58 @@ async function injectDynamicMetaTags(html: string, reqPath: string, host: string
               coverImage = foundPost.cover_image;
             }
             pageType = "article";
+            const sanitizedPost = JSON.stringify(foundPost).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+            ssrPayloadScript = `<script id="__STARTUPCREME_SSR_DATA__">window.__INITIAL_POST__ = ${sanitizedPost};</script>`;
           } else {
             // Try querying topics
-            const { data: topics } = await client
-              .from('discussion_topics')
-              .select('title, content, slug, id')
-              .or(`slug.ilike.${decodedSlug},id.ilike.${decodedSlug}`);
+            const topicRes = await executeQuery((client) =>
+              client.from('discussion_topics').select('*').or(`slug.ilike.${decodedSlug},id.ilike.${decodedSlug}`)
+            );
 
-            if (topics && topics.length > 0) {
-              const topic = topics[0];
+            if (topicRes?.data && topicRes.data.length > 0) {
+              const topic = topicRes.data[0];
               title = `${topic.title} | StartupCrème Discussion`;
               description = topic.content ? topic.content.slice(0, 200) + '...' : description;
               pageType = "article";
+              const sanitizedTopic = JSON.stringify(topic).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+              ssrPayloadScript = `<script id="__STARTUPCREME_SSR_DATA__">window.__INITIAL_TOPIC__ = ${sanitizedTopic};</script>`;
             }
           }
         } catch (e) {
           console.warn('Server meta tag lookup warning:', e);
         }
+      }
+    }
+  }
+
+  // Pre-fetch top posts if not an individual article to speed up initial view
+  if (!ssrPayloadScript) {
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+    const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+    if (supabaseUrl && supabaseAnonKey) {
+      try {
+        const scClient = createClient(supabaseUrl, supabaseAnonKey, {
+          db: { schema: 'startupcreme' }
+        });
+        const defaultClient = createClient(supabaseUrl, supabaseAnonKey);
+
+        const executeQuery = async (queryFn: (client: any) => PromiseLike<any>) => {
+          try {
+            const res = await queryFn(scClient);
+            if (!res.error && res.data) return res;
+          } catch (e) {}
+          return await queryFn(defaultClient);
+        };
+
+        const res = await executeQuery((client) =>
+          client.from('posts').select('*').order('created_at', { ascending: false }).limit(20)
+        );
+        if (res?.data && res.data.length > 0) {
+          const sanitizedPosts = JSON.stringify(res.data).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+          ssrPayloadScript = `<script id="__STARTUPCREME_SSR_DATA__">window.__INITIAL_POSTS__ = ${sanitizedPosts};</script>`;
+        }
+      } catch (e) {
+        // ignore
       }
     }
   }
@@ -119,6 +164,7 @@ async function injectDynamicMetaTags(html: string, reqPath: string, host: string
     <meta name="twitter:title" content="${safeTitle}" />
     <meta name="twitter:description" content="${safeDesc}" />
     <meta name="twitter:image" content="${safeImage}" />
+    ${ssrPayloadScript}
   `;
 
   let updatedHtml = html.replace(/<title>.*?<\/title>/gi, '');

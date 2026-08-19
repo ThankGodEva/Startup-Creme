@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header';
 import { DualHero } from './components/DualHero';
 import { ArticleCard } from './components/ArticleCard';
-import { ArticleView } from './components/ArticleView';
+import { ArticleView, ArticleLoadingSkeleton } from './components/ArticleView';
 import { DiscussionForum } from './components/DiscussionForum';
 import { TopicDetail } from './components/TopicDetail';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -24,6 +24,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<NavigationTab>('home');
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<DiscussionTopic | null>(null);
+  const [loadingArticleSlug, setLoadingArticleSlug] = useState<string | null>(null);
+  const [loadingTopicSlug, setLoadingTopicSlug] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   
   // Modals
@@ -39,6 +41,8 @@ export default function App() {
       setActiveTab('home');
       setSelectedPost(null);
       setSelectedTopic(null);
+      setLoadingArticleSlug(null);
+      setLoadingTopicSlug(null);
       return;
     }
 
@@ -46,6 +50,8 @@ export default function App() {
       setActiveTab('admin');
       setSelectedPost(null);
       setSelectedTopic(null);
+      setLoadingArticleSlug(null);
+      setLoadingTopicSlug(null);
       return;
     }
 
@@ -53,6 +59,8 @@ export default function App() {
       setActiveTab('privacy');
       setSelectedPost(null);
       setSelectedTopic(null);
+      setLoadingArticleSlug(null);
+      setLoadingTopicSlug(null);
       return;
     }
 
@@ -60,6 +68,8 @@ export default function App() {
       setActiveTab('terms');
       setSelectedPost(null);
       setSelectedTopic(null);
+      setLoadingArticleSlug(null);
+      setLoadingTopicSlug(null);
       return;
     }
 
@@ -75,6 +85,8 @@ export default function App() {
       setActiveTab('home');
       setSelectedPost(null);
       setSelectedTopic(null);
+      setLoadingArticleSlug(null);
+      setLoadingTopicSlug(null);
       return;
     }
 
@@ -85,32 +97,50 @@ export default function App() {
         setActiveTab('finance');
         setSelectedPost(null);
         setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
       } else if (first === 'tech') {
         setActiveTab('tech');
         setSelectedPost(null);
         setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
       } else if (first === 'discussions' || first === 'discussion') {
         setActiveTab('discussion');
         setSelectedPost(null);
         setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
       } else if (first === 'privacy' || first === 'privacy-policy') {
         setActiveTab('privacy');
         setSelectedPost(null);
         setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
       } else if (first === 'terms' || first === 'terms-of-service' || first === 'terms-of-editorial-service') {
         setActiveTab('terms');
         setSelectedPost(null);
         setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
       } else {
         const post = store.getPostBySlug(first);
         if (post) {
           setSelectedPost(post);
           setActiveTab(post.vertical);
           setSelectedTopic(null);
+          setLoadingArticleSlug(null);
+          setLoadingTopicSlug(null);
         } else {
-          setActiveTab('home');
-          setSelectedPost(null);
+          setLoadingArticleSlug(first);
           setSelectedTopic(null);
+          store.fetchPostBySlug(first, loc).then(fetched => {
+            if (fetched) {
+              setSelectedPost(fetched);
+              setActiveTab(fetched.vertical);
+            }
+            setLoadingArticleSlug(null);
+          });
         }
       }
       return;
@@ -124,33 +154,58 @@ export default function App() {
           setSelectedTopic(topic);
           setActiveTab('discussion');
           setSelectedPost(null);
+          setLoadingArticleSlug(null);
+          setLoadingTopicSlug(null);
         } else {
-          setActiveTab('discussion');
-          setSelectedTopic(null);
+          setLoadingTopicSlug(slug);
           setSelectedPost(null);
+          store.fetchTopicBySlug(slug).then(fetched => {
+            if (fetched) {
+              setSelectedTopic(fetched);
+              setActiveTab('discussion');
+            } else {
+              setActiveTab('discussion');
+            }
+            setLoadingTopicSlug(null);
+          });
         }
       } else if (first === 'privacy' || first === 'privacy-policy') {
         setActiveTab('privacy');
         setSelectedPost(null);
         setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
       } else if (first === 'terms' || first === 'terms-of-service' || first === 'terms-of-editorial-service') {
         setActiveTab('terms');
         setSelectedPost(null);
         setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
       } else {
         const post = store.getPostBySlug(slug, loc, first as ContentVertical) || store.getPostBySlug(slug);
         if (post) {
           setSelectedPost(post);
           setActiveTab(post.vertical);
           setSelectedTopic(null);
+          setLoadingArticleSlug(null);
+          setLoadingTopicSlug(null);
         } else {
-          if (first === 'finance' || first === 'tech') {
-            setActiveTab(first);
-          } else {
-            setActiveTab('home');
-          }
-          setSelectedPost(null);
+          setLoadingArticleSlug(slug);
           setSelectedTopic(null);
+          const targetVertical = (first === 'finance' || first === 'tech') ? (first as ContentVertical) : undefined;
+          store.fetchPostBySlug(slug, loc, targetVertical).then(fetched => {
+            if (fetched) {
+              setSelectedPost(fetched);
+              setActiveTab(fetched.vertical);
+            } else {
+              if (first === 'finance' || first === 'tech') {
+                setActiveTab(first);
+              } else {
+                setActiveTab('home');
+              }
+            }
+            setLoadingArticleSlug(null);
+          });
         }
       }
     }
@@ -286,6 +341,8 @@ export default function App() {
             onToggleBookmark={() => store.toggleBookmark(selectedPost.id)}
             onOpenAuth={() => setShowAuthModal(true)}
           />
+        ) : loadingArticleSlug ? (
+          <ArticleLoadingSkeleton onBack={handleBack} />
         ) : selectedTopic ? (
           /* FORUM TOPIC DETAILED VIEW */
           <TopicDetail
@@ -302,6 +359,8 @@ export default function App() {
             getUserCommentVote={(commentId) => store.getUserCommentVote(commentId)}
             onOpenAuth={() => setShowAuthModal(true)}
           />
+        ) : loadingTopicSlug ? (
+          <ArticleLoadingSkeleton onBack={handleBack} />
         ) : activeTab === 'discussion' ? (
           /* FORUM TOPICS LIST VIEW */
           <DiscussionForum

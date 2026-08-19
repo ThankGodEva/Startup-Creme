@@ -473,3 +473,76 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
     </article>
   );
 };
+
+export const ArticleLoadingSkeleton: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
+  return (
+    <article className="min-h-screen bg-slate-50 text-slate-800 pb-20 animate-pulse">
+      {/* Article Header Skeleton */}
+      <div className="border-b border-slate-200 bg-slate-100/70 py-6 px-4">
+        <div className="max-w-4xl mx-auto">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 mb-6"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to Publications</span>
+            </button>
+          )}
+
+          {/* Breadcrumb skeleton */}
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-16 h-5 bg-slate-200 rounded"></div>
+            <div className="w-4 h-4 text-slate-400">/</div>
+            <div className="w-16 h-5 bg-slate-200 rounded"></div>
+            <div className="w-4 h-4 text-slate-400">/</div>
+            <div className="w-44 h-5 bg-slate-200 rounded"></div>
+          </div>
+
+          {/* Title skeleton */}
+          <div className="space-y-3 mb-6">
+            <div className="w-full h-10 sm:h-12 bg-slate-300 rounded-lg"></div>
+            <div className="w-3/4 h-10 sm:h-12 bg-slate-300 rounded-lg"></div>
+          </div>
+
+          {/* Excerpt skeleton */}
+          <div className="w-full h-16 bg-white border-l-4 border-cyan-600 rounded-r-lg p-3 mb-8 shadow-xs">
+            <div className="w-full h-3.5 bg-slate-200 rounded mb-2"></div>
+            <div className="w-4/5 h-3.5 bg-slate-200 rounded"></div>
+          </div>
+
+          {/* Author bar skeleton */}
+          <div className="flex items-center justify-between pt-6 border-t border-slate-200">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-full bg-slate-300"></div>
+              <div className="space-y-2">
+                <div className="w-32 h-4 bg-slate-300 rounded"></div>
+                <div className="w-24 h-3 bg-slate-200 rounded"></div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <div className="w-24 h-8 bg-slate-200 rounded-lg"></div>
+              <div className="w-8 h-8 bg-slate-200 rounded-lg"></div>
+              <div className="w-20 h-8 bg-slate-200 rounded-lg"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Body content skeleton */}
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        <div className="w-full h-72 sm:h-96 bg-slate-200 rounded-xl mb-8"></div>
+        <div className="space-y-4">
+          <div className="w-full h-4 bg-slate-200 rounded"></div>
+          <div className="w-full h-4 bg-slate-200 rounded"></div>
+          <div className="w-5/6 h-4 bg-slate-200 rounded"></div>
+          <div className="w-4/5 h-4 bg-slate-200 rounded"></div>
+          <div className="w-2/3 h-7 bg-slate-300 rounded mt-8"></div>
+          <div className="w-full h-4 bg-slate-200 rounded"></div>
+          <div className="w-full h-4 bg-slate-200 rounded"></div>
+          <div className="w-3/4 h-4 bg-slate-200 rounded"></div>
+        </div>
+      </div>
+    </article>
+  );
+};

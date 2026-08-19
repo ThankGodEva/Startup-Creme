@@ -9,6 +9,9 @@ const SAMPLE_POST_SLUGS = [
   'autonomous-agent-architectures-and-llm-compilers'
 ];
 
+const POSTS_CACHE_KEY = 'startupcreme_posts_cache_v3';
+const TOPICS_CACHE_KEY = 'startupcreme_topics_cache_v3';
+
 const SEED_TOPICS: DiscussionTopic[] = [
   {
     id: 'topic-01',
@@ -99,12 +102,81 @@ class StartupCremeStore {
     this.loadInitialData();
   }
 
+  private persistCache() {
+    if (typeof window === 'undefined') return;
+    try {
+      if (this.posts && this.posts.length > 0) {
+        localStorage.setItem(POSTS_CACHE_KEY, JSON.stringify(this.posts));
+      }
+      if (this.topics && this.topics.length > 0) {
+        localStorage.setItem(TOPICS_CACHE_KEY, JSON.stringify(this.topics));
+      }
+    } catch (e) {
+      // ignore quota limits
+    }
+  }
+
   private loadInitialData() {
     this.posts = [];
     this.topics = [];
     this.postComments = {};
     this.discussionComments = {};
     this.currentUser = null;
+
+    // Synchronously hydrate from cache & SSR data on line 1 for 0ms latency
+    if (typeof window !== 'undefined') {
+      const win = window as any;
+      const postsMap = new Map<string, Post>();
+      const topicsMap = new Map<string, DiscussionTopic>();
+
+      // 1. Hydrate from localStorage cache
+      try {
+        const cachedPostsJson = localStorage.getItem(POSTS_CACHE_KEY);
+        if (cachedPostsJson) {
+          const cached = JSON.parse(cachedPostsJson);
+          if (Array.isArray(cached)) {
+            cached.forEach(p => {
+              if (p && p.slug && !SAMPLE_POST_SLUGS.includes(p.slug)) {
+                postsMap.set(p.slug, { ...p, cover_image: normalizeImageUrl(p.cover_image) });
+              }
+            });
+          }
+        }
+        const cachedTopicsJson = localStorage.getItem(TOPICS_CACHE_KEY);
+        if (cachedTopicsJson) {
+          const cached = JSON.parse(cachedTopicsJson);
+          if (Array.isArray(cached)) {
+            cached.forEach(t => {
+              if (t && t.slug) topicsMap.set(t.slug, t);
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('Cache hydration error:', e);
+      }
+
+      // 2. Hydrate from SSR pre-fetched payload
+      if (win.__INITIAL_POST__) {
+        const p = win.__INITIAL_POST__;
+        if (p && p.slug && !SAMPLE_POST_SLUGS.includes(p.slug)) {
+          postsMap.set(p.slug, { ...p, cover_image: normalizeImageUrl(p.cover_image) });
+        }
+      }
+      if (Array.isArray(win.__INITIAL_POSTS__)) {
+        win.__INITIAL_POSTS__.forEach((p: any) => {
+          if (p && p.slug && !SAMPLE_POST_SLUGS.includes(p.slug)) {
+            postsMap.set(p.slug, { ...p, cover_image: normalizeImageUrl(p.cover_image) });
+          }
+        });
+      }
+      if (win.__INITIAL_TOPIC__) {
+        const t = win.__INITIAL_TOPIC__;
+        if (t && t.slug) topicsMap.set(t.slug, t);
+      }
+
+      this.posts = Array.from(postsMap.values());
+      this.topics = Array.from(topicsMap.values());
+    }
 
     if (isSupabaseConfigured()) {
       this.syncFromSupabase().catch(err => {
@@ -441,6 +513,7 @@ class StartupCremeStore {
       }
       this.postComments = groupedPostComments;
 
+      this.persistCache();
       this.notify();
     } catch (e) {
       console.warn('Supabase sync error:', e);
@@ -548,6 +621,92 @@ class StartupCremeStore {
     }
 
     return found;
+  }
+
+  public async fetchPostBySlug(slug: string, locale = 'en-us', vertical?: ContentVertical): Promise<Post | null> {
+    const existing = this.getPostBySlug(slug, locale, vertical);
+    if (existing) return existing;
+
+    if (!isSupabaseConfigured()) return null;
+
+    const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
+
+    try {
+      // 1. Direct targeted query by slug
+      const { data: postsData } = await supabaseExecute((client) =>
+        client.from('posts').select('*').or(`slug.ilike.${decodedSlug},id.ilike.${decodedSlug}`).maybeSingle()
+      );
+
+      if (postsData) {
+        const post: Post = {
+          ...postsData,
+          cover_image: normalizeImageUrl(postsData.cover_image)
+        };
+        const map = new Map<string, Post>();
+        map.set(post.slug, post);
+        this.posts.forEach(p => { if (!map.has(p.slug)) map.set(p.slug, p); });
+        this.posts = Array.from(map.values());
+        this.persistCache();
+        this.notify();
+        return post;
+      }
+
+      // 2. Partial/fuzzy query fallback
+      if (decodedSlug.length > 8) {
+        const shortSlug = decodedSlug.slice(-20);
+        const { data: fuzzyData } = await supabaseExecute((client) =>
+          client.from('posts').select('*').ilike('slug', `%${shortSlug}%`).limit(1)
+        );
+
+        if (fuzzyData && fuzzyData.length > 0) {
+          const post: Post = {
+            ...fuzzyData[0],
+            cover_image: normalizeImageUrl(fuzzyData[0].cover_image)
+          };
+          const map = new Map<string, Post>();
+          map.set(post.slug, post);
+          this.posts.forEach(p => { if (!map.has(p.slug)) map.set(p.slug, p); });
+          this.posts = Array.from(map.values());
+          this.persistCache();
+          this.notify();
+          return post;
+        }
+      }
+    } catch (e) {
+      console.warn('fetchPostBySlug exception:', e);
+    }
+
+    return null;
+  }
+
+  public async fetchTopicBySlug(slug: string): Promise<DiscussionTopic | null> {
+    const existing = this.getDiscussionTopicBySlug(slug);
+    if (existing) return existing;
+
+    if (!isSupabaseConfigured()) return null;
+
+    const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
+
+    try {
+      const { data: topicData } = await supabaseExecute((client) =>
+        client.from('discussion_topics').select('*').or(`slug.ilike.${decodedSlug},id.ilike.${decodedSlug}`).maybeSingle()
+      );
+
+      if (topicData) {
+        const topic: DiscussionTopic = topicData;
+        const map = new Map<string, DiscussionTopic>();
+        map.set(topic.slug, topic);
+        this.topics.forEach(t => { if (!map.has(t.slug)) map.set(t.slug, t); });
+        this.topics = Array.from(map.values());
+        this.persistCache();
+        this.notify();
+        return topic;
+      }
+    } catch (e) {
+      console.warn('fetchTopicBySlug exception:', e);
+    }
+
+    return null;
   }
 
   public getPostComments(postId: string): PostComment[] {
@@ -705,6 +864,7 @@ class StartupCremeStore {
       };
       this.posts.unshift(savedPost);
     }
+    this.persistCache();
     this.notify();
 
     if (!isSupabaseConfigured()) {
@@ -780,6 +940,7 @@ class StartupCremeStore {
   public async deletePost(id: string) {
     const postToDelete = this.posts.find(p => p.id === id);
     this.posts = this.posts.filter(p => p.id !== id);
+    this.persistCache();
     this.notify();
 
     if (postToDelete) {
@@ -794,6 +955,7 @@ class StartupCremeStore {
     if (post) {
       post.status = post.status === 'published' ? 'draft' : 'published';
       post.updated_at = new Date().toISOString();
+      this.persistCache();
       this.notify();
 
       await supabaseExecute((client) =>
