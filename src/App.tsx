@@ -310,6 +310,30 @@ export default function App() {
       )
     : null;
 
+  // Compute 5 latest related posts for current article vertical
+  const getRelatedPostsForArticle = (currentPost: Post): Post[] => {
+    const primary = store
+      .getPosts(currentLocale, currentPost.vertical, 'published')
+      .filter(p => p.id !== currentPost.id && p.slug !== currentPost.slug);
+
+    if (primary.length >= 5) {
+      return primary.slice(0, 5);
+    }
+
+    const fallback = store
+      .getAllPosts()
+      .filter(
+        p =>
+          (p.vertical === currentPost.vertical || p.dual_silo) &&
+          p.status === 'published' &&
+          p.id !== currentPost.id &&
+          p.slug !== currentPost.slug &&
+          !primary.some(pr => pr.id === p.id)
+      );
+
+    return [...primary, ...fallback].slice(0, 5);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-cyan-500 selection:text-white">
       {/* Main Header */}
@@ -340,6 +364,8 @@ export default function App() {
             isBookmarked={store.isBookmarked(selectedPost.id)}
             onToggleBookmark={() => store.toggleBookmark(selectedPost.id)}
             onOpenAuth={() => setShowAuthModal(true)}
+            relatedPosts={getRelatedPostsForArticle(selectedPost)}
+            onSelectPost={handleSelectPost}
           />
         ) : loadingArticleSlug ? (
           <ArticleLoadingSkeleton onBack={handleBack} />

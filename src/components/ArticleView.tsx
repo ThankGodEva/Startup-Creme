@@ -10,11 +10,14 @@ import {
   Sparkles, 
   User,
   Globe,
-  Tag
+  Tag,
+  Cpu,
+  TrendingUp,
+  ArrowUpRight
 } from 'lucide-react';
 import { Post, PostComment, UserProfile, PostContentNode } from '../types';
 import { updatePageSEO } from '../lib/seo';
-import { normalizeImageUrl } from '../lib/router';
+import { normalizeImageUrl, getPostUrl } from '../lib/router';
 
 interface ArticleViewProps {
   post: Post;
@@ -25,6 +28,8 @@ interface ArticleViewProps {
   isBookmarked: boolean;
   onToggleBookmark: () => void;
   onOpenAuth: () => void;
+  relatedPosts?: Post[];
+  onSelectPost?: (post: Post) => void;
 }
 
 // Helper to format inline markdown like bold, italics, and code
@@ -35,11 +40,12 @@ function formatInlineMarkdown(text: string): string {
     .replace(/`([^`]+)`/g, '<code class="bg-slate-100 px-1.5 py-0.5 rounded text-sm font-mono text-cyan-800">$1</code>');
 }
 
-// Helper to render plain text / markdown with proper bullet lists and headings
+// Helper to render plain text / markdown with proper bullet lists, headings, and tables
 function renderPlainTextContent(text: string) {
   const lines = text.split('\n');
   const blocks: React.ReactNode[] = [];
   let currentList: { type: 'ul' | 'ol'; items: string[] } | null = null;
+  let currentTableRows: string[][] | null = null;
 
   const flushList = (key: string | number) => {
     if (!currentList) return;
@@ -67,12 +73,71 @@ function renderPlainTextContent(text: string) {
     currentList = null;
   };
 
+  const flushTable = (key: string | number) => {
+    if (!currentTableRows || currentTableRows.length === 0) {
+      currentTableRows = null;
+      return;
+    }
+    const [headerRow, ...bodyRows] = currentTableRows;
+    blocks.push(
+      <div key={`table-${key}`} className="my-8 overflow-x-auto rounded-xl border border-slate-200 shadow-2xs bg-white">
+        <table className="min-w-full divide-y divide-slate-200 border-collapse text-left">
+          {headerRow && (
+            <thead>
+              <tr className="bg-slate-100/90 divide-x divide-slate-200">
+                {headerRow.map((cell, cIdx) => (
+                  <th key={cIdx} className="p-3.5 text-xs sm:text-sm font-bold text-slate-900 font-sans tracking-wide uppercase">
+                    <span dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(cell.trim()) }} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+          )}
+          <tbody className="divide-y divide-slate-200">
+            {bodyRows.map((row, rIdx) => (
+              <tr key={rIdx} className="divide-x divide-slate-200 hover:bg-slate-50/50 transition-colors">
+                {row.map((cell, cIdx) => (
+                  <td key={cIdx} className="p-3.5 text-sm sm:text-base text-slate-800 font-sans align-top">
+                    <span dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(cell.trim()) }} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+    currentTableRows = null;
+  };
+
   lines.forEach((line, index) => {
     const trimmed = line.trim();
     if (!trimmed) {
       flushList(index);
+      flushTable(index);
       return;
     }
+
+    // Markdown Table row detection: | Col 1 | Col 2 |
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+      flushList(index);
+      // Check if it's a separator line like |---|---|
+      const isSeparator = /^\|(\s*[-:]+\s*\|)+$/.test(trimmed);
+      if (isSeparator) {
+        return;
+      }
+      const cells = trimmed
+        .slice(1, -1)
+        .split('|')
+        .map(c => c.trim());
+      if (!currentTableRows) {
+        currentTableRows = [];
+      }
+      currentTableRows.push(cells);
+      return;
+    }
+
+    flushTable(index);
 
     // Check bullet list: •, -, * or numbered 1.
     const bulletMatch = trimmed.match(/^([•\-\*]|\d+\.)\s+(.+)$/);
@@ -123,6 +188,7 @@ function renderPlainTextContent(text: string) {
   });
 
   flushList('end');
+  flushTable('end');
   return blocks;
 }
 
@@ -135,6 +201,8 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
   isBookmarked,
   onToggleBookmark,
   onOpenAuth,
+  relatedPosts = [],
+  onSelectPost,
 }) => {
   const [commentInput, setCommentInput] = useState('');
   const [copiedUrl, setCopiedUrl] = useState(false);
@@ -165,16 +233,49 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
 
   const isFinance = post.vertical === 'finance';
 
-  // Helper to render Tiptap JSON or string content
-  const renderContentNode = (node: PostContentNode, idx: number) => {
+  // Helper to render inline text nodes with marks (bold, italic, strike, code, links)
+  const renderInlineChild = (child: PostContentNode, cIdx: number): React.ReactNode => {
+    if (!child) return null;
+    let element: React.ReactNode = child.text || '';
+
+    if (child.marks && child.marks.length > 0) {
+      child.marks.forEach((mark, mIdx) => {
+        if (mark.type === 'bold') {
+          element = <strong key={`bold-${mIdx}`} className="font-bold text-slate-900">{element}</strong>;
+        } else if (mark.type === 'italic') {
+          element = <em key={`italic-${mIdx}`} className="italic">{element}</em>;
+        } else if (mark.type === 'strike') {
+          element = <s key={`strike-${mIdx}`} className="line-through text-slate-500">{element}</s>;
+        } else if (mark.type === 'code') {
+          element = <code key={`code-${mIdx}`} className="bg-slate-100 px-1.5 py-0.5 rounded text-sm font-mono text-cyan-800">{element}</code>;
+        } else if (mark.type === 'link') {
+          const href = mark.attrs?.href || '#';
+          element = (
+            <a 
+              key={`link-${mIdx}`} 
+              href={href} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-cyan-600 underline font-medium hover:text-cyan-700"
+            >
+              {element}
+            </a>
+          );
+        }
+      });
+    }
+
+    return <React.Fragment key={cIdx}>{element}</React.Fragment>;
+  };
+
+  // Helper to render Tiptap JSON content tree
+  const renderContentNode = (node: PostContentNode, idx: number): React.ReactNode => {
     if (!node) return null;
 
     if (node.type === 'paragraph') {
       return (
         <p key={idx} className="mb-5 leading-relaxed text-slate-800 font-serif text-lg">
-          {node.content?.map((child, cIdx) => (
-            <span key={cIdx}>{child.text}</span>
-          ))}
+          {node.content?.map((child, cIdx) => renderInlineChild(child, cIdx))}
         </p>
       );
     }
@@ -182,17 +283,41 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
     if (node.type === 'heading') {
       const level = node.attrs?.level || 2;
       const text = node.content?.map(c => c.text).join('') || '';
+      if (level === 1) {
+        return (
+          <h1 key={idx} className="font-serif text-3xl sm:text-4xl font-bold text-slate-900 mt-10 mb-4">
+            {node.content?.map((child, cIdx) => renderInlineChild(child, cIdx)) || text}
+          </h1>
+        );
+      }
       if (level === 2) {
         return (
           <h2 key={idx} className="font-serif text-2xl sm:text-3xl font-bold text-slate-900 mt-10 mb-4 border-b border-slate-200 pb-3">
-            {text}
+            {node.content?.map((child, cIdx) => renderInlineChild(child, cIdx)) || text}
           </h2>
         );
       }
       return (
-        <h3 key={idx} className="font-serif text-xl font-bold text-slate-900 mt-8 mb-3">
-          {text}
+        <h3 key={idx} className="font-serif text-xl sm:text-2xl font-bold text-slate-900 mt-8 mb-3">
+          {node.content?.map((child, cIdx) => renderInlineChild(child, cIdx)) || text}
         </h3>
+      );
+    }
+
+    if (node.type === 'blockquote') {
+      return (
+        <blockquote key={idx} className="border-l-4 border-cyan-600 pl-4 italic text-slate-700 my-6 font-serif text-lg">
+          {node.content?.map((child, cIdx) => {
+            if (child.type === 'paragraph') {
+              return (
+                <div key={cIdx} className="mb-2 last:mb-0">
+                  {child.content?.map((t, tIdx) => renderInlineChild(t, tIdx))}
+                </div>
+              );
+            }
+            return renderContentNode(child, cIdx);
+          })}
+        </blockquote>
       );
     }
 
@@ -203,7 +328,7 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
             <li key={lIdx} className="leading-relaxed pl-1">
               {li.content?.map((p, pIdx) => (
                 <span key={pIdx}>
-                  {p.content?.map((txt, tIdx) => txt.text).join('')}
+                  {p.content?.map((txt, tIdx) => renderInlineChild(txt, tIdx))}
                 </span>
               ))}
             </li>
@@ -219,12 +344,98 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
             <li key={lIdx} className="leading-relaxed pl-1">
               {li.content?.map((p, pIdx) => (
                 <span key={pIdx}>
-                  {p.content?.map((txt, tIdx) => txt.text).join('')}
+                  {p.content?.map((txt, tIdx) => renderInlineChild(txt, tIdx))}
                 </span>
               ))}
             </li>
           ))}
         </ol>
+      );
+    }
+
+    if (node.type === 'table') {
+      return (
+        <div key={idx} className="my-8 overflow-x-auto rounded-xl border border-slate-200 shadow-2xs bg-white">
+          <table className="min-w-full divide-y divide-slate-200 border-collapse text-left">
+            {node.content?.map((rowNode, rIdx) => renderContentNode(rowNode, rIdx))}
+          </table>
+        </div>
+      );
+    }
+
+    if (node.type === 'tableRow') {
+      return (
+        <tr key={idx} className="divide-x divide-slate-200 hover:bg-slate-50/50 transition-colors">
+          {node.content?.map((cellNode, cellIdx) => renderContentNode(cellNode, cellIdx))}
+        </tr>
+      );
+    }
+
+    if (node.type === 'tableHeader') {
+      return (
+        <th 
+          key={idx} 
+          colSpan={node.attrs?.colspan || 1} 
+          rowSpan={node.attrs?.rowspan || 1}
+          className="bg-slate-100/90 text-slate-900 font-bold p-3.5 border-b border-slate-200 text-xs sm:text-sm font-sans tracking-wide uppercase"
+        >
+          {node.content?.map((child, cIdx) => {
+            if (child.type === 'paragraph') {
+              return (
+                <div key={cIdx} className="font-bold text-slate-900">
+                  {child.content?.map((t, tIdx) => renderInlineChild(t, tIdx))}
+                </div>
+              );
+            }
+            return renderContentNode(child, cIdx);
+          })}
+        </th>
+      );
+    }
+
+    if (node.type === 'tableCell') {
+      return (
+        <td 
+          key={idx} 
+          colSpan={node.attrs?.colspan || 1} 
+          rowSpan={node.attrs?.rowspan || 1}
+          className="p-3.5 border-b border-slate-200 text-slate-800 text-sm sm:text-base font-sans align-top"
+        >
+          {node.content?.map((child, cIdx) => {
+            if (child.type === 'paragraph') {
+              return (
+                <div key={cIdx} className="my-0.5">
+                  {child.content?.map((t, tIdx) => renderInlineChild(t, tIdx))}
+                </div>
+              );
+            }
+            return renderContentNode(child, cIdx);
+          })}
+        </td>
+      );
+    }
+
+    if (node.type === 'image') {
+      const src = node.attrs?.src || '';
+      const alt = node.attrs?.alt || 'Article Image';
+      return (
+        <div key={idx} className="my-8 rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+          <img 
+            src={normalizeImageUrl(src)} 
+            alt={alt} 
+            className="w-full h-auto object-cover max-h-[500px]" 
+          />
+        </div>
+      );
+    }
+
+    if (node.type === 'codeBlock') {
+      return (
+        <pre key={idx} className="bg-slate-900 text-slate-100 p-4 rounded-xl font-mono text-sm overflow-x-auto my-6">
+          <code>
+            {node.content?.map(c => c.text).join('')}
+          </code>
+        </pre>
       );
     }
 
@@ -363,6 +574,9 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
                   [&_strong]:font-bold [&_strong]:text-slate-900
                   [&_a]:text-cyan-600 [&_a]:underline [&_a]:hover:text-cyan-700
                   [&_img]:rounded-xl [&_img]:border [&_img]:border-slate-200 [&_img]:my-6 [&_img]:shadow-sm [&_img]:max-w-full [&_img]:h-auto
+                  [&_table]:w-full [&_table]:border-collapse [&_table]:my-8 [&_table]:rounded-xl [&_table]:border [&_table]:border-slate-200 [&_table]:overflow-hidden [&_table]:shadow-2xs
+                  [&_th]:bg-slate-100/90 [&_th]:text-slate-900 [&_th]:font-bold [&_th]:p-3.5 [&_th]:border [&_th]:border-slate-200 [&_th]:text-xs sm:[&_th]:text-sm [&_th]:uppercase [&_th]:tracking-wide [&_th]:font-sans [&_th]:text-left
+                  [&_td]:p-3.5 [&_td]:border [&_td]:border-slate-200 [&_td]:text-slate-800 [&_td]:text-sm sm:[&_td]:text-base [&_td]:font-sans [&_td]:bg-white [&_td]:align-top
                   [&_code]:bg-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-sm [&_code]:font-mono [&_code]:text-cyan-800"
                 dangerouslySetInnerHTML={{ __html: post.content }} 
               />
@@ -469,6 +683,95 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
             )}
           </div>
         </section>
+
+        {/* Related Posts Section (5 Latest Tech or Finance links) */}
+        {relatedPosts && relatedPosts.length > 0 && (
+          <section className="mt-16 pt-10 border-t border-slate-200">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2.5">
+                {post.vertical === 'tech' ? (
+                  <Cpu className="w-5 h-5 text-cyan-600" />
+                ) : (
+                  <TrendingUp className="w-5 h-5 text-emerald-600" />
+                )}
+                <h3 className="font-serif text-2xl font-bold text-slate-900">
+                  Related posts
+                </h3>
+              </div>
+              <span
+                className={`text-xs font-mono font-bold uppercase px-2.5 py-0.5 rounded-full ${
+                  post.vertical === 'tech'
+                    ? 'bg-cyan-100 text-cyan-800 border border-cyan-200'
+                    : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                }`}
+              >
+                Latest {post.vertical === 'tech' ? 'Tech' : 'Finance'}
+              </span>
+            </div>
+
+            <div className="space-y-3.5">
+              {relatedPosts.slice(0, 5).map((related) => {
+                const relatedUrl = getPostUrl(related);
+                const isTech = related.vertical === 'tech';
+
+                return (
+                  <a
+                    key={related.id}
+                    href={relatedUrl}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      onSelectPost?.(related);
+                    }}
+                    className="group flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-xl bg-white border border-slate-200 hover:border-slate-300 hover:shadow-sm transition-all duration-200 text-left block cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3.5 flex-1 min-w-0">
+                      <img
+                        src={
+                          normalizeImageUrl(related.cover_image) ||
+                          'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=300'
+                        }
+                        alt={related.title}
+                        className="w-16 h-16 sm:w-20 sm:h-20 rounded-lg object-cover flex-shrink-0 border border-slate-100 group-hover:scale-105 transition-transform duration-300"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 text-[11px] text-slate-500 mb-1 font-mono">
+                          <span
+                            className={`font-bold uppercase ${
+                              isTech ? 'text-cyan-700' : 'text-emerald-700'
+                            }`}
+                          >
+                            {related.vertical}
+                          </span>
+                          <span>•</span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {related.reading_time_minutes} min read
+                          </span>
+                          <span className="hidden sm:inline">•</span>
+                          <span className="hidden sm:inline">
+                            {new Date(related.created_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <h4 className="font-serif text-base sm:text-lg font-bold text-slate-900 group-hover:text-cyan-700 transition-colors line-clamp-2 leading-snug">
+                          {related.title}
+                        </h4>
+                        {related.excerpt && (
+                          <p className="text-xs text-slate-600 line-clamp-1 mt-1 font-sans">
+                            {related.excerpt}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 text-xs font-semibold text-slate-600 group-hover:text-cyan-700 transition-colors sm:self-center self-end flex-shrink-0">
+                      <span>Read article</span>
+                      <ArrowUpRight className="w-4 h-4 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                    </div>
+                  </a>
+                );
+              })}
+            </div>
+          </section>
+        )}
       </div>
     </article>
   );
