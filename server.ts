@@ -263,6 +263,126 @@ async function startServer() {
     res.json({ status: 'ok' });
   });
 
+  // User Profile & Role Synchronization API (authoritatively resolves user/admin role via service_role)
+  app.get('/api/auth/profile', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Missing or invalid Authorization header' });
+    }
+
+    const token = authHeader.substring(7).trim();
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || '';
+    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+
+    if (!supabaseUrl || (!serviceRoleKey && !anonKey)) {
+      return res.status(503).json({ error: 'Database not configured' });
+    }
+
+    try {
+      // 1. Verify user JWT token with Supabase Auth
+      const authClient = createClient(supabaseUrl, anonKey || serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false }
+      });
+      const { data: { user }, error: authError } = await authClient.auth.getUser(token);
+
+      if (authError || !user) {
+        return res.status(401).json({ error: 'Invalid or expired auth token', details: authError?.message });
+      }
+
+      const email = (user.email || '').trim().toLowerCase();
+      const userId = user.id;
+
+      // 2. Query startupcreme.users using service_role to bypass RLS
+      const adminClient = createClient(supabaseUrl, serviceRoleKey || anonKey, {
+        db: { schema: 'startupcreme' },
+        auth: { persistSession: false, autoRefreshToken: false }
+      });
+
+      let dbUser: any = null;
+      // Check by user ID first
+      const { data: byId } = await adminClient
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (byId) {
+        dbUser = byId;
+      } else if (email) {
+        // Fallback check by email (handles pre-seeded admin accounts or ID updates)
+        const { data: byEmail } = await adminClient
+          .from('users')
+          .select('*')
+          .ilike('email', email)
+          .maybeSingle();
+
+        if (byEmail) {
+          dbUser = byEmail;
+          // If seeded user had a placeholder ID, update it to the real Supabase Auth UUID
+          if (serviceRoleKey && byEmail.id !== userId) {
+            await adminClient
+              .from('users')
+              .update({ id: userId, updated_at: new Date().toISOString() })
+              .eq('email', byEmail.email);
+            dbUser.id = userId;
+          }
+        }
+      }
+
+      // If user still not in DB, provision them
+      if (!dbUser) {
+        const metadataRole = (user.user_metadata?.role as 'admin' | 'user') || 'user';
+        const fullName = user.user_metadata?.full_name || email.split('@')[0] || 'User';
+        const avatarUrl = user.user_metadata?.avatar_url || `https://picsum.photos/seed/${encodeURIComponent(email)}/100/100`;
+
+        const { data: insertedUser } = await adminClient
+          .from('users')
+          .insert({
+            id: userId,
+            email: email,
+            full_name: fullName,
+            avatar_url: avatarUrl,
+            role: metadataRole
+          })
+          .select('*')
+          .single();
+
+        dbUser = insertedUser || {
+          id: userId,
+          email,
+          full_name: fullName,
+          avatar_url: avatarUrl,
+          role: metadataRole
+        };
+      }
+
+      const role = (dbUser.role || 'user').trim().toLowerCase() === 'admin' ? 'admin' : 'user';
+
+      // Keep user_metadata in sync in Supabase Auth if service_role is present
+      if (serviceRoleKey && user.user_metadata?.role !== role) {
+        const masterClient = createClient(supabaseUrl, serviceRoleKey);
+        masterClient.auth.admin.updateUserById(userId, {
+          user_metadata: { ...user.user_metadata, role }
+        }).catch(() => {});
+      }
+
+      return res.json({
+        id: dbUser.id || userId,
+        email: dbUser.email || email,
+        full_name: dbUser.full_name || user.user_metadata?.full_name || email.split('@')[0],
+        avatar_url: dbUser.avatar_url || user.user_metadata?.avatar_url,
+        role: role,
+        reputation: dbUser.reputation || 100,
+        badge: dbUser.badge || (role === 'admin' ? 'Founder' : 'Contributor'),
+        created_at: dbUser.created_at || user.created_at
+      });
+    } catch (err: any) {
+      console.error('[AuthProfile API] Error resolving profile:', err);
+      return res.status(500).json({ error: 'Internal error resolving user profile' });
+    }
+  });
+
   // AI Subsystem: Autonomous M2M and Admin Control Plane
   app.use('/api/ai', aiRouter);
 

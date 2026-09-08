@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { 
   AiTask, 
   AiAction, 
@@ -10,15 +11,20 @@ import {
 import { IAgent } from '../types/agent';
 import { ResearchAgent } from '../agents/research/researchAgent';
 import { PolicyEngine } from '../policies/policyEngine';
-import { isSupabaseConfigured, supabase } from '../../lib/supabase';
+import { aiDatabase } from './aiDatabase';
+import { eventBus } from '../events/eventBus';
+import { CorrelationMetadata, AIErrorCodes, createTaskError } from '../server/automationContract';
 
 export interface CreateTaskOptions<TPayload = any> {
   taskType: string;
-  assignedAgent: string;
+  assignedAgent?: string;
   payload: TPayload;
   priority?: AiTaskPriority;
   requestedBy?: string;
   idempotencyKey?: string;
+  correlation?: CorrelationMetadata;
+  webhookUrl?: string;
+  timeoutMs?: number;
 }
 
 export class TaskManager {
@@ -63,12 +69,18 @@ export class TaskManager {
   }
 
   /**
-   * Submits and executes a task with idempotency and policy enforcement.
+   * Submits and executes a task with persistent idempotency, database sync, and policy enforcement.
    */
   public async submitTask<TPayload = any, TResult = any>(
     options: CreateTaskOptions<TPayload>
   ): Promise<{ task: AiTask<TPayload, TResult>; isExisting: boolean }> {
-    // 1. Check idempotency
+    const correlation: CorrelationMetadata = options.correlation || {
+      requestId: crypto.randomUUID(),
+      idempotencyKey: options.idempotencyKey,
+      source: 'n8n_orchestration'
+    };
+
+    // 1. Check idempotency in memory first
     if (options.idempotencyKey) {
       const existingTaskId = this.idempotencyIndex.get(options.idempotencyKey);
       if (existingTaskId) {
@@ -77,32 +89,52 @@ export class TaskManager {
           return { task: existingTask as AiTask<TPayload, TResult>, isExisting: true };
         }
       }
+
+      // Check persistent database for matching idempotency_key
+      const dbTask = await aiDatabase.findTaskByIdempotencyKey(options.idempotencyKey);
+      if (dbTask) {
+        this.tasks.set(dbTask.id, dbTask);
+        this.idempotencyIndex.set(options.idempotencyKey, dbTask.id);
+        return { task: dbTask as AiTask<TPayload, TResult>, isExisting: true };
+      }
     }
 
-    const taskId = `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const taskId = crypto.randomUUID();
     const now = new Date().toISOString();
+    const assignedAgent = options.assignedAgent || 'agent_research';
+    const timeoutMs = options.timeoutMs || 60000;
+
+    // 2. Evaluate Policy
+    const policy = PolicyEngine.evaluateAction(options.taskType);
 
     const task: AiTask<TPayload, TResult> = {
       id: taskId,
       task_type: options.taskType,
       priority: options.priority || 'medium',
       status: 'queued',
-      requestedBy: options.requestedBy || 'system',
-      assigned_agent: options.assignedAgent,
+      policy_level: policy.level,
+      requested_by: options.requestedBy || 'n8n_control_plane',
+      assigned_agent: assignedAgent,
       payload: options.payload,
       retry_count: 0,
       idempotency_key: options.idempotencyKey || null,
+      metadata: correlation,
+      timeout_ms: timeoutMs,
       created_at: now,
       updated_at: now,
     } as any;
 
+    // Store in memory & index
     this.tasks.set(taskId, task);
     if (options.idempotencyKey) {
       this.idempotencyIndex.set(options.idempotencyKey, taskId);
     }
 
-    // 2. Evaluate Policy
-    const policy = PolicyEngine.evaluateAction(options.taskType);
+    // Persist to database
+    aiDatabase.insertTask(task).catch(() => {});
+
+    // Emit created event
+    eventBus.emit('task.created', task, correlation, options.webhookUrl);
 
     // If RED action: Reject immediately
     if (!policy.isAllowed) {
@@ -111,9 +143,15 @@ export class TaskManager {
       task.updated_at = new Date().toISOString();
       task.completed_at = task.updated_at;
 
+      aiDatabase.updateTask(taskId, {
+        status: 'failed',
+        error: policy.reason,
+        completed_at: task.completed_at
+      }).catch(() => {});
+
       this.recordAction({
         task_id: taskId,
-        agent: options.assignedAgent,
+        agent: assignedAgent,
         action: options.taskType,
         status: 'blocked_policy',
         policy_level: 'red',
@@ -124,11 +162,13 @@ export class TaskManager {
 
       this.createAlert({
         severity: 'critical',
-        agent: options.assignedAgent,
+        agent: assignedAgent,
         title: 'Policy Block: Forbidden AI Action Attempted',
-        message: `Autonomous task '${options.taskType}' was blocked: ${policy.reason}`,
-        metadata: { taskId, payload: options.payload }
+        message: `Autonomous task '${options.taskType}' was blocked by policy: ${policy.reason}`,
+        metadata: { taskId, payload: options.payload, correlation }
       });
+
+      eventBus.emit('task.failed', task, correlation, options.webhookUrl);
 
       return { task, isExisting: false };
     }
@@ -138,12 +178,12 @@ export class TaskManager {
       task.status = 'waiting_approval';
       task.updated_at = new Date().toISOString();
 
-      const approvalId = `appr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const approvalId = crypto.randomUUID();
       const approval: AiApproval = {
         id: approvalId,
         task_id: taskId,
         action_name: options.taskType,
-        agent: options.assignedAgent,
+        agent: assignedAgent,
         policy_level: policy.level as 'yellow' | 'red',
         status: 'pending',
         description: `Autonomous task '${options.taskType}' requires editorial sign-off before proceeding.`,
@@ -154,9 +194,15 @@ export class TaskManager {
       this.approvals.set(approvalId, approval);
       task.approval_id = approvalId;
 
+      aiDatabase.insertApproval(approval).catch(() => {});
+      aiDatabase.updateTask(taskId, {
+        status: 'waiting_approval',
+        approval_id: approvalId
+      }).catch(() => {});
+
       this.recordAction({
         task_id: taskId,
-        agent: options.assignedAgent,
+        agent: assignedAgent,
         action: options.taskType,
         status: 'waiting_approval',
         policy_level: policy.level,
@@ -164,19 +210,23 @@ export class TaskManager {
         input_summary: options.payload as any
       });
 
+      eventBus.emit('task.waiting_approval', { task, approval }, correlation, options.webhookUrl);
+
       return { task, isExisting: false };
     }
 
-    // If GREEN action: Execute immediately
-    this.executeTask(taskId);
+    // If GREEN action: Execute asynchronously with timeout boundary
+    this.executeTask(taskId, options.webhookUrl).catch(err => {
+      console.error(`[TaskManager] Background execution error on task ${taskId}:`, err);
+    });
 
     return { task, isExisting: false };
   }
 
   /**
-   * Internal worker loop executing an approved or green task.
+   * Internal worker loop executing an approved or green task with strict timeout safety.
    */
-  public async executeTask(taskId: string): Promise<AiTask> {
+  public async executeTask(taskId: string, webhookUrl?: string): Promise<AiTask> {
     const task = this.tasks.get(taskId);
     if (!task) throw new Error(`Task '${taskId}' not found`);
 
@@ -186,23 +236,57 @@ export class TaskManager {
       task.error = `Assigned agent '${task.assigned_agent}' is not registered.`;
       task.updated_at = new Date().toISOString();
       task.completed_at = task.updated_at;
+
+      aiDatabase.updateTask(taskId, {
+        status: 'failed',
+        error: task.error,
+        completed_at: task.completed_at
+      }).catch(() => {});
+
+      eventBus.emit('task.failed', task, task.metadata as any, webhookUrl);
       return task;
     }
 
     task.status = 'running';
     task.updated_at = new Date().toISOString();
 
+    aiDatabase.updateTask(taskId, {
+      status: 'running',
+      updated_at: task.updated_at
+    }).catch(() => {});
+
+    eventBus.emit('task.started', task, task.metadata as any, webhookUrl);
+
     this.recordAction({
       task_id: taskId,
       agent: agent.id,
       action: task.task_type,
       status: 'started',
-      policy_level: 'green',
+      policy_level: task.policy_level || 'green',
       input_summary: task.payload as any
     });
 
+    // Timeout boundary execution
+    const timeoutMs = task.timeout_ms || 60000;
+
     try {
-      const result = await agent.execute(task.payload, { taskId });
+      const executionPromise = agent.execute(task.payload, { 
+        taskId, 
+        metadata: task.metadata 
+      });
+
+      let timer: NodeJS.Timeout;
+      const timeoutPromise = new Promise<{ isTimeout: true }>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`TASK_TIMEOUT: Execution exceeded boundary of ${timeoutMs}ms`)), timeoutMs);
+        timer.unref();
+      });
+
+      let result: any;
+      try {
+        result = await Promise.race([executionPromise, timeoutPromise]) as any;
+      } finally {
+        clearTimeout(timer!);
+      }
 
       if (result.success) {
         task.status = 'completed';
@@ -210,12 +294,18 @@ export class TaskManager {
         task.updated_at = new Date().toISOString();
         task.completed_at = task.updated_at;
 
+        aiDatabase.updateTask(taskId, {
+          status: 'completed',
+          result: result.data,
+          completed_at: task.completed_at
+        }).catch(() => {});
+
         this.recordAction({
           task_id: taskId,
           agent: agent.id,
           action: task.task_type,
           status: 'succeeded',
-          policy_level: 'green',
+          policy_level: task.policy_level || 'green',
           confidence: result.confidence,
           reason: result.reasoningSummary,
           input_summary: task.payload as any,
@@ -225,38 +315,69 @@ export class TaskManager {
             anglesCount: (result.data as any)?.potential_article_angles?.length
           }
         });
+
+        eventBus.emit('task.completed', task, task.metadata as any, webhookUrl);
       } else {
         task.status = 'failed';
         task.error = result.error || 'Agent execution failed';
         task.updated_at = new Date().toISOString();
         task.completed_at = task.updated_at;
 
+        aiDatabase.updateTask(taskId, {
+          status: 'failed',
+          error: task.error,
+          completed_at: task.completed_at
+        }).catch(() => {});
+
         this.recordAction({
           task_id: taskId,
           agent: agent.id,
           action: task.task_type,
           status: 'failed',
-          policy_level: 'green',
+          policy_level: task.policy_level || 'green',
           reason: result.reasoningSummary,
           error: result.error,
           input_summary: task.payload as any
         });
+
+        eventBus.emit('task.failed', task, task.metadata as any, webhookUrl);
       }
     } catch (err: any) {
+      const isTimeout = err?.message?.includes('TASK_TIMEOUT');
       task.status = 'failed';
-      task.error = err?.message || 'Unknown execution failure';
+      task.error = isTimeout 
+        ? `Task execution timed out after ${timeoutMs}ms` 
+        : (err?.message || 'Unknown execution failure');
       task.updated_at = new Date().toISOString();
       task.completed_at = task.updated_at;
+
+      aiDatabase.updateTask(taskId, {
+        status: 'failed',
+        error: task.error,
+        completed_at: task.completed_at
+      }).catch(() => {});
 
       this.recordAction({
         task_id: taskId,
         agent: agent.id,
         action: task.task_type,
         status: 'failed',
-        policy_level: 'green',
-        error: err?.message,
+        policy_level: task.policy_level || 'green',
+        error: task.error,
         input_summary: task.payload as any
       });
+
+      if (isTimeout) {
+        this.createAlert({
+          severity: 'warning',
+          agent: agent.id,
+          title: 'Execution Timeout Exceeded',
+          message: `Task '${task.id}' (${task.task_type}) timed out after ${timeoutMs}ms`,
+          metadata: { taskId, timeoutMs, correlation: task.metadata }
+        });
+      }
+
+      eventBus.emit('task.failed', task, task.metadata as any, webhookUrl);
     }
 
     return task;
@@ -275,11 +396,22 @@ export class TaskManager {
     approval.decision_reason = reason;
     approval.decided_at = new Date().toISOString();
 
+    aiDatabase.updateApproval(approvalId, {
+      status: 'approved',
+      decided_by: decidedBy,
+      decision_reason: reason,
+      decided_at: approval.decided_at
+    }).catch(() => {});
+
+    eventBus.emit('approval.decided', approval);
+
     if (approval.task_id) {
       const task = this.tasks.get(approval.task_id);
       if (task) {
         task.status = 'queued';
-        await this.executeTask(task.id);
+        task.updated_at = new Date().toISOString();
+        aiDatabase.updateTask(task.id, { status: 'queued', updated_at: task.updated_at }).catch(() => {});
+        this.executeTask(task.id).catch(() => {});
         return { success: true, task };
       }
     }
@@ -300,6 +432,15 @@ export class TaskManager {
     approval.decision_reason = reason;
     approval.decided_at = new Date().toISOString();
 
+    aiDatabase.updateApproval(approvalId, {
+      status: 'rejected',
+      decided_by: decidedBy,
+      decision_reason: reason,
+      decided_at: approval.decided_at
+    }).catch(() => {});
+
+    eventBus.emit('approval.decided', approval);
+
     if (approval.task_id) {
       const task = this.tasks.get(approval.task_id);
       if (task) {
@@ -307,6 +448,14 @@ export class TaskManager {
         task.error = `Rejected by human supervisor: ${reason}`;
         task.updated_at = new Date().toISOString();
         task.completed_at = task.updated_at;
+
+        aiDatabase.updateTask(task.id, {
+          status: 'cancelled',
+          error: task.error,
+          completed_at: task.completed_at
+        }).catch(() => {});
+
+        eventBus.emit('task.failed', task, task.metadata as any);
         return { success: true, task };
       }
     }
@@ -320,11 +469,12 @@ export class TaskManager {
   public recordAction(action: Omit<AiAction, 'id' | 'created_at'>): AiAction {
     const now = new Date().toISOString();
     const entry: AiAction = {
-      id: `act_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: crypto.randomUUID(),
       created_at: now,
       ...action
     };
     this.actions.unshift(entry);
+    aiDatabase.insertAction(entry).catch(() => {});
     return entry;
   }
 
@@ -333,12 +483,13 @@ export class TaskManager {
    */
   public createAlert(alert: Omit<AiAlert, 'id' | 'is_dismissed' | 'created_at'>): AiAlert {
     const entry: AiAlert = {
-      id: `alt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: crypto.randomUUID(),
       is_dismissed: false,
       created_at: new Date().toISOString(),
       ...alert
     };
     this.alerts.unshift(entry);
+    aiDatabase.insertAlert(entry).catch(() => {});
     return entry;
   }
 
@@ -346,14 +497,27 @@ export class TaskManager {
     const alert = this.alerts.find(a => a.id === alertId);
     if (alert) {
       alert.is_dismissed = true;
+      aiDatabase.dismissAlert(alertId).catch(() => {});
       return true;
     }
     return false;
   }
 
-  // Getters for Command Center
+  // Getters for Command Center and API Polling
   public getTask(taskId: string): AiTask | undefined {
     return this.tasks.get(taskId);
+  }
+
+  public async getTaskAsync(taskId: string): Promise<AiTask | undefined> {
+    const cached = this.tasks.get(taskId);
+    if (cached) return cached;
+
+    const dbTask = await aiDatabase.getTask(taskId);
+    if (dbTask) {
+      this.tasks.set(dbTask.id, dbTask);
+      return dbTask;
+    }
+    return undefined;
   }
 
   public listTasks(limit = 50, status?: AiTaskStatus): AiTask[] {
@@ -370,14 +534,14 @@ export class TaskManager {
     return this.actions.slice(0, limit);
   }
 
-  public listApprovals(status?: 'pending' | 'approved' | 'rejected'): AiApproval[] {
+  public listApprovals(status?: 'pending' | 'approved' | 'rejected', limit = 50): AiApproval[] {
     let list = Array.from(this.approvals.values()).sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
     if (status) {
       list = list.filter(a => a.status === status);
     }
-    return list;
+    return list.slice(0, limit);
   }
 
   public listAlerts(includeDismissed = false): AiAlert[] {
@@ -387,6 +551,9 @@ export class TaskManager {
 
   public getSystemMetrics() {
     const tasks = Array.from(this.tasks.values());
+    const dbStatus = aiDatabase.getStatus();
+    const webhookStats = eventBus.getWebhookStats();
+
     return {
       totalTasks: tasks.length,
       queued: tasks.filter(t => t.status === 'queued').length,
@@ -397,7 +564,17 @@ export class TaskManager {
       pendingApprovalsCount: Array.from(this.approvals.values()).filter(a => a.status === 'pending').length,
       activeAlertsCount: this.alerts.filter(a => !a.is_dismissed).length,
       totalActionsLogged: this.actions.length,
-      registeredAgentsCount: this.agents.size
+      registeredAgentsCount: this.agents.size,
+      databasePersistence: {
+        isAvailable: aiDatabase.isAvailable(),
+        hasServiceRole: dbStatus.hasServiceRole,
+        schema: dbStatus.targetSchema
+      },
+      webhooks: {
+        totalDispatched: webhookStats.totalDispatched,
+        deliveredCount: webhookStats.deliveredCount,
+        failedCount: webhookStats.failedCount
+      }
     };
   }
 }

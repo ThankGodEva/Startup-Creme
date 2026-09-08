@@ -124,16 +124,25 @@ CREATE POLICY "Users can manage own profile"
     USING (auth.uid() = id)
     WITH CHECK (auth.uid() = id);
 
+-- Helper function to evaluate admin privileges without recursive RLS execution
+CREATE OR REPLACE FUNCTION startupcreme.is_admin(user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = startupcreme, public
+STABLE
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM startupcreme.users
+        WHERE id = user_id AND role = 'admin'
+    );
+$$;
+
 DROP POLICY IF EXISTS "Admins full access to users" ON startupcreme.users;
 CREATE POLICY "Admins full access to users"
     ON startupcreme.users FOR ALL
     TO authenticated
-    USING (
-        EXISTS (
-            SELECT 1 FROM startupcreme.users
-            WHERE id = auth.uid() AND role = 'admin'
-        )
-    );
+    USING (startupcreme.is_admin(auth.uid()));
 
 -- --------------------------------------------------------------------
 -- 6. EDITORIAL POSTS TABLE (startupcreme.posts)

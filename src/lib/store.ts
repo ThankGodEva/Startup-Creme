@@ -214,7 +214,36 @@ class StartupCremeStore {
     let computedName = userObj.user_metadata?.full_name || (userEmail ? userEmail.split('@')[0] : 'User');
     let computedAvatar = userObj.user_metadata?.avatar_url || `https://picsum.photos/seed/${encodeURIComponent(userEmail || 'user')}/100/100`;
 
-    // Strictly fetch from startupcreme.users table (try ID first, fallback to email)
+    // 1. Authoritative check via backend API with service_role bypass
+    if (session?.access_token) {
+      try {
+        const resp = await fetch('/api/auth/profile', {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`
+          }
+        });
+        if (resp.ok) {
+          const profile = await resp.json();
+          if (profile && profile.role) {
+            this.currentUser = {
+              id: profile.id || userObj.id,
+              email: profile.email || userEmail,
+              full_name: profile.full_name || computedName,
+              avatar_url: profile.avatar_url || computedAvatar,
+              role: profile.role === 'admin' ? 'admin' : 'user',
+              created_at: profile.created_at || userObj.created_at || new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            };
+            this.notify();
+            return;
+          }
+        }
+      } catch (apiErr) {
+        console.warn('Backend /api/auth/profile check failed, falling back to direct DB queries:', apiErr);
+      }
+    }
+
+    // 2. Direct fallback query to startupcreme.users table (try ID first, fallback to email)
     try {
       let scUser: any = null;
       if (userObj.id) {
@@ -265,6 +294,42 @@ class StartupCremeStore {
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      
+      // 1. Check backend API first
+      if (session?.access_token) {
+        try {
+          const resp = await fetch('/api/auth/profile', {
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`
+            }
+          });
+          if (resp.ok) {
+            const profile = await resp.json();
+            if (profile && profile.role) {
+              const dbRole: 'admin' | 'user' = profile.role === 'admin' ? 'admin' : 'user';
+              const dbName = profile.full_name || this.currentUser?.full_name || 'User';
+              const dbAvatar = profile.avatar_url || this.currentUser?.avatar_url;
+
+              const changed = !this.currentUser || this.currentUser.role !== dbRole || this.currentUser.full_name !== dbName;
+              this.currentUser = {
+                id: profile.id || session.user?.id || this.currentUser?.id || 'unknown',
+                email: profile.email || session.user?.email || this.currentUser?.email || '',
+                full_name: dbName,
+                avatar_url: dbAvatar,
+                role: dbRole,
+                created_at: profile.created_at || this.currentUser?.created_at || new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              };
+              if (changed) this.notify();
+              return dbRole;
+            }
+          }
+        } catch (apiErr) {
+          console.warn('/api/auth/profile refresh error, falling back:', apiErr);
+        }
+      }
+
+      // 2. Direct DB fallback
       const currentAuthUser = session?.user;
       const effectiveId = currentAuthUser?.id || this.currentUser?.id;
       const effectiveEmail = (currentAuthUser?.email || this.currentUser?.email || '').trim();

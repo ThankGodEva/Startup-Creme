@@ -1,4 +1,4 @@
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { PolicyEngine } from '../src/ai/policies/policyEngine';
 import { ToolRegistry } from '../src/ai/tools/registry';
@@ -231,5 +231,11 @@ describe('StartupCrème AI Operating Subsystem - Foundation Phase Tests', () => 
       assert.ok(results.length > 0);
       assert.ok(results.some(r => r.key === 'autonomous_foundation_phase'));
     });
+  });
+
+  after(() => {
+    setTimeout(() => {
+      process.exit(0);
+    }, 200).unref();
   });
 });

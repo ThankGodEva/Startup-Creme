@@ -157,6 +157,7 @@ export interface AiTask<TPayload = any, TResult = any> {
   task_type: string;
   priority: AiTaskPriority;
   status: AiTaskStatus;
+  policy_level?: PolicyLevel;
   requested_by: string;
   assigned_agent: string;
   payload: TPayload;
@@ -165,6 +166,8 @@ export interface AiTask<TPayload = any, TResult = any> {
   retry_count: number;
   idempotency_key?: string | null;
   approval_id?: string | null;
+  metadata?: Record<string, any>;
+  timeout_ms?: number;
   created_at: string;
   updated_at: string;
   completed_at?: string | null;

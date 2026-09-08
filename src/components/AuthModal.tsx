@@ -68,6 +68,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const resolveUserProfile = async (userObj: any, userEmail: string): Promise<UserProfile> => {
     const supabase = getSupabaseClient();
     const trimmedEmail = userEmail.trim();
+
+    // 1. Authoritative resolution via server endpoint with service_role
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        const resp = await fetch('/api/auth/profile', {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`
+          }
+        });
+        if (resp.ok) {
+          const profile = await resp.json();
+          if (profile && profile.role) {
+            return {
+              id: profile.id || userObj?.id || `user-${Date.now()}`,
+              email: profile.email || trimmedEmail,
+              full_name: profile.full_name || userObj?.user_metadata?.full_name || trimmedEmail.split('@')[0],
+              avatar_url: profile.avatar_url || userObj?.user_metadata?.avatar_url || `https://picsum.photos/seed/${encodeURIComponent(trimmedEmail)}/100/100`,
+              role: profile.role === 'admin' ? 'admin' : 'user',
+              created_at: profile.created_at || userObj?.created_at || new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            };
+          }
+        }
+      }
+    } catch (apiErr) {
+      console.warn('Authoritative profile fetch error in modal, using DB fallback:', apiErr);
+    }
+
     let fetchedRole: 'admin' | 'user' = (userObj?.user_metadata?.role as 'admin' | 'user') || 'user';
     let fetchedName = userObj?.user_metadata?.full_name || trimmedEmail.split('@')[0];
     let fetchedAvatar = userObj?.user_metadata?.avatar_url || `https://picsum.photos/seed/${encodeURIComponent(trimmedEmail)}/100/100`;
