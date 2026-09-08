@@ -19,17 +19,20 @@ import {
   Database,
   Loader2,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Bot
 } from 'lucide-react';
 import { Post, DiscussionTopic, UserProfile, ContentVertical, PublicationStatus } from '../types';
 import { generateSitemapXML, generateRobotsTxt } from '../lib/seo';
 import { store } from '../lib/store';
 import { ArticleEditorPage } from './ArticleEditorPage';
+import { AiCommandCenter } from './AiCommandCenter';
 
 interface AdminDashboardProps {
   currentUser: UserProfile | null;
   posts: Post[];
   topics: DiscussionTopic[];
+  initialTab?: 'posts' | 'discussions' | 'seo' | 'ai';
   onSavePost: (post: Partial<Post>) => Promise<{ success: boolean; post: Post; error?: string }>;
   onDeletePost: (id: string) => void;
   onTogglePostStatus: (id: string) => void;
@@ -41,13 +44,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   currentUser,
   posts,
   topics,
+  initialTab,
   onSavePost,
   onDeletePost,
   onTogglePostStatus,
   onDeleteTopic,
   onSwitchRole,
 }) => {
-  const [activeTab, setActiveTab] = useState<'posts' | 'discussions' | 'seo'>('posts');
+  const [activeTab, setActiveTab] = useState<'posts' | 'discussions' | 'seo' | 'ai'>(initialTab || 'posts');
   const [editingPost, setEditingPost] = useState<Partial<Post> | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [verticalFilter, setVerticalFilter] = useState<'all' | ContentVertical>('all');
@@ -256,7 +260,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <Globe className="w-4 h-4 text-emerald-600" />
             <span>SEO Sitemap & Robots.txt</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('ai')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === 'ai'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Bot className="w-4 h-4 text-amber-400" />
+            <span>AI Command Center</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+              Autonomous
+            </span>
+          </button>
         </div>
+
+        {/* AI COMMAND CENTER TAB */}
+        {activeTab === 'ai' && (
+          <AiCommandCenter onNavigateToEditor={(draft) => setEditingPost(draft)} />
+        )}
 
         {/* POSTS TAB */}
         {activeTab === 'posts' && (

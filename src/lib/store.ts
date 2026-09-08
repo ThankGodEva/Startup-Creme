@@ -32,7 +32,7 @@ const SEED_TOPICS: DiscussionTopic[] = [
   }
 ];
 
-// Helper to execute query on 'startupcreme' schema with fallback to default schema
+// Helper to execute query strictly on 'startupcreme' schema
 async function supabaseExecute<T = any>(
   queryFn: (client: SupabaseClient) => PromiseLike<any>
 ): Promise<{ data: T | null; error: any }> {
@@ -44,43 +44,25 @@ async function supabaseExecute<T = any>(
     };
   }
 
-  let scError: any = null;
-
-  // 1. Try 'startupcreme' schema client first
+  // Strictly execute on 'startupcreme' schema
   try {
     const scClient = supabase.schema('startupcreme');
     const res = await Promise.resolve(queryFn(scClient as any));
-    if (!res.error) {
+    if (res.error) {
+      console.warn('startupcreme schema query returned error:', res.error?.message || res.error);
+      const scErrMsg = res.error?.message || String(res.error || '');
+      if (scErrMsg.includes('permission denied for schema')) {
+        return {
+          data: null,
+          error: new Error('Permission denied for schema "startupcreme". Grant schema usage in Supabase SQL Editor by running supabase/schema.sql.')
+        };
+      }
       return res as { data: T | null; error: any };
     }
-    scError = res.error;
-    console.warn('startupcreme schema query returned error, trying default schema fallback:', res.error?.message || res.error);
-  } catch (err) {
-    scError = err;
-    console.warn('startupcreme schema query exception, trying default schema fallback:', err);
-  }
-
-  // 2. Fall back to standard default schema client
-  try {
-    const pubRes = await Promise.resolve(queryFn(supabase as any));
-    if (!pubRes.error) {
-      return pubRes as { data: T | null; error: any };
-    }
-    console.warn('default schema query error:', pubRes.error?.message || pubRes.error);
-
-    // If startupcreme schema returned permission denied, present clean actionable guidance
-    const scErrMsg = scError?.message || String(scError || '');
-    if (scErrMsg.includes('permission denied for schema')) {
-      return {
-        data: null,
-        error: new Error('Permission denied for schema "startupcreme". Grant schema usage in Supabase SQL Editor (use the button below to copy full SQL).')
-      };
-    }
-
-    return pubRes as { data: T | null; error: any };
-  } catch (err) {
-    console.warn('default schema query exception:', err);
-    return { data: null, error: scError || err };
+    return res as { data: T | null; error: any };
+  } catch (err: any) {
+    console.error('startupcreme schema query exception:', err);
+    return { data: null, error: err };
   }
 }
 
@@ -188,41 +170,164 @@ class StartupCremeStore {
 
   private initSupabaseAuthListener() {
     try {
+      // 1. Check existing active session immediately on startup
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          this.syncUserFromSession(session);
+        }
+      }).catch(err => {
+        console.warn('Session hydration error:', err);
+      });
+
+      // 2. Listen for auth changes
       supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) {
-          const userEmail = session.user.email || '';
-          let computedRole: 'admin' | 'user' = (session.user.user_metadata?.role as 'admin' | 'user') || 'user';
-
-          try {
-            const { data: scUser } = await supabaseExecute((client) =>
-              client.from('users').select('role, full_name, avatar_url').eq('id', session.user.id).maybeSingle()
-            );
-            if (scUser?.role) {
-              computedRole = scUser.role as 'admin' | 'user';
-            }
-          } catch (e) {
-            console.warn('DB user role fetch error:', e);
-          }
-
-          const defaultName = session.user.user_metadata?.full_name || (userEmail ? userEmail.split('@')[0] : 'User');
-
-          const userProfile: UserProfile = {
-            id: session.user.id,
-            email: userEmail,
-            full_name: defaultName,
-            avatar_url: session.user.user_metadata?.avatar_url || `https://picsum.photos/seed/${encodeURIComponent(userEmail || 'user')}/100/100`,
-            role: computedRole,
-            created_at: session.user.created_at || new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          };
-
-          this.currentUser = userProfile;
+          await this.syncUserFromSession(session);
+        } else if (event === 'SIGNED_OUT') {
+          this.currentUser = null;
           this.notify();
         }
       });
+
+      // 3. Auto-sync on window focus and periodic background poll
+      if (typeof window !== 'undefined') {
+        window.addEventListener('focus', () => {
+          this.refreshCurrentUserRole().catch(() => {});
+        });
+        setInterval(() => {
+          if (this.currentUser) {
+            this.refreshCurrentUserRole().catch(() => {});
+          }
+        }, 15000);
+      }
     } catch (e) {
       console.warn('Supabase auth listener error:', e);
     }
+  }
+
+  public async syncUserFromSession(session: any) {
+    if (!session?.user) return;
+    const userObj = session.user;
+    const userEmail = (userObj.email || '').trim();
+
+    let computedRole: 'admin' | 'user' = (userObj.user_metadata?.role as 'admin' | 'user') || 'user';
+    let computedName = userObj.user_metadata?.full_name || (userEmail ? userEmail.split('@')[0] : 'User');
+    let computedAvatar = userObj.user_metadata?.avatar_url || `https://picsum.photos/seed/${encodeURIComponent(userEmail || 'user')}/100/100`;
+
+    // Strictly fetch from startupcreme.users table (try ID first, fallback to email)
+    try {
+      let scUser: any = null;
+      if (userObj.id) {
+        const { data } = await supabase
+          .schema('startupcreme')
+          .from('users')
+          .select('id, email, full_name, avatar_url, role')
+          .eq('id', userObj.id)
+          .maybeSingle();
+        if (data) scUser = data;
+      }
+
+      if (!scUser && userEmail) {
+        const { data } = await supabase
+          .schema('startupcreme')
+          .from('users')
+          .select('id, email, full_name, avatar_url, role')
+          .ilike('email', userEmail)
+          .maybeSingle();
+        if (data) scUser = data;
+      }
+
+      if (scUser) {
+        if (scUser.role) {
+          computedRole = scUser.role.trim().toLowerCase() === 'admin' ? 'admin' : 'user';
+        }
+        if (scUser.full_name) computedName = scUser.full_name;
+        if (scUser.avatar_url) computedAvatar = scUser.avatar_url;
+      }
+    } catch (e) {
+      console.warn('DB user role fetch error:', e);
+    }
+
+    this.currentUser = {
+      id: userObj.id,
+      email: userEmail,
+      full_name: computedName,
+      avatar_url: computedAvatar,
+      role: computedRole,
+      created_at: userObj.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.notify();
+  }
+
+  public async refreshCurrentUserRole(): Promise<'admin' | 'user' | null> {
+    if (!isSupabaseConfigured()) return this.currentUser?.role || null;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentAuthUser = session?.user;
+      const effectiveId = currentAuthUser?.id || this.currentUser?.id;
+      const effectiveEmail = (currentAuthUser?.email || this.currentUser?.email || '').trim();
+
+      if (!effectiveId && !effectiveEmail) return null;
+
+      let scUser: any = null;
+
+      if (effectiveId) {
+        const { data } = await supabase
+          .schema('startupcreme')
+          .from('users')
+          .select('id, email, full_name, avatar_url, role')
+          .eq('id', effectiveId)
+          .maybeSingle();
+        if (data) scUser = data;
+      }
+
+      if (!scUser && effectiveEmail) {
+        const { data } = await supabase
+          .schema('startupcreme')
+          .from('users')
+          .select('id, email, full_name, avatar_url, role')
+          .ilike('email', effectiveEmail)
+          .maybeSingle();
+        if (data) scUser = data;
+      }
+
+      if (scUser) {
+        const dbRole: 'admin' | 'user' = (scUser.role?.trim().toLowerCase() === 'admin') ? 'admin' : 'user';
+        const dbName = scUser.full_name || this.currentUser?.full_name || 'User';
+        const dbAvatar = scUser.avatar_url || this.currentUser?.avatar_url;
+
+        if (this.currentUser) {
+          const changed = this.currentUser.role !== dbRole || this.currentUser.full_name !== dbName;
+          this.currentUser = {
+            ...this.currentUser,
+            id: scUser.id || this.currentUser.id,
+            email: scUser.email || this.currentUser.email,
+            full_name: dbName,
+            avatar_url: dbAvatar,
+            role: dbRole,
+            updated_at: new Date().toISOString(),
+          };
+          if (changed) this.notify();
+        } else if (currentAuthUser) {
+          this.currentUser = {
+            id: scUser.id || currentAuthUser.id,
+            email: scUser.email || currentAuthUser.email || '',
+            full_name: dbName,
+            avatar_url: dbAvatar,
+            role: dbRole,
+            created_at: currentAuthUser.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          this.notify();
+        }
+        return dbRole;
+      }
+    } catch (err) {
+      console.warn('Failed to refresh user role from DB:', err);
+    }
+    return this.currentUser?.role || null;
   }
 
   public subscribe(fn: () => void) {
@@ -528,11 +633,17 @@ class StartupCremeStore {
   public setCurrentUser(user: UserProfile | null) {
     this.currentUser = user;
     this.notify();
+    if (user) {
+      this.refreshCurrentUserRole().catch(() => {});
+    }
   }
 
   public switchDemoRole(role: 'admin' | 'user' | 'guest') {
     if (role === 'guest') {
       this.currentUser = null;
+      if (isSupabaseConfigured()) {
+        supabase.auth.signOut().catch(() => {});
+      }
     } else if (role === 'admin') {
       this.currentUser = {
         id: 'admin-demo-id',
@@ -566,17 +677,54 @@ class StartupCremeStore {
 
     if (isSupabaseConfigured()) {
       try {
-        await supabaseExecute((client) =>
-          client.from('users').upsert({
+        // Query startupcreme.users first to never overwrite existing role
+        let existingUser: any = null;
+
+        if (isValidUUID) {
+          const { data } = await supabase
+            .schema('startupcreme')
+            .from('users')
+            .select('id, role, full_name, avatar_url')
+            .eq('id', targetUserId)
+            .maybeSingle();
+          if (data) existingUser = data;
+        }
+
+        if (!existingUser && user.email) {
+          const { data } = await supabase
+            .schema('startupcreme')
+            .from('users')
+            .select('id, role, full_name, avatar_url')
+            .ilike('email', user.email.trim())
+            .maybeSingle();
+          if (data) existingUser = data;
+        }
+
+        if (existingUser) {
+          // Sync database role to in-memory currentUser if different
+          if (existingUser.role && this.currentUser) {
+            const dbRole: 'admin' | 'user' = existingUser.role.trim().toLowerCase() === 'admin' ? 'admin' : 'user';
+            if (this.currentUser.role !== dbRole) {
+              this.currentUser.role = dbRole;
+              this.notify();
+            }
+          }
+          return existingUser.id || targetUserId;
+        }
+
+        // Only insert if user does not exist in DB yet
+        await supabase
+          .schema('startupcreme')
+          .from('users')
+          .insert({
             id: targetUserId,
             email: user.email || 'user@startupcreme.com',
             full_name: user.full_name || 'Community Member',
             avatar_url: user.avatar_url || 'https://picsum.photos/seed/user/100/100',
             role: user.role || 'user',
-          }, { onConflict: 'id' })
-        );
+          });
       } catch (e) {
-        console.warn('ensureUserInDb upsert notice:', e);
+        console.warn('ensureUserInDb notice:', e);
       }
     }
 

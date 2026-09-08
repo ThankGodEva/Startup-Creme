@@ -5,6 +5,7 @@ import multer from 'multer';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { createServer as createViteServer } from 'vite';
 import { createClient } from '@supabase/supabase-js';
+import { aiRouter } from './src/server/aiRouter';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -261,6 +262,9 @@ async function startServer() {
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
   });
+
+  // AI Subsystem: Autonomous M2M and Admin Control Plane
+  app.use('/api/ai', aiRouter);
 
   // Dynamic XML Sitemap for Google Search Console
   app.get(['/sitemap.xml', '/sitemap', '/sitemap_index.xml'], async (req, res) => {

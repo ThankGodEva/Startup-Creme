@@ -31,6 +31,7 @@ export default function App() {
   // Modals
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showBookmarksDrawer, setShowBookmarksDrawer] = useState(false);
+  const [adminTab, setAdminTab] = useState<'posts' | 'discussions' | 'seo' | 'ai'>('posts');
 
   // Sync React state with URL path
   const syncStateFromUrl = useCallback(() => {
@@ -48,6 +49,15 @@ export default function App() {
 
     if (parts[0] === 'admin') {
       setActiveTab('admin');
+      if (parts[1] === 'ai') {
+        setAdminTab('ai');
+      } else if (parts[1] === 'seo') {
+        setAdminTab('seo');
+      } else if (parts[1] === 'discussions') {
+        setAdminTab('discussions');
+      } else {
+        setAdminTab('posts');
+      }
       setSelectedPost(null);
       setSelectedTopic(null);
       setLoadingArticleSlug(null);
@@ -406,6 +416,7 @@ export default function App() {
             currentUser={currentUser}
             posts={allPosts}
             topics={topics}
+            initialTab={adminTab}
             onSavePost={(post) => store.savePost(post)}
             onDeletePost={(id) => store.deletePost(id)}
             onTogglePostStatus={(id) => store.togglePostStatus(id)}
