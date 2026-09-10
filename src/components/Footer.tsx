@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, ArrowRight, ShieldCheck, Globe, Check, AlertCircle, Loader2, ExternalLink } from 'lucide-react';
+import { Mail, ArrowRight, ShieldCheck, Globe, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { store } from '../lib/store';
 import { NavigationTab, getTabUrl } from '../lib/router';
 
@@ -188,16 +188,6 @@ export const Footer: React.FC<FooterProps> = ({ currentLocale, onTabChange, onOp
             className="hover:text-cyan-400 transition-colors cursor-pointer"
           >
             Terms of Editorial Service
-          </a>
-          <span className="text-slate-700 hidden sm:inline">•</span>
-          <a
-            href="/sitemap.xml"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-slate-200 transition-colors flex items-center gap-1 cursor-pointer"
-          >
-            <span>Sitemap XML</span>
-            <ExternalLink className="w-3 h-3 text-slate-500" />
           </a>
         </div>
       </div>

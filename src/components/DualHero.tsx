@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrendingUp, Cpu, ArrowRight, Layers, Sparkles } from 'lucide-react';
+import { TrendingUp, Cpu, ArrowRight, Layers } from 'lucide-react';
 import { getTabUrl } from '../lib/router';
 
 interface DualHeroProps {
@@ -21,10 +21,6 @@ export const DualHero: React.FC<DualHeroProps> = ({
       <div className="max-w-7xl mx-auto relative z-10">
         {/* Title & Tagline */}
         <div className="text-center max-w-3xl mx-auto mb-10">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-xs text-slate-700 shadow-sm mb-4">
-            <Sparkles className="w-3.5 h-3.5 text-cyan-600" />
-            <span>Topical Authority Subpath Siloing • <code className="text-cyan-700 font-bold">/{currentLocale}</code></span>
-          </div>
           <h1 className="font-serif text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900 mb-4 leading-tight">
             Where High-Value Capital Meets <br className="hidden sm:inline" />
             <span className="text-teal-700 block sm:inline mt-1 sm:mt-0">
