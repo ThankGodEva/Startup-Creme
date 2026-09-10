@@ -94,6 +94,22 @@ export function createApp(): express.Express {
 
   app.use(express.json({ limit: '10mb' }));
 
+  // Vercel rewrite normalization middleware:
+  // When Vercel rewrites /api/(.*) to /api, Vercel sets req.url to /api while placing
+  // the requested path in x-matched-path or x-forwarded-uri.
+  // We normalize req.url so Express router always sees the original intended route.
+  app.use((req, res, next) => {
+    const rawMatched = (req.headers['x-matched-path'] || req.headers['x-forwarded-uri']) as string | undefined;
+    if (rawMatched && typeof rawMatched === 'string') {
+      const cleanMatched = rawMatched.split('?')[0];
+      if (cleanMatched.startsWith('/api') && req.url !== cleanMatched) {
+        const queryPart = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
+        req.url = cleanMatched + queryPart;
+      }
+    }
+    next();
+  });
+
   // Static uploads directory middleware (safe creation for serverless / read-only filesystems)
   const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
   if (!fs.existsSync(uploadsDir)) {
@@ -109,6 +125,22 @@ export function createApp(): express.Express {
   // Core API Routes (registered with both /api/* and root-relative paths
   // to ensure robust handling across Vercel rewrites and direct calls)
   // --------------------------------------------------------------------
+
+  // 0. Base API index
+  app.get(['/api', '/api/'], (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json({
+      status: 'ok',
+      service: 'StartupCrème Operational Platform',
+      version: '1.0.0',
+      routes: [
+        '/api/health',
+        '/api/ai/health',
+        '/api/auth/profile',
+        '/api/upload-image'
+      ]
+    });
+  });
 
   // 1. System Health check
   app.get(['/api/health', '/health'], (req, res) => {

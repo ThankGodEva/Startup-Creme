@@ -26,14 +26,20 @@ export function createRateLimiter(options: RateLimitOptions) {
   }, Math.max(options.windowMs, 30000)).unref();
 
   return (req: Request, res: Response, next: NextFunction) => {
-    // Identify client by token or IP
-    const clientKey = (
-      req.headers['x-automation-secret'] ||
-      req.headers.authorization ||
-      req.ip ||
-      req.socket.remoteAddress ||
-      'unknown_client'
-    ) as string;
+    // Identify client by token or IP safely across serverless and proxy environments
+    let clientKey = 'unknown_client';
+    try {
+      clientKey = (
+        req.headers['x-automation-secret'] ||
+        req.headers.authorization ||
+        (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+        req.ip ||
+        req.socket?.remoteAddress ||
+        'unknown_client'
+      ) as string;
+    } catch {
+      clientKey = 'unknown_client';
+    }
 
     const key = `${options.endpointIdentifier || 'global'}:${clientKey}`;
     const now = Date.now();
