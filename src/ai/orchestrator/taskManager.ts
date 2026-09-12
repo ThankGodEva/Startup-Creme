@@ -84,7 +84,10 @@ export class TaskManager {
     if (options.idempotencyKey) {
       const existingTaskId = this.idempotencyIndex.get(options.idempotencyKey);
       if (existingTaskId) {
-        const existingTask = this.tasks.get(existingTaskId);
+        let existingTask = this.tasks.get(existingTaskId);
+        if (!existingTask) {
+          existingTask = await this.getTaskAsync(existingTaskId);
+        }
         if (existingTask) {
           return { task: existingTask as AiTask<TPayload, TResult>, isExisting: true };
         }
@@ -93,6 +96,12 @@ export class TaskManager {
       // Check persistent database for matching idempotency_key
       const dbTask = await aiDatabase.findTaskByIdempotencyKey(options.idempotencyKey);
       if (dbTask) {
+        if (!dbTask.policy_level) {
+          dbTask.policy_level = PolicyEngine.evaluateAction(dbTask.task_type).level;
+        }
+        if (!dbTask.metadata) {
+          dbTask.metadata = correlation;
+        }
         this.tasks.set(dbTask.id, dbTask);
         this.idempotencyIndex.set(options.idempotencyKey, dbTask.id);
         return { task: dbTask as AiTask<TPayload, TResult>, isExisting: true };
@@ -124,30 +133,23 @@ export class TaskManager {
       updated_at: now,
     } as any;
 
-    // Store in memory & index
-    this.tasks.set(taskId, task);
-    if (options.idempotencyKey) {
-      this.idempotencyIndex.set(options.idempotencyKey, taskId);
-    }
-
-    // Persist to database
-    aiDatabase.insertTask(task).catch(() => {});
-
-    // Emit created event
-    eventBus.emit('task.created', task, correlation, options.webhookUrl);
-
     // If RED action: Reject immediately
     if (!policy.isAllowed) {
       task.status = 'failed';
       task.error = policy.reason;
-      task.updated_at = new Date().toISOString();
-      task.completed_at = task.updated_at;
+      task.updated_at = now;
+      task.completed_at = now;
 
-      aiDatabase.updateTask(taskId, {
-        status: 'failed',
-        error: policy.reason,
-        completed_at: task.completed_at
-      }).catch(() => {});
+      // Durable database persistence before reporting
+      const persisted = await aiDatabase.insertTask(task);
+      if (!persisted) {
+        throw new Error(`Failed to persist AI task: ${policy.reason}`);
+      }
+
+      this.tasks.set(taskId, task);
+      if (options.idempotencyKey) {
+        this.idempotencyIndex.set(options.idempotencyKey, taskId);
+      }
 
       this.recordAction({
         task_id: taskId,
@@ -176,7 +178,7 @@ export class TaskManager {
     // If YELLOW action: Requires approval
     if (policy.requiresApproval) {
       task.status = 'waiting_approval';
-      task.updated_at = new Date().toISOString();
+      task.updated_at = now;
 
       const approvalId = crypto.randomUUID();
       const approval: AiApproval = {
@@ -191,14 +193,25 @@ export class TaskManager {
         created_at: now
       };
 
-      this.approvals.set(approvalId, approval);
       task.approval_id = approvalId;
 
-      aiDatabase.insertApproval(approval).catch(() => {});
-      aiDatabase.updateTask(taskId, {
-        status: 'waiting_approval',
-        approval_id: approvalId
-      }).catch(() => {});
+      // Durable database persistence: insert approval and task before reporting success
+      const approvalPersisted = await aiDatabase.insertApproval(approval);
+      if (!approvalPersisted) {
+        throw new Error('Failed to persist AI approval request');
+      }
+
+      const taskPersisted = await aiDatabase.insertTask(task);
+      if (!taskPersisted) {
+        throw new Error('Failed to persist AI task');
+      }
+
+      // Populate memory cache
+      this.tasks.set(taskId, task);
+      this.approvals.set(approvalId, approval);
+      if (options.idempotencyKey) {
+        this.idempotencyIndex.set(options.idempotencyKey, taskId);
+      }
 
       this.recordAction({
         task_id: taskId,
@@ -215,7 +228,22 @@ export class TaskManager {
       return { task, isExisting: false };
     }
 
-    // If GREEN action: Execute asynchronously with timeout boundary
+    // If GREEN action: Persist task durably before reporting success
+    const persisted = await aiDatabase.insertTask(task);
+    if (!persisted) {
+      throw new Error('Failed to persist AI task');
+    }
+
+    // Populate memory cache & index
+    this.tasks.set(taskId, task);
+    if (options.idempotencyKey) {
+      this.idempotencyIndex.set(options.idempotencyKey, taskId);
+    }
+
+    // Emit created event
+    eventBus.emit('task.created', task, correlation, options.webhookUrl);
+
+    // Execute asynchronously with timeout boundary
     this.executeTask(taskId, options.webhookUrl).catch(err => {
       console.error(`[TaskManager] Background execution error on task ${taskId}:`, err);
     });
@@ -227,7 +255,10 @@ export class TaskManager {
    * Internal worker loop executing an approved or green task with strict timeout safety.
    */
   public async executeTask(taskId: string, webhookUrl?: string): Promise<AiTask> {
-    const task = this.tasks.get(taskId);
+    let task = this.tasks.get(taskId);
+    if (!task) {
+      task = await this.getTaskAsync(taskId);
+    }
     if (!task) throw new Error(`Task '${taskId}' not found`);
 
     const agent = this.agents.get(task.assigned_agent);
@@ -237,11 +268,11 @@ export class TaskManager {
       task.updated_at = new Date().toISOString();
       task.completed_at = task.updated_at;
 
-      aiDatabase.updateTask(taskId, {
+      await aiDatabase.updateTask(taskId, {
         status: 'failed',
         error: task.error,
         completed_at: task.completed_at
-      }).catch(() => {});
+      });
 
       eventBus.emit('task.failed', task, task.metadata as any, webhookUrl);
       return task;
@@ -250,10 +281,10 @@ export class TaskManager {
     task.status = 'running';
     task.updated_at = new Date().toISOString();
 
-    aiDatabase.updateTask(taskId, {
+    await aiDatabase.updateTask(taskId, {
       status: 'running',
       updated_at: task.updated_at
-    }).catch(() => {});
+    });
 
     eventBus.emit('task.started', task, task.metadata as any, webhookUrl);
 
@@ -294,11 +325,11 @@ export class TaskManager {
         task.updated_at = new Date().toISOString();
         task.completed_at = task.updated_at;
 
-        aiDatabase.updateTask(taskId, {
+        await aiDatabase.updateTask(taskId, {
           status: 'completed',
           result: result.data,
           completed_at: task.completed_at
-        }).catch(() => {});
+        });
 
         this.recordAction({
           task_id: taskId,
@@ -323,11 +354,11 @@ export class TaskManager {
         task.updated_at = new Date().toISOString();
         task.completed_at = task.updated_at;
 
-        aiDatabase.updateTask(taskId, {
+        await aiDatabase.updateTask(taskId, {
           status: 'failed',
           error: task.error,
           completed_at: task.completed_at
-        }).catch(() => {});
+        });
 
         this.recordAction({
           task_id: taskId,
@@ -351,11 +382,11 @@ export class TaskManager {
       task.updated_at = new Date().toISOString();
       task.completed_at = task.updated_at;
 
-      aiDatabase.updateTask(taskId, {
+      await aiDatabase.updateTask(taskId, {
         status: 'failed',
         error: task.error,
         completed_at: task.completed_at
-      }).catch(() => {});
+      });
 
       this.recordAction({
         task_id: taskId,
@@ -387,7 +418,10 @@ export class TaskManager {
    * Approves a waiting task and resumes execution.
    */
   public async approveTask(approvalId: string, decidedBy = 'admin', reason = 'Approved by editor'): Promise<{ success: boolean; task?: AiTask; error?: string }> {
-    const approval = this.approvals.get(approvalId);
+    let approval = this.approvals.get(approvalId);
+    if (!approval) {
+      approval = await this.getApprovalAsync(approvalId);
+    }
     if (!approval) return { success: false, error: 'Approval request not found' };
     if (approval.status !== 'pending') return { success: false, error: `Approval is already ${approval.status}` };
 
@@ -396,21 +430,24 @@ export class TaskManager {
     approval.decision_reason = reason;
     approval.decided_at = new Date().toISOString();
 
-    aiDatabase.updateApproval(approvalId, {
+    await aiDatabase.updateApproval(approvalId, {
       status: 'approved',
       decided_by: decidedBy,
       decision_reason: reason,
       decided_at: approval.decided_at
-    }).catch(() => {});
+    });
 
     eventBus.emit('approval.decided', approval);
 
     if (approval.task_id) {
-      const task = this.tasks.get(approval.task_id);
+      let task = this.tasks.get(approval.task_id);
+      if (!task) {
+        task = await this.getTaskAsync(approval.task_id);
+      }
       if (task) {
         task.status = 'queued';
         task.updated_at = new Date().toISOString();
-        aiDatabase.updateTask(task.id, { status: 'queued', updated_at: task.updated_at }).catch(() => {});
+        await aiDatabase.updateTask(task.id, { status: 'queued', updated_at: task.updated_at });
         this.executeTask(task.id).catch(() => {});
         return { success: true, task };
       }
@@ -423,7 +460,10 @@ export class TaskManager {
    * Rejects a waiting task.
    */
   public async rejectTask(approvalId: string, decidedBy = 'admin', reason = 'Rejected by editor'): Promise<{ success: boolean; task?: AiTask; error?: string }> {
-    const approval = this.approvals.get(approvalId);
+    let approval = this.approvals.get(approvalId);
+    if (!approval) {
+      approval = await this.getApprovalAsync(approvalId);
+    }
     if (!approval) return { success: false, error: 'Approval request not found' };
     if (approval.status !== 'pending') return { success: false, error: `Approval is already ${approval.status}` };
 
@@ -432,28 +472,31 @@ export class TaskManager {
     approval.decision_reason = reason;
     approval.decided_at = new Date().toISOString();
 
-    aiDatabase.updateApproval(approvalId, {
+    await aiDatabase.updateApproval(approvalId, {
       status: 'rejected',
       decided_by: decidedBy,
       decision_reason: reason,
       decided_at: approval.decided_at
-    }).catch(() => {});
+    });
 
     eventBus.emit('approval.decided', approval);
 
     if (approval.task_id) {
-      const task = this.tasks.get(approval.task_id);
+      let task = this.tasks.get(approval.task_id);
+      if (!task) {
+        task = await this.getTaskAsync(approval.task_id);
+      }
       if (task) {
         task.status = 'cancelled';
         task.error = `Rejected by human supervisor: ${reason}`;
         task.updated_at = new Date().toISOString();
         task.completed_at = task.updated_at;
 
-        aiDatabase.updateTask(task.id, {
+        await aiDatabase.updateTask(task.id, {
           status: 'cancelled',
           error: task.error,
           completed_at: task.completed_at
-        }).catch(() => {});
+        });
 
         eventBus.emit('task.failed', task, task.metadata as any);
         return { success: true, task };
@@ -514,10 +557,44 @@ export class TaskManager {
 
     const dbTask = await aiDatabase.getTask(taskId);
     if (dbTask) {
+      if (!dbTask.policy_level) {
+        dbTask.policy_level = PolicyEngine.evaluateAction(dbTask.task_type).level;
+      }
+      if (!dbTask.metadata) {
+        dbTask.metadata = {
+          requestId: dbTask.id,
+          idempotencyKey: dbTask.idempotency_key || undefined,
+          source: 'database_recovery'
+        };
+      }
+      if (!dbTask.timeout_ms) {
+        dbTask.timeout_ms = 60000;
+      }
       this.tasks.set(dbTask.id, dbTask);
+      if (dbTask.idempotency_key) {
+        this.idempotencyIndex.set(dbTask.idempotency_key, dbTask.id);
+      }
       return dbTask;
     }
     return undefined;
+  }
+
+  public async getApprovalAsync(approvalId: string): Promise<AiApproval | undefined> {
+    const cached = this.approvals.get(approvalId);
+    if (cached) return cached;
+
+    const dbApproval = await aiDatabase.getApproval(approvalId);
+    if (dbApproval) {
+      this.approvals.set(dbApproval.id, dbApproval);
+      return dbApproval;
+    }
+    return undefined;
+  }
+
+  public clearMemoryCache(): void {
+    this.tasks.clear();
+    this.approvals.clear();
+    this.idempotencyIndex.clear();
   }
 
   public listTasks(limit = 50, status?: AiTaskStatus): AiTask[] {
@@ -528,6 +605,23 @@ export class TaskManager {
       list = list.filter(t => t.status === status);
     }
     return list.slice(0, limit);
+  }
+
+  public async listTasksAsync(limit = 50, status?: AiTaskStatus): Promise<AiTask[]> {
+    const dbTasks = await aiDatabase.listTasks(limit, status);
+    if (dbTasks && dbTasks.length > 0) {
+      for (const t of dbTasks) {
+        if (!t.policy_level) {
+          t.policy_level = PolicyEngine.evaluateAction(t.task_type).level;
+        }
+        this.tasks.set(t.id, t);
+        if (t.idempotency_key) {
+          this.idempotencyIndex.set(t.idempotency_key, t.id);
+        }
+      }
+      return dbTasks;
+    }
+    return this.listTasks(limit, status);
   }
 
   public listActions(limit = 50): AiAction[] {
@@ -542,6 +636,17 @@ export class TaskManager {
       list = list.filter(a => a.status === status);
     }
     return list.slice(0, limit);
+  }
+
+  public async listApprovalsAsync(status?: 'pending' | 'approved' | 'rejected', limit = 50): Promise<AiApproval[]> {
+    const dbApprovals = await aiDatabase.listApprovals(status);
+    if (dbApprovals && dbApprovals.length > 0) {
+      for (const a of dbApprovals) {
+        this.approvals.set(a.id, a);
+      }
+      return dbApprovals.slice(0, limit);
+    }
+    return this.listApprovals(status, limit);
   }
 
   public listAlerts(includeDismissed = false): AiAlert[] {

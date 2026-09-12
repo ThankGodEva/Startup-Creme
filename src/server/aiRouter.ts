@@ -191,10 +191,10 @@ aiRouter.post('/tasks', taskLimiter, async (req: AuthenticatedAutomationRequest,
   }
 });
 
-aiRouter.get('/tasks', (req: Request, res: Response) => {
+aiRouter.get('/tasks', async (req: Request, res: Response) => {
   const limit = parseInt(req.query.limit as string, 10) || 50;
   const status = req.query.status as any;
-  const tasks = taskManager.listTasks(limit, status);
+  const tasks = await taskManager.listTasksAsync(limit, status);
   res.json({ tasks, total: tasks.length });
 });
 
@@ -219,7 +219,10 @@ aiRouter.get('/tasks/:id', async (req: Request, res: Response) => {
   // Retrieve approval details if task is paused in human review
   let approvalDetails = null;
   if (task.approval_id) {
-    const approval = taskManager.listApprovals().find(a => a.id === task.approval_id);
+    let approval = taskManager.listApprovals().find(a => a.id === task.approval_id);
+    if (!approval) {
+      approval = await taskManager.getApprovalAsync(task.approval_id);
+    }
     if (approval) {
       approvalDetails = {
         id: approval.id,
@@ -267,9 +270,9 @@ aiRouter.get('/tasks/:id', async (req: Request, res: Response) => {
 // --------------------------------------------------------------------
 // 4. Human Approval Workflow
 // --------------------------------------------------------------------
-aiRouter.get('/approvals', (req: Request, res: Response) => {
+aiRouter.get('/approvals', async (req: Request, res: Response) => {
   const status = req.query.status as any;
-  const approvals = taskManager.listApprovals(status);
+  const approvals = await taskManager.listApprovalsAsync(status);
   res.json({ approvals, count: approvals.length });
 });
 

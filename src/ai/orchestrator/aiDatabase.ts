@@ -86,6 +86,8 @@ export class AIDatabase {
 
   public async getTask(taskId: string): Promise<AiTask | null> {
     if (!this.client || !this.isConfigured) return null;
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskId);
+    if (!isUUID) return null;
     try {
       const { data, error } = await this.client
         .from('ai_tasks')
@@ -304,6 +306,28 @@ export class AIDatabase {
     } catch (err: any) {
       console.warn('[AIDatabase] updateApproval exception:', err?.message);
       return false;
+    }
+  }
+
+  public async getApproval(approvalId: string): Promise<AiApproval | null> {
+    if (!this.client || !this.isConfigured) return null;
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(approvalId);
+    if (!isUUID) return null;
+    try {
+      const { data, error } = await this.client
+        .from('ai_approvals')
+        .select('*')
+        .eq('id', approvalId)
+        .maybeSingle();
+
+      if (error) {
+        console.warn('[AIDatabase] getApproval error:', error.message);
+        return null;
+      }
+      return data as AiApproval | null;
+    } catch (err: any) {
+      console.warn('[AIDatabase] getApproval exception:', err?.message);
+      return null;
     }
   }
 

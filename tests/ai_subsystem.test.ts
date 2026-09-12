@@ -233,6 +233,84 @@ describe('StartupCrème AI Operating Subsystem - Foundation Phase Tests', () => 
     });
   });
 
+  describe('Durable Supabase Persistence & Serverless Cold-Start Resilience', () => {
+    test('Memory cold-start recovery: task is recovered from Supabase after memory cache is cleared', async () => {
+      const tm = TaskManager.getInstance();
+      const { task } = await tm.submitTask({
+        taskType: 'research_topic',
+        assignedAgent: 'agent_research',
+        payload: { topic: 'Cold Start Resilience in Distributed Systems' }
+      });
+      assert.ok(task.id);
+
+      // Simulate serverless cold start / fresh instance by wiping in-memory map
+      tm.clearMemoryCache();
+      assert.equal(tm.getTask(task.id), undefined);
+
+      // Durable async retrieval loads the task from Supabase into memory
+      const recovered = await tm.getTaskAsync(task.id);
+      assert.ok(recovered, 'Task should be recovered from Supabase database');
+      assert.equal(recovered?.id, task.id);
+      assert.equal(recovered?.task_type, 'research_topic');
+      assert.equal(tm.getTask(task.id)?.id, task.id, 'Task should now be cached in memory');
+    });
+
+    test('Cold executeTask(): loads and executes task from Supabase when absent from memory', async () => {
+      const tm = TaskManager.getInstance();
+      const { task } = await tm.submitTask({
+        taskType: 'research_topic',
+        assignedAgent: 'agent_research',
+        payload: { topic: 'Cold Execution Handling' }
+      });
+
+      // Clear memory cache so executeTask sees no in-memory record
+      tm.clearMemoryCache();
+      assert.equal(tm.getTask(task.id), undefined);
+
+      // Call executeTask directly on the cold instance
+      const executed = await tm.executeTask(task.id);
+      assert.ok(executed);
+      assert.equal(executed.id, task.id);
+      assert.ok(['running', 'completed'].includes(executed.status));
+
+      // Verify that the task was loaded into memory and updated in the database
+      const cached = tm.getTask(task.id);
+      assert.ok(cached);
+      assert.equal(cached?.id, task.id);
+    });
+
+    test('Idempotency across memory loss: reuses database record when memory cache is wiped', async () => {
+      const tm = TaskManager.getInstance();
+      const idempotencyKey = `serverless_idem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+      // Submit first task
+      const first = await tm.submitTask({
+        taskType: 'research_topic',
+        assignedAgent: 'agent_research',
+        payload: { topic: 'Serverless Idempotency Persistence' },
+        idempotencyKey
+      });
+      assert.equal(first.isExisting, false);
+      assert.ok(first.task.id);
+
+      // Simulate a different runtime instance with completely cold memory
+      tm.clearMemoryCache();
+      assert.equal(tm.getTask(first.task.id), undefined);
+
+      // Submit the same task again with the same idempotency key
+      const second = await tm.submitTask({
+        taskType: 'research_topic',
+        assignedAgent: 'agent_research',
+        payload: { topic: 'Serverless Idempotency Persistence' },
+        idempotencyKey
+      });
+
+      // Database idempotency index must match and prevent duplicate execution
+      assert.equal(second.isExisting, true);
+      assert.equal(second.task.id, first.task.id);
+    });
+  });
+
   after(() => {
     setTimeout(() => {
       process.exit(0);
