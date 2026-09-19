@@ -1039,7 +1039,15 @@ class StartupCremeStore {
 
   // Admin CRUD for Posts
   public async savePost(post: Partial<Post>): Promise<{ success: boolean; post: Post; error?: string }> {
-    const existingIndex = this.posts.findIndex(p => p.id === post.id || (p.slug === post.slug && p.locale === post.locale && p.vertical === post.vertical));
+    const isUUID = (val?: string): boolean =>
+      Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
+    // 1. Identify existing post in memory by ID or composite key (slug + locale + vertical)
+    const existingIndex = this.posts.findIndex(p => 
+      (post.id && p.id === post.id) || 
+      (p.slug === post.slug && p.locale === post.locale && p.vertical === post.vertical)
+    );
+    const originalPost = existingIndex >= 0 ? { ...this.posts[existingIndex] } : null;
     const now = new Date().toISOString();
     let savedPost: Post;
 
@@ -1072,7 +1080,7 @@ class StartupCremeStore {
         tags: post.tags || ['Finance', 'Tech'],
         reading_time_minutes: post.reading_time_minutes || 5,
         word_count: post.word_count || 800,
-        created_at: now,
+        created_at: post.created_at || now,
         updated_at: now,
       };
       this.posts.unshift(savedPost);
@@ -1088,7 +1096,7 @@ class StartupCremeStore {
       ? JSON.stringify(savedPost.content)
       : savedPost.content;
 
-    const postPayload = {
+    const basePayload = {
       slug: savedPost.slug,
       locale: savedPost.locale,
       vertical: savedPost.vertical,
@@ -1107,45 +1115,102 @@ class StartupCremeStore {
       tags: savedPost.tags,
       reading_time_minutes: savedPost.reading_time_minutes,
       word_count: savedPost.word_count,
-      created_at: savedPost.created_at,
-      updated_at: savedPost.updated_at,
+      updated_at: now,
     };
 
     try {
-      // Direct INSERT into posts table
-      let res = await supabaseExecute((client) =>
-        client.from('posts').insert(postPayload).select()
-      );
-
-      // On conflict or error (e.g. duplicate slug), append random unique characters to slug and retry INSERT
-      if (res.error) {
-        console.warn('Initial post insert failed (possible slug conflict):', res.error?.message || res.error);
-        const randomSuffix = Math.random().toString(36).substring(2, 7);
-        const uniqueSlug = `${savedPost.slug}-${randomSuffix}`;
-        postPayload.slug = uniqueSlug;
-        savedPost.slug = uniqueSlug;
-
-        res = await supabaseExecute((client) =>
-          client.from('posts').insert(postPayload).select()
-        );
+      // Determine if this post already has an existing database record in Supabase:
+      let targetDbId: string | null = null;
+      if (isUUID(savedPost.id)) {
+        targetDbId = savedPost.id;
+      } else if (originalPost && isUUID(originalPost.id)) {
+        targetDbId = originalPost.id;
+      } else if (isUUID(post.id)) {
+        targetDbId = post.id;
       }
 
+      // If no UUID yet, check if record exists in DB by original or target slug
+      if (!targetDbId) {
+        const slugToCheck = originalPost?.slug || savedPost.slug;
+        if (slugToCheck) {
+          const { data: existingRow } = await supabaseExecute((client) =>
+            client.from('posts').select('id').eq('slug', slugToCheck).maybeSingle()
+          );
+          if (existingRow?.id && isUUID(existingRow.id)) {
+            targetDbId = existingRow.id;
+            savedPost.id = existingRow.id;
+            if (existingIndex >= 0) {
+              this.posts[existingIndex].id = existingRow.id;
+            }
+          }
+        }
+      }
+
+      // If existing database record found, execute UPDATE
+      if (targetDbId) {
+        const res = await supabaseExecute((client) =>
+          client.from('posts').update(basePayload).eq('id', targetDbId).select()
+        );
+
+        if (res.error) {
+          const errorMsg = res.error?.message || String(res.error);
+          console.error('Failed to update post in Supabase:', errorMsg);
+          if (res.error?.code === '23505' || errorMsg.includes('unique') || errorMsg.includes('duplicate key')) {
+            return {
+              success: false,
+              post: savedPost,
+              error: `An article with the slug "${savedPost.slug}" already exists in the ${savedPost.vertical} vertical.`
+            };
+          }
+          return { success: false, post: savedPost, error: errorMsg };
+        }
+
+        if (res.data && res.data[0]) {
+          savedPost.id = res.data[0].id;
+          savedPost.updated_at = res.data[0].updated_at;
+          this.persistCache();
+          this.notify();
+          console.log('Post updated in Supabase database successfully:', res.data[0].id);
+          return { success: true, post: savedPost };
+        }
+      }
+
+      // If no existing record was found in DB, execute INSERT
+      const insertPayload = {
+        ...basePayload,
+        created_at: savedPost.created_at || now,
+      };
+
+      let res = await supabaseExecute((client) =>
+        client.from('posts').insert(insertPayload).select()
+      );
+
       if (res.error) {
-        const errorMsg = res.error.message || String(res.error);
+        const errorMsg = res.error?.message || String(res.error);
         console.error('Failed to insert post into Supabase database:', errorMsg);
+        if (res.error?.code === '23505' || errorMsg.includes('unique') || errorMsg.includes('duplicate key')) {
+          return {
+            success: false,
+            post: savedPost,
+            error: `An article with the slug "${savedPost.slug}" already exists in the ${savedPost.vertical} vertical. Please choose a different slug.`
+          };
+        }
         return { success: false, post: savedPost, error: errorMsg };
       }
 
       if (res.data && res.data[0]) {
         savedPost.id = res.data[0].id;
+        savedPost.created_at = res.data[0].created_at;
+        savedPost.updated_at = res.data[0].updated_at;
+        this.persistCache();
         this.notify();
-        console.log('Post inserted into Supabase database successfully:', res.data[0]);
+        console.log('Post inserted into Supabase database successfully:', res.data[0].id);
       }
 
       return { success: true, post: savedPost };
     } catch (err: any) {
       const exceptionMsg = err?.message || 'Database execution exception';
-      console.error('Exception during post insert to Supabase:', exceptionMsg);
+      console.error('Exception during post save to Supabase:', exceptionMsg);
       return { success: false, post: savedPost, error: exceptionMsg };
     }
   }
@@ -1156,10 +1221,17 @@ class StartupCremeStore {
     this.persistCache();
     this.notify();
 
-    if (postToDelete) {
-      await supabaseExecute((client) =>
-        client.from('posts').delete().or(`id.eq.${id},slug.eq.${postToDelete.slug}`)
-      );
+    if (postToDelete && isSupabaseConfigured()) {
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+      if (isUUID) {
+        await supabaseExecute((client) =>
+          client.from('posts').delete().eq('id', id)
+        );
+      } else if (postToDelete.slug) {
+        await supabaseExecute((client) =>
+          client.from('posts').delete().eq('slug', postToDelete.slug)
+        );
+      }
     }
   }
 
@@ -1171,9 +1243,18 @@ class StartupCremeStore {
       this.persistCache();
       this.notify();
 
-      await supabaseExecute((client) =>
-        client.from('posts').update({ status: post.status, updated_at: post.updated_at }).or(`id.eq.${id},slug.eq.${post.slug}`)
-      );
+      if (isSupabaseConfigured()) {
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+        if (isUUID) {
+          await supabaseExecute((client) =>
+            client.from('posts').update({ status: post.status, updated_at: post.updated_at }).eq('id', id)
+          );
+        } else if (post.slug) {
+          await supabaseExecute((client) =>
+            client.from('posts').update({ status: post.status, updated_at: post.updated_at }).eq('slug', post.slug)
+          );
+        }
+      }
     }
   }
 

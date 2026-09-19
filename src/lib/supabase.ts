@@ -1,19 +1,19 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-let runtimeUrl = '';
-let runtimeKey = '';
+let runtimeUrl: string | null = null;
+let runtimeKey: string | null = null;
 
 // Helper to retrieve environment credentials
 export function getSupabaseCredentials() {
   const url = 
-    runtimeUrl ||
+    runtimeUrl !== null ? runtimeUrl :
     (typeof process !== 'undefined' && process.env?.SUPABASE_URL) || 
     (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_URL) || 
     (import.meta.env?.VITE_SUPABASE_URL as string) || 
     '';
 
   const anonKey = 
-    runtimeKey ||
+    runtimeKey !== null ? runtimeKey :
     (typeof process !== 'undefined' && process.env?.SUPABASE_ANON_KEY) || 
     (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_ANON_KEY) || 
     (import.meta.env?.VITE_SUPABASE_ANON_KEY as string) || 
@@ -60,15 +60,19 @@ export function setSupabaseCredentials(url: string, anonKey: string) {
   runtimeKey = anonKey.trim();
 
   activeClientUrl = runtimeUrl;
-  activeClient = createClient(runtimeUrl, runtimeKey, {
-    db: {
-      schema: 'startupcreme',
-    },
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-    },
-  });
+  if (runtimeUrl && runtimeKey) {
+    activeClient = createClient(runtimeUrl, runtimeKey, {
+      db: {
+        schema: 'startupcreme',
+      },
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+      },
+    });
+  } else {
+    activeClient = null;
+  }
 }
 
 export function isSupabaseConfigured(): boolean {
