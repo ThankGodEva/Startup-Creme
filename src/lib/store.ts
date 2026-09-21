@@ -656,10 +656,20 @@ class StartupCremeStore {
       }
       this.discussionComments = groupedDiscComments;
 
-      // Fetch Article Comments strictly from startupcreme schema
-      const { data: postCommentsData } = await supabaseExecute((client) =>
-        client.from('comments').select('*').order('created_at', { ascending: false })
+      // Fetch Article Comments strictly from startupcreme.public_comments view to enforce privacy
+      let postCommentsData: any[] | null = null;
+      const viewRes = await supabaseExecute((client) =>
+        client.from('public_comments').select('*').order('created_at', { ascending: false })
       );
+      if (viewRes.data) {
+        postCommentsData = viewRes.data;
+      } else {
+        // Fallback without ever requesting author_email
+        const fallbackRes = await supabaseExecute((client) =>
+          client.from('comments').select('id, post_id, user_id, author_name, author_avatar, content, created_at, updated_at').order('created_at', { ascending: false })
+        );
+        postCommentsData = fallbackRes.data || null;
+      }
 
       const groupedPostComments: Record<string, PostComment[]> = {};
       if (postCommentsData && postCommentsData.length > 0) {
@@ -671,7 +681,7 @@ class StartupCremeStore {
             groupedPostComments[c.post_id].push({
               id: c.id,
               post_id: c.post_id,
-              user_id: c.user_id || 'user-anon',
+              user_id: c.user_id || null,
               author_name: c.author_name || 'Member',
               author_avatar: c.author_avatar,
               content: c.content,
@@ -697,9 +707,34 @@ class StartupCremeStore {
 
   public setCurrentUser(user: UserProfile | null) {
     this.currentUser = user;
+    if (user && user.email) {
+      const lowerEmail = user.email.trim().toLowerCase();
+      // Auto-sync previous guest comments matching this user's email address
+      let syncedCount = 0;
+      Object.keys(this.postComments).forEach(key => {
+        this.postComments[key] = this.postComments[key].map(comment => {
+          if (!comment.user_id && comment.author_email && comment.author_email.toLowerCase() === lowerEmail) {
+            syncedCount++;
+            return {
+              ...comment,
+              user_id: user.id,
+              author_avatar: user.avatar_url || comment.author_avatar,
+            };
+          }
+          return comment;
+        });
+      });
+      if (syncedCount > 0) {
+        this.persistCache();
+      }
+    }
     this.notify();
     if (user) {
       this.refreshCurrentUserRole().catch(() => {});
+      // Refresh comments from DB to fetch server-synced guest comments
+      if (isSupabaseConfigured()) {
+        this.syncFromSupabase().catch(() => {});
+      }
     }
   }
 
@@ -937,8 +972,17 @@ class StartupCremeStore {
     );
   }
 
-  public async addPostComment(postId: string, content: string): Promise<PostComment | null> {
-    if (!this.currentUser) return null;
+  public async addPostComment(
+    postId: string,
+    content: string,
+    guestInfo?: { author_name: string; author_email: string }
+  ): Promise<PostComment | null> {
+    const isGuest = !this.currentUser;
+    if (isGuest && (!guestInfo || !guestInfo.author_name?.trim() || !guestInfo.author_email?.trim())) {
+      console.warn('Guest comment missing author_name or author_email');
+      return null;
+    }
+
     const now = new Date().toISOString();
     const commentId = `comment-${Date.now()}`;
 
@@ -971,13 +1015,19 @@ class StartupCremeStore {
       }
     }
 
+    const authorName = this.currentUser ? this.currentUser.full_name : guestInfo!.author_name.trim();
+    const authorEmail = this.currentUser ? (this.currentUser.email || null) : guestInfo!.author_email.trim().toLowerCase();
+    const authorAvatar = this.currentUser ? this.currentUser.avatar_url : null;
+    const userId = this.currentUser ? this.currentUser.id : null;
+
     const newComment: PostComment = {
       id: commentId,
       post_id: effectivePostId,
-      user_id: this.currentUser.id,
-      author_name: this.currentUser.full_name,
-      author_avatar: this.currentUser.avatar_url,
-      content,
+      user_id: userId,
+      author_name: authorName,
+      author_email: authorEmail,
+      author_avatar: authorAvatar,
+      content: content.trim(),
       created_at: now,
       updated_at: now,
     };
@@ -998,25 +1048,27 @@ class StartupCremeStore {
       }
     });
 
+    this.persistCache();
     this.notify();
 
     if (!isSupabaseConfigured()) {
       return newComment;
     }
 
-    const isValidUserUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(this.currentUser.id);
+    const isValidUserUUID = Boolean(userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId));
     const postCommentPayload = {
       post_id: effectivePostId,
-      user_id: isValidUserUUID ? this.currentUser.id : null,
-      author_name: this.currentUser.full_name,
-      author_avatar: this.currentUser.avatar_url,
-      content: content,
+      user_id: isValidUserUUID ? userId : null,
+      author_name: authorName,
+      author_email: authorEmail,
+      author_avatar: authorAvatar,
+      content: content.trim(),
       created_at: now,
       updated_at: now,
     };
 
     const res = await supabaseExecute((client) =>
-      client.from('comments').insert(postCommentPayload).select()
+      client.from('comments').insert(postCommentPayload).select('id, post_id, user_id, author_name, author_avatar, content, created_at, updated_at')
     );
 
     if (res.error) {
@@ -1030,6 +1082,7 @@ class StartupCremeStore {
         if (item) item.id = realCommentId;
       });
 
+      this.persistCache();
       this.notify();
       console.log('Article comment saved to Supabase startupcreme schema successfully:', res.data[0]);
     }

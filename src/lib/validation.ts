@@ -32,6 +32,12 @@ export const CommentSchema = z.object({
   parent_id: z.string().uuid().optional().nullable(),
 });
 
+export const GuestCommentSchema = z.object({
+  author_name: z.string().trim().min(2, 'Name must be at least 2 characters').max(60, 'Name cannot exceed 60 characters'),
+  author_email: z.string().trim().email('Please enter a valid email address').toLowerCase(),
+  content: z.string().trim().min(2, 'Comment must be at least 2 characters').max(2000, 'Comment cannot exceed 2000 characters'),
+});
+
 export function sanitizeHtmlText(str: string): string {
   if (!str) return '';
   return str

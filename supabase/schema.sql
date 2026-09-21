@@ -200,14 +200,25 @@ CREATE TABLE IF NOT EXISTS startupcreme.comments (
     post_id TEXT NOT NULL,
     user_id UUID REFERENCES startupcreme.users(id) ON DELETE SET NULL,
     author_name TEXT NOT NULL,
+    author_email TEXT NULL,
     author_avatar TEXT,
     content TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+
+    -- Validate that either user_id is present, or both author_name and author_email are validly specified
+    CONSTRAINT check_sc_comments_author CHECK (
+        (user_id IS NOT NULL) OR (
+            user_id IS NULL AND
+            author_name IS NOT NULL AND length(trim(author_name::text)) > 0 AND
+            author_email IS NOT NULL AND author_email::text ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+        )
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_sc_comments_post_id ON startupcreme.comments (post_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sc_comments_user_id ON startupcreme.comments (user_id);
+CREATE INDEX IF NOT EXISTS idx_sc_comments_user_id ON startupcreme.comments (user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sc_comments_guest_email ON startupcreme.comments (LOWER(author_email)) WHERE user_id IS NULL;
 
 ALTER TABLE startupcreme.comments ENABLE ROW LEVEL SECURITY;
 
@@ -216,16 +227,65 @@ CREATE POLICY "Public visitors can view comments"
     ON startupcreme.comments FOR SELECT
     USING (true);
 
+DROP POLICY IF EXISTS "Public and members can insert comments" ON startupcreme.comments;
 DROP POLICY IF EXISTS "Anyone can write comments" ON startupcreme.comments;
-CREATE POLICY "Anyone can write comments"
+CREATE POLICY "Public and members can insert comments"
     ON startupcreme.comments FOR INSERT
-    WITH CHECK (true);
+    WITH CHECK (
+        content IS NOT NULL AND length(trim(content::text)) > 0 AND
+        post_id IS NOT NULL AND
+        (
+            (user_id IS NOT NULL) OR
+            (user_id IS NULL AND author_name IS NOT NULL AND length(trim(author_name::text)) > 0 AND author_email IS NOT NULL AND length(trim(author_email::text)) > 0)
+        )
+    );
 
 DROP POLICY IF EXISTS "Users can manage own comments" ON startupcreme.comments;
 CREATE POLICY "Users can manage own comments"
     ON startupcreme.comments FOR ALL
     USING (auth.uid() = user_id OR auth.uid() IS NOT NULL)
     WITH CHECK (auth.uid() = user_id OR auth.uid() IS NOT NULL);
+
+-- Auto-Sync Trigger Function for Guest Comments
+CREATE OR REPLACE FUNCTION startupcreme.sync_guest_comments()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = startupcreme, public
+AS $$
+BEGIN
+    IF NEW.email IS NOT NULL AND length(trim(NEW.email::text)) > 0 THEN
+        UPDATE startupcreme.comments
+        SET user_id = NEW.id,
+            updated_at = timezone('utc'::text, now())
+        WHERE LOWER(author_email) = LOWER(trim(NEW.email::text))
+          AND user_id IS NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trigger_sync_guest_comments ON startupcreme.users;
+CREATE TRIGGER trigger_sync_guest_comments
+    AFTER INSERT ON startupcreme.users
+    FOR EACH ROW
+    EXECUTE FUNCTION startupcreme.sync_guest_comments();
+
+-- Public View for comments (Excludes author_email so emails can never leak)
+CREATE OR REPLACE VIEW startupcreme.public_comments AS
+SELECT
+    id,
+    post_id,
+    user_id,
+    author_name,
+    author_avatar,
+    content,
+    created_at,
+    updated_at
+FROM startupcreme.comments;
+
+GRANT SELECT ON startupcreme.public_comments TO anon, authenticated, service_role;
+GRANT INSERT ON startupcreme.comments TO anon, authenticated, service_role;
 
 -- --------------------------------------------------------------------
 -- 8. DISCUSSION FORUM TABLES

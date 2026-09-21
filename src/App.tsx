@@ -370,7 +370,7 @@ export default function App() {
             comments={store.getPostComments(selectedPost.id)}
             onBack={handleBack}
             currentUser={currentUser}
-            onAddComment={(content) => store.addPostComment(selectedPost.id, content)}
+            onAddComment={(content, guestInfo) => store.addPostComment(selectedPost.id, content, guestInfo)}
             isBookmarked={store.isBookmarked(selectedPost.id)}
             onToggleBookmark={() => store.toggleBookmark(selectedPost.id)}
             onOpenAuth={() => setShowAuthModal(true)}

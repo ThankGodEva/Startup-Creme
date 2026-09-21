@@ -53,9 +53,10 @@ export interface Post {
 export interface PostComment {
   id: string;
   post_id: string;
-  user_id: string;
+  user_id?: string | null;
   author_name: string;
-  author_avatar?: string;
+  author_email?: string | null;
+  author_avatar?: string | null;
   content: string;
   created_at: string;
   updated_at: string;

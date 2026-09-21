@@ -18,13 +18,15 @@ import {
 import { Post, PostComment, UserProfile, PostContentNode } from '../types';
 import { updatePageSEO } from '../lib/seo';
 import { normalizeImageUrl, getPostUrl } from '../lib/router';
+import { CommentForm } from './CommentForm';
+import { CommentList } from './CommentList';
 
 interface ArticleViewProps {
   post: Post;
   comments: PostComment[];
   onBack: () => void;
   currentUser: UserProfile | null;
-  onAddComment: (content: string) => void;
+  onAddComment: (content: string, guestInfo?: { author_name: string; author_email: string }) => Promise<any> | void;
   isBookmarked: boolean;
   onToggleBookmark: () => void;
   onOpenAuth: () => void;
@@ -204,7 +206,6 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
   relatedPosts = [],
   onSelectPost,
 }) => {
-  const [commentInput, setCommentInput] = useState('');
   const [copiedUrl, setCopiedUrl] = useState(false);
 
   useEffect(() => {
@@ -222,13 +223,6 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
     navigator.clipboard.writeText(window.location.href);
     setCopiedUrl(true);
     setTimeout(() => setCopiedUrl(false), 2500);
-  };
-
-  const handleCommentSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!commentInput.trim()) return;
-    onAddComment(commentInput.trim());
-    setCommentInput('');
   };
 
   const isFinance = post.vertical === 'finance';
@@ -604,84 +598,28 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
 
         {/* Article Comments Section */}
         <section className="mt-16 pt-10 border-t border-slate-200">
-          <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center justify-between mb-6">
             <h3 className="font-serif text-2xl font-bold text-slate-900 flex items-center gap-2">
-              <MessageCircle className="w-5 h-5 text-cyan-600" />
-              <span>Editorial Comments ({comments.length})</span>
+              <MessageCircle className="w-5 h-5 text-indigo-600" />
+              <span>Editorial Discussion</span>
             </h3>
+            <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+              {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
+            </span>
           </div>
 
-          {/* Comment Input */}
-          <div className="mb-8 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-            {currentUser ? (
-              <form onSubmit={handleCommentSubmit} className="space-y-3">
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-800">
-                  <img
-                    src={currentUser.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'}
-                    alt={currentUser.full_name}
-                    className="w-6 h-6 rounded-full"
-                  />
-                  <span>Commenting as {currentUser.full_name}</span>
-                </div>
-                <textarea
-                  value={commentInput}
-                  onChange={(e) => setCommentInput(e.target.value)}
-                  placeholder="Share professional insights or analysis on this article..."
-                  rows={3}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-cyan-500 transition-colors"
-                />
-                <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Post Comment</span>
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <div className="text-center py-4">
-                <p className="text-xs text-slate-600 mb-3">Sign in to participate in editorial analysis and post comments.</p>
-                <button
-                  onClick={onOpenAuth}
-                  className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-cyan-600 text-white font-bold text-xs shadow-xs"
-                >
-                  Sign In to Comment
-                </button>
-              </div>
-            )}
+          {/* Dedicated Comment Form */}
+          <div className="mb-8">
+            <CommentForm
+              postId={post.id}
+              currentUser={currentUser}
+              onSubmitComment={onAddComment}
+              onOpenAuth={onOpenAuth}
+            />
           </div>
 
-          {/* Comment List */}
-          <div className="space-y-4">
-            {comments.length === 0 ? (
-              <div className="text-center py-8 text-slate-500 text-xs font-mono">
-                No comments yet. Be the first to share analysis on this publication!
-              </div>
-            ) : (
-              comments.map(c => (
-                <div key={c.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2.5">
-                      <img
-                        src={c.author_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'}
-                        alt={c.author_name}
-                        className="w-7 h-7 rounded-full object-cover ring-1 ring-slate-200"
-                      />
-                      <div>
-                        <span className="text-xs font-bold text-slate-900">{c.author_name}</span>
-                        <span className="text-[10px] text-slate-500 ml-2">{new Date(c.created_at).toLocaleDateString()}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans pl-9">
-                    {c.content}
-                  </p>
-                </div>
-              ))
-            )}
-          </div>
+          {/* Dedicated Comment Feed & Items */}
+          <CommentList comments={comments} title="All Comments" />
         </section>
 
         {/* Related Posts Section (5 Latest Tech or Finance links) */}
