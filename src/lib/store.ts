@@ -189,16 +189,11 @@ class StartupCremeStore {
         }
       });
 
-      // 3. Auto-sync on window focus and periodic background poll
+      // 3. Auto-sync on window focus
       if (typeof window !== 'undefined') {
         window.addEventListener('focus', () => {
           this.refreshCurrentUserRole().catch(() => {});
         });
-        setInterval(() => {
-          if (this.currentUser) {
-            this.refreshCurrentUserRole().catch(() => {});
-          }
-        }, 15000);
       }
     } catch (e) {
       console.warn('Supabase auth listener error:', e);
