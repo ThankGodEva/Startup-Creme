@@ -26,10 +26,24 @@ export function updatePageSEO(options: {
 
   const desc = options.description || 'StartupCrème is the premier digital publication for Finance, Macro-economics, and Deep Technology.';
   const defaultImage = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630';
-  const imgUrl = options.ogImage ? normalizeImageUrl(options.ogImage) : defaultImage;
-  const currentUrl = options.canonicalUrl || window.location.href;
+  let imgUrl = options.ogImage ? normalizeImageUrl(options.ogImage) : defaultImage;
+  if (imgUrl.startsWith('/') && typeof window !== 'undefined') {
+    imgUrl = `${window.location.origin}${imgUrl}`;
+  }
+  const currentUrl = options.canonicalUrl || (typeof window !== 'undefined' ? window.location.href : 'https://www.startupcreme.com');
 
   setMetaTag('meta[name="description"]', 'name', 'description', desc);
+
+  // Canonical tag
+  if (typeof document !== 'undefined') {
+    let canonEl = document.querySelector('link[rel="canonical"]');
+    if (!canonEl) {
+      canonEl = document.createElement('link');
+      canonEl.setAttribute('rel', 'canonical');
+      document.head.appendChild(canonEl);
+    }
+    canonEl.setAttribute('href', currentUrl);
+  }
 
   // OpenGraph
   setMetaTag('meta[property="og:site_name"]', 'property', 'og:site_name', 'StartupCrème');
@@ -37,11 +51,16 @@ export function updatePageSEO(options: {
   setMetaTag('meta[property="og:title"]', 'property', 'og:title', fullTitle);
   setMetaTag('meta[property="og:description"]', 'property', 'og:description', desc);
   setMetaTag('meta[property="og:image"]', 'property', 'og:image', imgUrl);
+  setMetaTag('meta[property="og:image:secure_url"]', 'property', 'og:image:secure_url', imgUrl);
+  setMetaTag('meta[property="og:image:width"]', 'property', 'og:image:width', '1200');
+  setMetaTag('meta[property="og:image:height"]', 'property', 'og:image:height', '630');
+  setMetaTag('meta[property="og:image:alt"]', 'property', 'og:image:alt', fullTitle);
   setMetaTag('meta[property="og:url"]', 'property', 'og:url', currentUrl);
 
   // Twitter Card
   setMetaTag('meta[name="twitter:card"]', 'name', 'twitter:card', 'summary_large_image');
   setMetaTag('meta[name="twitter:site"]', 'name', 'twitter:site', '@startupcreme');
+  setMetaTag('meta[name="twitter:creator"]', 'name', 'twitter:creator', '@startupcreme');
   setMetaTag('meta[name="twitter:title"]', 'name', 'twitter:title', fullTitle);
   setMetaTag('meta[name="twitter:description"]', 'name', 'twitter:description', desc);
   setMetaTag('meta[name="twitter:image"]', 'name', 'twitter:image', imgUrl);

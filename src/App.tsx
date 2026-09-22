@@ -135,9 +135,16 @@ export default function App() {
         setLoadingTopicSlug(null);
       } else {
         const post = store.getPostBySlug(first);
+        const winPost = typeof window !== 'undefined' ? (window as any).__INITIAL_POST__ : null;
         if (post) {
           setSelectedPost(post);
           setActiveTab(post.vertical);
+          setSelectedTopic(null);
+          setLoadingArticleSlug(null);
+          setLoadingTopicSlug(null);
+        } else if (winPost && (winPost.slug === first || winPost.id === first)) {
+          setSelectedPost(winPost);
+          setActiveTab(winPost.vertical || 'finance');
           setSelectedTopic(null);
           setLoadingArticleSlug(null);
           setLoadingTopicSlug(null);
@@ -160,8 +167,15 @@ export default function App() {
       const slug = rest[1];
       if (first === 'discussions' || first === 'discussion') {
         const topic = store.getDiscussionTopicBySlug(slug);
+        const winTopic = typeof window !== 'undefined' ? (window as any).__INITIAL_TOPIC__ : null;
         if (topic) {
           setSelectedTopic(topic);
+          setActiveTab('discussion');
+          setSelectedPost(null);
+          setLoadingArticleSlug(null);
+          setLoadingTopicSlug(null);
+        } else if (winTopic && (winTopic.slug === slug || winTopic.id === slug)) {
+          setSelectedTopic(winTopic);
           setActiveTab('discussion');
           setSelectedPost(null);
           setLoadingArticleSlug(null);
@@ -193,9 +207,16 @@ export default function App() {
         setLoadingTopicSlug(null);
       } else {
         const post = store.getPostBySlug(slug, loc, first as ContentVertical) || store.getPostBySlug(slug);
+        const winPost = typeof window !== 'undefined' ? (window as any).__INITIAL_POST__ : null;
         if (post) {
           setSelectedPost(post);
           setActiveTab(post.vertical);
+          setSelectedTopic(null);
+          setLoadingArticleSlug(null);
+          setLoadingTopicSlug(null);
+        } else if (winPost && (winPost.slug === slug || winPost.id === slug)) {
+          setSelectedPost(winPost);
+          setActiveTab(winPost.vertical || (first as ContentVertical) || 'finance');
           setSelectedTopic(null);
           setLoadingArticleSlug(null);
           setLoadingTopicSlug(null);

@@ -5,6 +5,7 @@ import multer from 'multer';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { createClient } from '@supabase/supabase-js';
 import { aiRouter } from '../src/server/aiRouter';
+import { injectDynamicMetaTags } from './meta';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -84,25 +85,35 @@ function getR2Config() {
   return { accountId, accessKeyId, secretAccessKey, bucketName, publicUrl, isConfigured };
 }
 
+export interface CreateAppOptions {
+  serveHtml?: boolean;
+}
+
 /**
  * Express Application Factory
  * Creates and configures the authoritative Express API runtime for StartupCrème.
  * Can be imported by local standalone server (server.ts), test suites, or Vercel serverless adapter (api/index.ts).
  */
-export function createApp(): express.Express {
+export function createApp(options?: CreateAppOptions): express.Express {
   const app = express();
 
   app.use(express.json({ limit: '10mb' }));
 
-  // Vercel rewrite normalization middleware:
-  // When Vercel rewrites /api/(.*) to /api, Vercel sets req.url to /api while placing
+  // Vercel / Cloud Run rewrite normalization middleware:
+  // When Vercel rewrites requests to /api, Vercel sets req.url to /api while placing
   // the requested path in x-matched-path or x-forwarded-uri.
   // We normalize req.url so Express router always sees the original intended route.
   app.use((req, res, next) => {
-    const rawMatched = (req.headers['x-matched-path'] || req.headers['x-forwarded-uri']) as string | undefined;
+    const rawMatched = (
+      req.headers['x-matched-path'] ||
+      req.headers['x-forwarded-uri'] ||
+      req.headers['x-original-url'] ||
+      req.headers['x-rewrite-url']
+    ) as string | undefined;
+
     if (rawMatched && typeof rawMatched === 'string') {
       const cleanMatched = rawMatched.split('?')[0];
-      if (cleanMatched.startsWith('/api') && req.url !== cleanMatched) {
+      if (cleanMatched && cleanMatched !== '/api' && cleanMatched !== '/api/' && req.url !== cleanMatched) {
         const queryPart = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
         req.url = cleanMatched + queryPart;
       }
@@ -488,6 +499,68 @@ Sitemap: ${protocol}://${host}/sitemap.xml
       });
     }
   });
+
+  // --------------------------------------------------------------------
+  // Dynamic HTML & Open Graph Social Metadata Delivery
+  // Intercepts all non-API page requests to inject article-specific
+  // Open Graph, Twitter Cards, Schema.org JSON-LD, and SSR hydration data.
+  // --------------------------------------------------------------------
+  if (options?.serveHtml !== false) {
+    const distPath = path.join(process.cwd(), 'dist');
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath, { index: false }));
+    }
+
+    const loadHtmlTemplate = (): string => {
+      const candidates = [
+        path.join(process.cwd(), 'dist', 'index.html'),
+        path.join(process.cwd(), 'index.html'),
+        path.join(process.cwd(), 'public', 'index.html'),
+      ];
+      for (const p of candidates) {
+        try {
+          if (fs.existsSync(p)) return fs.readFileSync(p, 'utf-8');
+        } catch {
+          // ignore
+        }
+      }
+      return `<!doctype html><html lang="en"><head><meta charset="UTF-8" /><title>StartupCrème</title></head><body><div id="root"></div></body></html>`;
+    };
+
+    app.get('*', async (req, res, next) => {
+      const activePath = (req.url || req.path).split('?')[0].toLowerCase();
+      // Skip API endpoints, sitemaps, robots, or static asset extensions
+      if (
+        activePath.startsWith('/api') ||
+        activePath === '/sitemap.xml' ||
+        activePath === '/sitemap' ||
+        activePath === '/sitemap_index.xml' ||
+        activePath === '/robots.txt' ||
+        /\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot)$/i.test(activePath)
+      ) {
+        return next();
+      }
+
+      try {
+        const template = loadHtmlTemplate();
+        let host = (req.headers['x-forwarded-host'] || req.headers['host'] || 'www.startupcreme.com') as string;
+        if (Array.isArray(host)) host = host[0];
+        let protocol = (req.headers['x-forwarded-proto'] || req.protocol || 'https') as string;
+        if (Array.isArray(protocol)) protocol = protocol[0];
+
+        const targetUrl = req.url || req.originalUrl;
+        const dynamicHtml = await injectDynamicMetaTags(template, targetUrl, host, protocol);
+
+        res.status(200).set({
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=600'
+        }).send(dynamicHtml);
+      } catch (err) {
+        console.error('[SEO Render] Error rendering dynamic metadata:', err);
+        next(err);
+      }
+    });
+  }
 
   return app;
 }

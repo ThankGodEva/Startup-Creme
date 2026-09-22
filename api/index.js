@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import multer from "multer";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import { createClient as createClient3 } from "@supabase/supabase-js";
+import { createClient as createClient4 } from "@supabase/supabase-js";
 
 // src/server/aiRouter.ts
 import { Router } from "express";
@@ -170,11 +170,13 @@ var STARTUPCREME_CONSTITUTION = {
 
 // src/lib/supabase.ts
 import { createClient } from "@supabase/supabase-js";
-var runtimeUrl = "";
-var runtimeKey = "";
+var runtimeUrl = null;
+var runtimeKey = null;
 function getSupabaseCredentials() {
-  const url = runtimeUrl || typeof process !== "undefined" && process.env?.SUPABASE_URL || typeof process !== "undefined" && process.env?.VITE_SUPABASE_URL || import.meta.env?.VITE_SUPABASE_URL || "";
-  const anonKey = runtimeKey || typeof process !== "undefined" && process.env?.SUPABASE_ANON_KEY || typeof process !== "undefined" && process.env?.VITE_SUPABASE_ANON_KEY || import.meta.env?.VITE_SUPABASE_ANON_KEY || "";
+  const metaEnv = typeof import.meta !== "undefined" ? import.meta.env : void 0;
+  const procEnv = typeof process !== "undefined" ? process.env : void 0;
+  const url = runtimeUrl !== null ? runtimeUrl : procEnv?.SUPABASE_URL || procEnv?.VITE_SUPABASE_URL || metaEnv?.VITE_SUPABASE_URL || "";
+  const anonKey = runtimeKey !== null ? runtimeKey : procEnv?.SUPABASE_ANON_KEY || procEnv?.VITE_SUPABASE_ANON_KEY || metaEnv?.VITE_SUPABASE_ANON_KEY || "";
   const isConfigured = Boolean(
     url && anonKey && !url.includes("your-supabase-project") && !anonKey.includes("your-supabase-anon-key")
   );
@@ -771,9 +773,18 @@ var StartupCremeStore = class {
         });
       }
       this.discussionComments = groupedDiscComments;
-      const { data: postCommentsData } = await supabaseExecute(
-        (client) => client.from("comments").select("*").order("created_at", { ascending: false })
+      let postCommentsData = null;
+      const viewRes = await supabaseExecute(
+        (client) => client.from("public_comments").select("*").order("created_at", { ascending: false })
       );
+      if (viewRes.data) {
+        postCommentsData = viewRes.data;
+      } else {
+        const fallbackRes = await supabaseExecute(
+          (client) => client.from("comments").select("id, post_id, user_id, author_name, author_avatar, content, created_at, updated_at").order("created_at", { ascending: false })
+        );
+        postCommentsData = fallbackRes.data || null;
+      }
       const groupedPostComments = {};
       if (postCommentsData && postCommentsData.length > 0) {
         postCommentsData.forEach((c) => {
@@ -784,7 +795,7 @@ var StartupCremeStore = class {
             groupedPostComments[c.post_id].push({
               id: c.id,
               post_id: c.post_id,
-              user_id: c.user_id || "user-anon",
+              user_id: c.user_id || null,
               author_name: c.author_name || "Member",
               author_avatar: c.author_avatar,
               content: c.content,
@@ -807,10 +818,34 @@ var StartupCremeStore = class {
   }
   setCurrentUser(user) {
     this.currentUser = user;
+    if (user && user.email) {
+      const lowerEmail = user.email.trim().toLowerCase();
+      let syncedCount = 0;
+      Object.keys(this.postComments).forEach((key) => {
+        this.postComments[key] = this.postComments[key].map((comment) => {
+          if (!comment.user_id && comment.author_email && comment.author_email.toLowerCase() === lowerEmail) {
+            syncedCount++;
+            return {
+              ...comment,
+              user_id: user.id,
+              author_avatar: user.avatar_url || comment.author_avatar
+            };
+          }
+          return comment;
+        });
+      });
+      if (syncedCount > 0) {
+        this.persistCache();
+      }
+    }
     this.notify();
     if (user) {
       this.refreshCurrentUserRole().catch(() => {
       });
+      if (isSupabaseConfigured()) {
+        this.syncFromSupabase().catch(() => {
+        });
+      }
     }
   }
   switchDemoRole(role) {
@@ -1000,8 +1035,12 @@ var StartupCremeStore = class {
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
   }
-  async addPostComment(postId, content) {
-    if (!this.currentUser) return null;
+  async addPostComment(postId, content, guestInfo) {
+    const isGuest = !this.currentUser;
+    if (isGuest && (!guestInfo || !guestInfo.author_name?.trim() || !guestInfo.author_email?.trim())) {
+      console.warn("Guest comment missing author_name or author_email");
+      return null;
+    }
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const commentId = `comment-${Date.now()}`;
     let targetPost = this.posts.find((p) => p.id === postId || p.slug === postId);
@@ -1026,13 +1065,18 @@ var StartupCremeStore = class {
         effectivePostId = targetPost.id;
       }
     }
+    const authorName = this.currentUser ? this.currentUser.full_name : guestInfo.author_name.trim();
+    const authorEmail = this.currentUser ? this.currentUser.email || null : guestInfo.author_email.trim().toLowerCase();
+    const authorAvatar = this.currentUser ? this.currentUser.avatar_url : null;
+    const userId = this.currentUser ? this.currentUser.id : null;
     const newComment = {
       id: commentId,
       post_id: effectivePostId,
-      user_id: this.currentUser.id,
-      author_name: this.currentUser.full_name,
-      author_avatar: this.currentUser.avatar_url,
-      content,
+      user_id: userId,
+      author_name: authorName,
+      author_email: authorEmail,
+      author_avatar: authorAvatar,
+      content: content.trim(),
       created_at: now,
       updated_at: now
     };
@@ -1049,22 +1093,24 @@ var StartupCremeStore = class {
         this.postComments[k].unshift(newComment);
       }
     });
+    this.persistCache();
     this.notify();
     if (!isSupabaseConfigured()) {
       return newComment;
     }
-    const isValidUserUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(this.currentUser.id);
+    const isValidUserUUID = Boolean(userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId));
     const postCommentPayload = {
       post_id: effectivePostId,
-      user_id: isValidUserUUID ? this.currentUser.id : null,
-      author_name: this.currentUser.full_name,
-      author_avatar: this.currentUser.avatar_url,
-      content,
+      user_id: isValidUserUUID ? userId : null,
+      author_name: authorName,
+      author_email: authorEmail,
+      author_avatar: authorAvatar,
+      content: content.trim(),
       created_at: now,
       updated_at: now
     };
     const res = await supabaseExecute(
-      (client) => client.from("comments").insert(postCommentPayload).select()
+      (client) => client.from("comments").insert(postCommentPayload).select("id, post_id, user_id, author_name, author_avatar, content, created_at, updated_at")
     );
     if (res.error) {
       console.warn("Notice saving article comment to Supabase (using local state fallback):", res.error?.message || res.error);
@@ -1075,6 +1121,7 @@ var StartupCremeStore = class {
         const item = this.postComments[k]?.find((c) => c.id === commentId);
         if (item) item.id = realCommentId;
       });
+      this.persistCache();
       this.notify();
       console.log("Article comment saved to Supabase startupcreme schema successfully:", res.data[0]);
     }
@@ -1082,7 +1129,11 @@ var StartupCremeStore = class {
   }
   // Admin CRUD for Posts
   async savePost(post) {
-    const existingIndex = this.posts.findIndex((p) => p.id === post.id || p.slug === post.slug && p.locale === post.locale && p.vertical === post.vertical);
+    const isUUID = (val) => Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+    const existingIndex = this.posts.findIndex(
+      (p) => post.id && p.id === post.id || p.slug === post.slug && p.locale === post.locale && p.vertical === post.vertical
+    );
+    const originalPost = existingIndex >= 0 ? { ...this.posts[existingIndex] } : null;
     const now = (/* @__PURE__ */ new Date()).toISOString();
     let savedPost;
     if (existingIndex >= 0) {
@@ -1114,7 +1165,7 @@ var StartupCremeStore = class {
         tags: post.tags || ["Finance", "Tech"],
         reading_time_minutes: post.reading_time_minutes || 5,
         word_count: post.word_count || 800,
-        created_at: now,
+        created_at: post.created_at || now,
         updated_at: now
       };
       this.posts.unshift(savedPost);
@@ -1125,7 +1176,7 @@ var StartupCremeStore = class {
       return { success: true, post: savedPost };
     }
     const contentPayload = typeof savedPost.content === "object" ? JSON.stringify(savedPost.content) : savedPost.content;
-    const postPayload = {
+    const basePayload = {
       slug: savedPost.slug,
       locale: savedPost.locale,
       vertical: savedPost.vertical,
@@ -1144,37 +1195,88 @@ var StartupCremeStore = class {
       tags: savedPost.tags,
       reading_time_minutes: savedPost.reading_time_minutes,
       word_count: savedPost.word_count,
-      created_at: savedPost.created_at,
-      updated_at: savedPost.updated_at
+      updated_at: now
     };
     try {
+      let targetDbId = null;
+      if (isUUID(savedPost.id)) {
+        targetDbId = savedPost.id;
+      } else if (originalPost && isUUID(originalPost.id)) {
+        targetDbId = originalPost.id;
+      } else if (isUUID(post.id)) {
+        targetDbId = post.id;
+      }
+      if (!targetDbId) {
+        const slugToCheck = originalPost?.slug || savedPost.slug;
+        if (slugToCheck) {
+          const { data: existingRow } = await supabaseExecute(
+            (client) => client.from("posts").select("id").eq("slug", slugToCheck).maybeSingle()
+          );
+          if (existingRow?.id && isUUID(existingRow.id)) {
+            targetDbId = existingRow.id;
+            savedPost.id = existingRow.id;
+            if (existingIndex >= 0) {
+              this.posts[existingIndex].id = existingRow.id;
+            }
+          }
+        }
+      }
+      if (targetDbId) {
+        const res2 = await supabaseExecute(
+          (client) => client.from("posts").update(basePayload).eq("id", targetDbId).select()
+        );
+        if (res2.error) {
+          const errorMsg = res2.error?.message || String(res2.error);
+          console.error("Failed to update post in Supabase:", errorMsg);
+          if (res2.error?.code === "23505" || errorMsg.includes("unique") || errorMsg.includes("duplicate key")) {
+            return {
+              success: false,
+              post: savedPost,
+              error: `An article with the slug "${savedPost.slug}" already exists in the ${savedPost.vertical} vertical.`
+            };
+          }
+          return { success: false, post: savedPost, error: errorMsg };
+        }
+        if (res2.data && res2.data[0]) {
+          savedPost.id = res2.data[0].id;
+          savedPost.updated_at = res2.data[0].updated_at;
+          this.persistCache();
+          this.notify();
+          console.log("Post updated in Supabase database successfully:", res2.data[0].id);
+          return { success: true, post: savedPost };
+        }
+      }
+      const insertPayload = {
+        ...basePayload,
+        created_at: savedPost.created_at || now
+      };
       let res = await supabaseExecute(
-        (client) => client.from("posts").insert(postPayload).select()
+        (client) => client.from("posts").insert(insertPayload).select()
       );
       if (res.error) {
-        console.warn("Initial post insert failed (possible slug conflict):", res.error?.message || res.error);
-        const randomSuffix = Math.random().toString(36).substring(2, 7);
-        const uniqueSlug = `${savedPost.slug}-${randomSuffix}`;
-        postPayload.slug = uniqueSlug;
-        savedPost.slug = uniqueSlug;
-        res = await supabaseExecute(
-          (client) => client.from("posts").insert(postPayload).select()
-        );
-      }
-      if (res.error) {
-        const errorMsg = res.error.message || String(res.error);
+        const errorMsg = res.error?.message || String(res.error);
         console.error("Failed to insert post into Supabase database:", errorMsg);
+        if (res.error?.code === "23505" || errorMsg.includes("unique") || errorMsg.includes("duplicate key")) {
+          return {
+            success: false,
+            post: savedPost,
+            error: `An article with the slug "${savedPost.slug}" already exists in the ${savedPost.vertical} vertical. Please choose a different slug.`
+          };
+        }
         return { success: false, post: savedPost, error: errorMsg };
       }
       if (res.data && res.data[0]) {
         savedPost.id = res.data[0].id;
+        savedPost.created_at = res.data[0].created_at;
+        savedPost.updated_at = res.data[0].updated_at;
+        this.persistCache();
         this.notify();
-        console.log("Post inserted into Supabase database successfully:", res.data[0]);
+        console.log("Post inserted into Supabase database successfully:", res.data[0].id);
       }
       return { success: true, post: savedPost };
     } catch (err) {
       const exceptionMsg = err?.message || "Database execution exception";
-      console.error("Exception during post insert to Supabase:", exceptionMsg);
+      console.error("Exception during post save to Supabase:", exceptionMsg);
       return { success: false, post: savedPost, error: exceptionMsg };
     }
   }
@@ -1183,10 +1285,17 @@ var StartupCremeStore = class {
     this.posts = this.posts.filter((p) => p.id !== id);
     this.persistCache();
     this.notify();
-    if (postToDelete) {
-      await supabaseExecute(
-        (client) => client.from("posts").delete().or(`id.eq.${id},slug.eq.${postToDelete.slug}`)
-      );
+    if (postToDelete && isSupabaseConfigured()) {
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+      if (isUUID) {
+        await supabaseExecute(
+          (client) => client.from("posts").delete().eq("id", id)
+        );
+      } else if (postToDelete.slug) {
+        await supabaseExecute(
+          (client) => client.from("posts").delete().eq("slug", postToDelete.slug)
+        );
+      }
     }
   }
   async togglePostStatus(id) {
@@ -1196,9 +1305,18 @@ var StartupCremeStore = class {
       post.updated_at = (/* @__PURE__ */ new Date()).toISOString();
       this.persistCache();
       this.notify();
-      await supabaseExecute(
-        (client) => client.from("posts").update({ status: post.status, updated_at: post.updated_at }).or(`id.eq.${id},slug.eq.${post.slug}`)
-      );
+      if (isSupabaseConfigured()) {
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+        if (isUUID) {
+          await supabaseExecute(
+            (client) => client.from("posts").update({ status: post.status, updated_at: post.updated_at }).eq("id", id)
+          );
+        } else if (post.slug) {
+          await supabaseExecute(
+            (client) => client.from("posts").update({ status: post.status, updated_at: post.updated_at }).eq("slug", post.slug)
+          );
+        }
+      }
     }
   }
   // Discussion Forum Methods
@@ -2172,6 +2290,8 @@ var AIDatabase = class _AIDatabase {
   }
   async getTask(taskId) {
     if (!this.client || !this.isConfigured) return null;
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskId);
+    if (!isUUID) return null;
     try {
       const { data, error } = await this.client.from("ai_tasks").select("*").eq("id", taskId).maybeSingle();
       if (error) {
@@ -2352,6 +2472,22 @@ var AIDatabase = class _AIDatabase {
     } catch (err) {
       console.warn("[AIDatabase] updateApproval exception:", err?.message);
       return false;
+    }
+  }
+  async getApproval(approvalId) {
+    if (!this.client || !this.isConfigured) return null;
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(approvalId);
+    if (!isUUID) return null;
+    try {
+      const { data, error } = await this.client.from("ai_approvals").select("*").eq("id", approvalId).maybeSingle();
+      if (error) {
+        console.warn("[AIDatabase] getApproval error:", error.message);
+        return null;
+      }
+      return data;
+    } catch (err) {
+      console.warn("[AIDatabase] getApproval exception:", err?.message);
+      return null;
     }
   }
   async listApprovals(status) {
@@ -2600,13 +2736,22 @@ var TaskManager = class _TaskManager {
     if (options.idempotencyKey) {
       const existingTaskId = this.idempotencyIndex.get(options.idempotencyKey);
       if (existingTaskId) {
-        const existingTask = this.tasks.get(existingTaskId);
+        let existingTask = this.tasks.get(existingTaskId);
+        if (!existingTask) {
+          existingTask = await this.getTaskAsync(existingTaskId);
+        }
         if (existingTask) {
           return { task: existingTask, isExisting: true };
         }
       }
       const dbTask = await aiDatabase.findTaskByIdempotencyKey(options.idempotencyKey);
       if (dbTask) {
+        if (!dbTask.policy_level) {
+          dbTask.policy_level = PolicyEngine.evaluateAction(dbTask.task_type).level;
+        }
+        if (!dbTask.metadata) {
+          dbTask.metadata = correlation;
+        }
         this.tasks.set(dbTask.id, dbTask);
         this.idempotencyIndex.set(options.idempotencyKey, dbTask.id);
         return { task: dbTask, isExisting: true };
@@ -2633,24 +2778,19 @@ var TaskManager = class _TaskManager {
       created_at: now,
       updated_at: now
     };
-    this.tasks.set(taskId, task);
-    if (options.idempotencyKey) {
-      this.idempotencyIndex.set(options.idempotencyKey, taskId);
-    }
-    aiDatabase.insertTask(task).catch(() => {
-    });
-    eventBus.emit("task.created", task, correlation, options.webhookUrl);
     if (!policy.isAllowed) {
       task.status = "failed";
       task.error = policy.reason;
-      task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-      task.completed_at = task.updated_at;
-      aiDatabase.updateTask(taskId, {
-        status: "failed",
-        error: policy.reason,
-        completed_at: task.completed_at
-      }).catch(() => {
-      });
+      task.updated_at = now;
+      task.completed_at = now;
+      const persisted2 = await aiDatabase.insertTask(task);
+      if (!persisted2) {
+        throw new Error(`Failed to persist AI task: ${policy.reason}`);
+      }
+      this.tasks.set(taskId, task);
+      if (options.idempotencyKey) {
+        this.idempotencyIndex.set(options.idempotencyKey, taskId);
+      }
       this.recordAction({
         task_id: taskId,
         agent: assignedAgent,
@@ -2673,7 +2813,7 @@ var TaskManager = class _TaskManager {
     }
     if (policy.requiresApproval) {
       task.status = "waiting_approval";
-      task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+      task.updated_at = now;
       const approvalId = crypto3.randomUUID();
       const approval = {
         id: approvalId,
@@ -2686,15 +2826,20 @@ var TaskManager = class _TaskManager {
         payload: options.payload,
         created_at: now
       };
-      this.approvals.set(approvalId, approval);
       task.approval_id = approvalId;
-      aiDatabase.insertApproval(approval).catch(() => {
-      });
-      aiDatabase.updateTask(taskId, {
-        status: "waiting_approval",
-        approval_id: approvalId
-      }).catch(() => {
-      });
+      const approvalPersisted = await aiDatabase.insertApproval(approval);
+      if (!approvalPersisted) {
+        throw new Error("Failed to persist AI approval request");
+      }
+      const taskPersisted = await aiDatabase.insertTask(task);
+      if (!taskPersisted) {
+        throw new Error("Failed to persist AI task");
+      }
+      this.tasks.set(taskId, task);
+      this.approvals.set(approvalId, approval);
+      if (options.idempotencyKey) {
+        this.idempotencyIndex.set(options.idempotencyKey, taskId);
+      }
       this.recordAction({
         task_id: taskId,
         agent: assignedAgent,
@@ -2707,6 +2852,15 @@ var TaskManager = class _TaskManager {
       eventBus.emit("task.waiting_approval", { task, approval }, correlation, options.webhookUrl);
       return { task, isExisting: false };
     }
+    const persisted = await aiDatabase.insertTask(task);
+    if (!persisted) {
+      throw new Error("Failed to persist AI task");
+    }
+    this.tasks.set(taskId, task);
+    if (options.idempotencyKey) {
+      this.idempotencyIndex.set(options.idempotencyKey, taskId);
+    }
+    eventBus.emit("task.created", task, correlation, options.webhookUrl);
     this.executeTask(taskId, options.webhookUrl).catch((err) => {
       console.error(`[TaskManager] Background execution error on task ${taskId}:`, err);
     });
@@ -2716,7 +2870,10 @@ var TaskManager = class _TaskManager {
    * Internal worker loop executing an approved or green task with strict timeout safety.
    */
   async executeTask(taskId, webhookUrl) {
-    const task = this.tasks.get(taskId);
+    let task = this.tasks.get(taskId);
+    if (!task) {
+      task = await this.getTaskAsync(taskId);
+    }
     if (!task) throw new Error(`Task '${taskId}' not found`);
     const agent = this.agents.get(task.assigned_agent);
     if (!agent) {
@@ -2724,21 +2881,19 @@ var TaskManager = class _TaskManager {
       task.error = `Assigned agent '${task.assigned_agent}' is not registered.`;
       task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
       task.completed_at = task.updated_at;
-      aiDatabase.updateTask(taskId, {
+      await aiDatabase.updateTask(taskId, {
         status: "failed",
         error: task.error,
         completed_at: task.completed_at
-      }).catch(() => {
       });
       eventBus.emit("task.failed", task, task.metadata, webhookUrl);
       return task;
     }
     task.status = "running";
     task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-    aiDatabase.updateTask(taskId, {
+    await aiDatabase.updateTask(taskId, {
       status: "running",
       updated_at: task.updated_at
-    }).catch(() => {
     });
     eventBus.emit("task.started", task, task.metadata, webhookUrl);
     this.recordAction({
@@ -2771,11 +2926,10 @@ var TaskManager = class _TaskManager {
         task.result = result.data;
         task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
         task.completed_at = task.updated_at;
-        aiDatabase.updateTask(taskId, {
+        await aiDatabase.updateTask(taskId, {
           status: "completed",
           result: result.data,
           completed_at: task.completed_at
-        }).catch(() => {
         });
         this.recordAction({
           task_id: taskId,
@@ -2798,11 +2952,10 @@ var TaskManager = class _TaskManager {
         task.error = result.error || "Agent execution failed";
         task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
         task.completed_at = task.updated_at;
-        aiDatabase.updateTask(taskId, {
+        await aiDatabase.updateTask(taskId, {
           status: "failed",
           error: task.error,
           completed_at: task.completed_at
-        }).catch(() => {
         });
         this.recordAction({
           task_id: taskId,
@@ -2822,11 +2975,10 @@ var TaskManager = class _TaskManager {
       task.error = isTimeout ? `Task execution timed out after ${timeoutMs}ms` : err?.message || "Unknown execution failure";
       task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
       task.completed_at = task.updated_at;
-      aiDatabase.updateTask(taskId, {
+      await aiDatabase.updateTask(taskId, {
         status: "failed",
         error: task.error,
         completed_at: task.completed_at
-      }).catch(() => {
       });
       this.recordAction({
         task_id: taskId,
@@ -2854,28 +3006,32 @@ var TaskManager = class _TaskManager {
    * Approves a waiting task and resumes execution.
    */
   async approveTask(approvalId, decidedBy = "admin", reason = "Approved by editor") {
-    const approval = this.approvals.get(approvalId);
+    let approval = this.approvals.get(approvalId);
+    if (!approval) {
+      approval = await this.getApprovalAsync(approvalId);
+    }
     if (!approval) return { success: false, error: "Approval request not found" };
     if (approval.status !== "pending") return { success: false, error: `Approval is already ${approval.status}` };
     approval.status = "approved";
     approval.decided_by = decidedBy;
     approval.decision_reason = reason;
     approval.decided_at = (/* @__PURE__ */ new Date()).toISOString();
-    aiDatabase.updateApproval(approvalId, {
+    await aiDatabase.updateApproval(approvalId, {
       status: "approved",
       decided_by: decidedBy,
       decision_reason: reason,
       decided_at: approval.decided_at
-    }).catch(() => {
     });
     eventBus.emit("approval.decided", approval);
     if (approval.task_id) {
-      const task = this.tasks.get(approval.task_id);
+      let task = this.tasks.get(approval.task_id);
+      if (!task) {
+        task = await this.getTaskAsync(approval.task_id);
+      }
       if (task) {
         task.status = "queued";
         task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-        aiDatabase.updateTask(task.id, { status: "queued", updated_at: task.updated_at }).catch(() => {
-        });
+        await aiDatabase.updateTask(task.id, { status: "queued", updated_at: task.updated_at });
         this.executeTask(task.id).catch(() => {
         });
         return { success: true, task };
@@ -2887,33 +3043,37 @@ var TaskManager = class _TaskManager {
    * Rejects a waiting task.
    */
   async rejectTask(approvalId, decidedBy = "admin", reason = "Rejected by editor") {
-    const approval = this.approvals.get(approvalId);
+    let approval = this.approvals.get(approvalId);
+    if (!approval) {
+      approval = await this.getApprovalAsync(approvalId);
+    }
     if (!approval) return { success: false, error: "Approval request not found" };
     if (approval.status !== "pending") return { success: false, error: `Approval is already ${approval.status}` };
     approval.status = "rejected";
     approval.decided_by = decidedBy;
     approval.decision_reason = reason;
     approval.decided_at = (/* @__PURE__ */ new Date()).toISOString();
-    aiDatabase.updateApproval(approvalId, {
+    await aiDatabase.updateApproval(approvalId, {
       status: "rejected",
       decided_by: decidedBy,
       decision_reason: reason,
       decided_at: approval.decided_at
-    }).catch(() => {
     });
     eventBus.emit("approval.decided", approval);
     if (approval.task_id) {
-      const task = this.tasks.get(approval.task_id);
+      let task = this.tasks.get(approval.task_id);
+      if (!task) {
+        task = await this.getTaskAsync(approval.task_id);
+      }
       if (task) {
         task.status = "cancelled";
         task.error = `Rejected by human supervisor: ${reason}`;
         task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
         task.completed_at = task.updated_at;
-        aiDatabase.updateTask(task.id, {
+        await aiDatabase.updateTask(task.id, {
           status: "cancelled",
           error: task.error,
           completed_at: task.completed_at
-        }).catch(() => {
         });
         eventBus.emit("task.failed", task, task.metadata);
         return { success: true, task };
@@ -2970,10 +3130,41 @@ var TaskManager = class _TaskManager {
     if (cached) return cached;
     const dbTask = await aiDatabase.getTask(taskId);
     if (dbTask) {
+      if (!dbTask.policy_level) {
+        dbTask.policy_level = PolicyEngine.evaluateAction(dbTask.task_type).level;
+      }
+      if (!dbTask.metadata) {
+        dbTask.metadata = {
+          requestId: dbTask.id,
+          idempotencyKey: dbTask.idempotency_key || void 0,
+          source: "database_recovery"
+        };
+      }
+      if (!dbTask.timeout_ms) {
+        dbTask.timeout_ms = 6e4;
+      }
       this.tasks.set(dbTask.id, dbTask);
+      if (dbTask.idempotency_key) {
+        this.idempotencyIndex.set(dbTask.idempotency_key, dbTask.id);
+      }
       return dbTask;
     }
     return void 0;
+  }
+  async getApprovalAsync(approvalId) {
+    const cached = this.approvals.get(approvalId);
+    if (cached) return cached;
+    const dbApproval = await aiDatabase.getApproval(approvalId);
+    if (dbApproval) {
+      this.approvals.set(dbApproval.id, dbApproval);
+      return dbApproval;
+    }
+    return void 0;
+  }
+  clearMemoryCache() {
+    this.tasks.clear();
+    this.approvals.clear();
+    this.idempotencyIndex.clear();
   }
   listTasks(limit = 50, status) {
     let list = Array.from(this.tasks.values()).sort(
@@ -2983,6 +3174,22 @@ var TaskManager = class _TaskManager {
       list = list.filter((t) => t.status === status);
     }
     return list.slice(0, limit);
+  }
+  async listTasksAsync(limit = 50, status) {
+    const dbTasks = await aiDatabase.listTasks(limit, status);
+    if (dbTasks && dbTasks.length > 0) {
+      for (const t of dbTasks) {
+        if (!t.policy_level) {
+          t.policy_level = PolicyEngine.evaluateAction(t.task_type).level;
+        }
+        this.tasks.set(t.id, t);
+        if (t.idempotency_key) {
+          this.idempotencyIndex.set(t.idempotency_key, t.id);
+        }
+      }
+      return dbTasks;
+    }
+    return this.listTasks(limit, status);
   }
   listActions(limit = 50) {
     return this.actions.slice(0, limit);
@@ -2995,6 +3202,16 @@ var TaskManager = class _TaskManager {
       list = list.filter((a) => a.status === status);
     }
     return list.slice(0, limit);
+  }
+  async listApprovalsAsync(status, limit = 50) {
+    const dbApprovals = await aiDatabase.listApprovals(status);
+    if (dbApprovals && dbApprovals.length > 0) {
+      for (const a of dbApprovals) {
+        this.approvals.set(a.id, a);
+      }
+      return dbApprovals.slice(0, limit);
+    }
+    return this.listApprovals(status, limit);
   }
   listAlerts(includeDismissed = false) {
     if (includeDismissed) return this.alerts;
@@ -3718,6 +3935,7 @@ var taskLimiter = createRateLimiter({
   endpointIdentifier: "ai_task_submission"
 });
 aiRouter.use(generalLimiter);
+aiRouter.use(requireAutomationAuth);
 aiRouter.get("/health", (req, res) => {
   const geminiKeyConfigured = Boolean(
     process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "MY_GEMINI_API_KEY"
@@ -3750,7 +3968,6 @@ aiRouter.get("/health", (req, res) => {
     registeredTaskTypes: TaskRegistry.list()
   });
 });
-aiRouter.use(requireAutomationAuth);
 aiRouter.get("/tools", (req, res) => {
   res.json({
     tools: ToolRegistry.list()
@@ -3845,10 +4062,10 @@ aiRouter.post("/tasks", taskLimiter, async (req, res) => {
     });
   }
 });
-aiRouter.get("/tasks", (req, res) => {
+aiRouter.get("/tasks", async (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 50;
   const status = req.query.status;
-  const tasks = taskManager.listTasks(limit, status);
+  const tasks = await taskManager.listTasksAsync(limit, status);
   res.json({ tasks, total: tasks.length });
 });
 aiRouter.get("/tasks/:id", async (req, res) => {
@@ -3868,7 +4085,10 @@ aiRouter.get("/tasks/:id", async (req, res) => {
   const durationMs = completedTime ? completedTime - createdTime : null;
   let approvalDetails = null;
   if (task.approval_id) {
-    const approval = taskManager.listApprovals().find((a) => a.id === task.approval_id);
+    let approval = taskManager.listApprovals().find((a) => a.id === task.approval_id);
+    if (!approval) {
+      approval = await taskManager.getApprovalAsync(task.approval_id);
+    }
     if (approval) {
       approvalDetails = {
         id: approval.id,
@@ -3907,9 +4127,9 @@ aiRouter.get("/tasks/:id", async (req, res) => {
   };
   res.json(responseEnvelope);
 });
-aiRouter.get("/approvals", (req, res) => {
+aiRouter.get("/approvals", async (req, res) => {
   const status = req.query.status;
-  const approvals = taskManager.listApprovals(status);
+  const approvals = await taskManager.listApprovalsAsync(status);
   res.json({ approvals, count: approvals.length });
 });
 aiRouter.post("/approvals/:id/approve", async (req, res) => {
@@ -4039,6 +4259,421 @@ aiRouter.post("/research", taskLimiter, async (req, res) => {
   }
 });
 
+// server/meta.ts
+import { createClient as createClient3 } from "@supabase/supabase-js";
+var DEFAULT_TITLE = "StartupCr\xE8me | Financial & Technology Intelligence";
+var DEFAULT_DESCRIPTION = "StartupCr\xE8me is the premier digital publication for Finance, Macro-economics, and Deep Technology.";
+var DEFAULT_IMAGE = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630";
+function ensureAbsoluteUrl(url, baseUrl) {
+  if (!url) return DEFAULT_IMAGE;
+  const trimmed = url.trim();
+  if (!trimmed) return DEFAULT_IMAGE;
+  if (trimmed.startsWith("data:") || trimmed.startsWith("blob:")) {
+    return DEFAULT_IMAGE;
+  }
+  if (trimmed.startsWith("//")) {
+    return `https:${trimmed}`;
+  }
+  if (trimmed.startsWith("/")) {
+    return `${baseUrl.replace(/\/+$/, "")}${trimmed}`;
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+}
+function escapeHtml(str) {
+  return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function resolveArticleDescription(post) {
+  if (post.excerpt && typeof post.excerpt === "string" && post.excerpt.trim().length > 10) {
+    return post.excerpt.trim();
+  }
+  if (post.meta_description && typeof post.meta_description === "string" && post.meta_description.trim().length > 10) {
+    return post.meta_description.trim();
+  }
+  if (post.excerpt && typeof post.excerpt === "string" && post.excerpt.trim().length > 0) {
+    return post.excerpt.trim();
+  }
+  if (post.meta_description && typeof post.meta_description === "string" && post.meta_description.trim().length > 0) {
+    return post.meta_description.trim();
+  }
+  try {
+    if (post.content && typeof post.content === "object" && Array.isArray(post.content.content)) {
+      const texts = [];
+      for (const node of post.content.content) {
+        if (node.type === "paragraph" && Array.isArray(node.content)) {
+          for (const child of node.content) {
+            if (child.text && typeof child.text === "string") {
+              texts.push(child.text.trim());
+            }
+          }
+        }
+        if (texts.join(" ").length >= 140) break;
+      }
+      const combined = texts.join(" ").trim();
+      if (combined.length > 20) {
+        return combined.length > 200 ? `${combined.substring(0, 197)}...` : combined;
+      }
+    }
+  } catch {
+  }
+  return DEFAULT_DESCRIPTION;
+}
+async function resolvePageMetadata(reqPath, host, protocol) {
+  let normalizedHost = host || "www.startupcreme.com";
+  if (!normalizedHost.includes("startupcreme.com") && !normalizedHost.includes("localhost") && !normalizedHost.includes("127.0.0.1")) {
+    if (normalizedHost.includes("run.app")) {
+    } else {
+      normalizedHost = "www.startupcreme.com";
+    }
+  }
+  let normalizedProtocol = protocol || "https";
+  if (normalizedHost.includes("startupcreme.com")) {
+    normalizedProtocol = "https";
+  }
+  const baseUrl = `${normalizedProtocol}://${normalizedHost}`;
+  const cleanPath = reqPath.split("?")[0].split("#")[0];
+  const fullUrl = `${baseUrl}${cleanPath.startsWith("/") ? cleanPath : "/" + cleanPath}`;
+  const segments = cleanPath.split("/").filter(Boolean);
+  let title = DEFAULT_TITLE;
+  let description = DEFAULT_DESCRIPTION;
+  let coverImage = DEFAULT_IMAGE;
+  let pageType = "website";
+  let authorName;
+  let publishedTime;
+  let modifiedTime;
+  let section;
+  let tags;
+  let ssrPayloadScript = "";
+  let jsonLdScript = "";
+  const excluded = [
+    "finance",
+    "tech",
+    "discussion",
+    "discussions",
+    "admin",
+    "sitemap.xml",
+    "robots.txt",
+    "privacy",
+    "privacy-policy",
+    "terms",
+    "terms-of-service",
+    "terms-of-editorial-service",
+    "api",
+    "uploads",
+    "assets"
+  ];
+  if (segments.length > 0) {
+    const rawSlug = segments[segments.length - 1];
+    const lowerSlug = rawSlug.toLowerCase();
+    if (lowerSlug === "finance") {
+      title = "Finance, Markets & Venture Intelligence | StartupCr\xE8me";
+      description = "Authoritative reporting on African and global fintech, capital markets, venture capital, macroeconomics, and institutional investments.";
+      coverImage = "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&q=80&w=1200&h=630";
+      section = "Finance";
+    } else if (lowerSlug === "tech") {
+      title = "Deep Technology & Frontier AI Intelligence | StartupCr\xE8me";
+      description = "Frontier artificial intelligence architectures, developer tooling, cloud infrastructure, and emerging startup technology ecosystems.";
+      coverImage = "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=1200&h=630";
+      section = "Technology";
+    } else if (lowerSlug === "discussions" || lowerSlug === "discussion") {
+      title = "Editorial Community & Technical Discussions | StartupCr\xE8me";
+      description = "Engage with institutional analysts, technical founders, and verified engineering leaders on market strategy and AI infrastructure.";
+      section = "Discussions";
+    } else if (lowerSlug === "privacy" || lowerSlug === "privacy-policy") {
+      title = "Privacy Policy | StartupCr\xE8me Editorial Platform";
+      description = "StartupCr\xE8me privacy policy and user data governance standards.";
+    } else if (lowerSlug === "terms" || lowerSlug === "terms-of-service" || lowerSlug === "terms-of-editorial-service") {
+      title = "Terms of Editorial Service | StartupCr\xE8me";
+      description = "Terms of service and reader agreement for StartupCr\xE8me publications.";
+    } else if (rawSlug && !excluded.includes(lowerSlug)) {
+      const decodedSlug = decodeURIComponent(rawSlug).trim();
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+      if (supabaseUrl && supabaseKey) {
+        try {
+          const scClient = createClient3(supabaseUrl, supabaseKey, {
+            db: { schema: "startupcreme" },
+            auth: { persistSession: false, autoRefreshToken: false }
+          });
+          const defaultClient = createClient3(supabaseUrl, supabaseKey, {
+            auth: { persistSession: false, autoRefreshToken: false }
+          });
+          const executeQuery = async (queryFn) => {
+            try {
+              const res = await queryFn(scClient);
+              if (!res.error && res.data && (!Array.isArray(res.data) || res.data.length > 0)) {
+                return res;
+              }
+            } catch {
+            }
+            return await queryFn(defaultClient);
+          };
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(decodedSlug);
+          let foundPost = null;
+          const resA = await executeQuery(
+            (client) => client.from("posts").select("*").ilike("slug", decodedSlug).limit(1)
+          );
+          if (resA?.data && resA.data.length > 0) {
+            foundPost = resA.data[0];
+          }
+          if (!foundPost && isUuid) {
+            const resUuid = await executeQuery(
+              (client) => client.from("posts").select("*").eq("id", decodedSlug).limit(1)
+            );
+            if (resUuid?.data && resUuid.data.length > 0) {
+              foundPost = resUuid.data[0];
+            }
+          }
+          if (!foundPost && decodedSlug.includes("-")) {
+            const withSpaces = decodedSlug.replace(/-/g, " ");
+            const resSpaces = await executeQuery(
+              (client) => client.from("posts").select("*").ilike("slug", withSpaces).limit(1)
+            );
+            if (resSpaces?.data && resSpaces.data.length > 0) {
+              foundPost = resSpaces.data[0];
+            }
+          }
+          if (!foundPost && decodedSlug.includes(" ")) {
+            const withHyphens = decodedSlug.replace(/\s+/g, "-");
+            const resHyphens = await executeQuery(
+              (client) => client.from("posts").select("*").ilike("slug", withHyphens).limit(1)
+            );
+            if (resHyphens?.data && resHyphens.data.length > 0) {
+              foundPost = resHyphens.data[0];
+            }
+          }
+          if (!foundPost && decodedSlug.length > 12) {
+            const prefix = decodedSlug.slice(0, 30);
+            const resPartial = await executeQuery(
+              (client) => client.from("posts").select("*").ilike("slug", `%${prefix}%`).limit(1)
+            );
+            if (resPartial?.data && resPartial.data.length > 0) {
+              foundPost = resPartial.data[0];
+            }
+          }
+          if (foundPost) {
+            title = `${foundPost.title} | StartupCr\xE8me`;
+            description = resolveArticleDescription(foundPost);
+            coverImage = ensureAbsoluteUrl(foundPost.cover_image, baseUrl);
+            pageType = "article";
+            authorName = foundPost.author_name || "Startup Cr\xE8me Editorial";
+            publishedTime = foundPost.created_at || (/* @__PURE__ */ new Date()).toISOString();
+            modifiedTime = foundPost.updated_at || foundPost.created_at || (/* @__PURE__ */ new Date()).toISOString();
+            section = foundPost.vertical === "tech" ? "Technology" : "Finance";
+            tags = Array.isArray(foundPost.tags) ? foundPost.tags : [];
+            const sanitizedPost = JSON.stringify(foundPost).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+            ssrPayloadScript = `<script id="__STARTUPCREME_SSR_DATA__">window.__INITIAL_POST__ = ${sanitizedPost};</script>`;
+            const articleJsonLd = {
+              "@context": "https://schema.org",
+              "@type": "NewsArticle",
+              mainEntityOfPage: {
+                "@type": "WebPage",
+                "@id": fullUrl
+              },
+              headline: foundPost.title,
+              description,
+              image: [coverImage],
+              datePublished: publishedTime,
+              dateModified: modifiedTime,
+              author: {
+                "@type": "Person",
+                name: authorName
+              },
+              publisher: {
+                "@type": "Organization",
+                name: "StartupCr\xE8me",
+                logo: {
+                  "@type": "ImageObject",
+                  url: `${baseUrl}/logo.jpg`
+                }
+              },
+              articleSection: section,
+              keywords: tags.join(", ")
+            };
+            jsonLdScript = `<script type="application/ld+json">${JSON.stringify(articleJsonLd)}</script>`;
+          } else {
+            let foundTopic = null;
+            const topicResA = await executeQuery(
+              (client) => client.from("discussion_topics").select("*").ilike("slug", decodedSlug).limit(1)
+            );
+            if (topicResA?.data && topicResA.data.length > 0) {
+              foundTopic = topicResA.data[0];
+            } else if (decodedSlug.includes("-")) {
+              const topicResB = await executeQuery(
+                (client) => client.from("discussion_topics").select("*").ilike("slug", decodedSlug.replace(/-/g, " ")).limit(1)
+              );
+              if (topicResB?.data && topicResB.data.length > 0) {
+                foundTopic = topicResB.data[0];
+              }
+            }
+            if (foundTopic) {
+              title = `${foundTopic.title} | StartupCr\xE8me Discussion`;
+              description = foundTopic.content ? foundTopic.content.slice(0, 160) + (foundTopic.content.length > 160 ? "..." : "") : "Join the community discussion on StartupCr\xE8me.";
+              pageType = "article";
+              authorName = foundTopic.author_name || "Community Member";
+              publishedTime = foundTopic.created_at;
+              modifiedTime = foundTopic.updated_at || foundTopic.created_at;
+              section = "Discussions";
+              const sanitizedTopic = JSON.stringify(foundTopic).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+              ssrPayloadScript = `<script id="__STARTUPCREME_SSR_DATA__">window.__INITIAL_TOPIC__ = ${sanitizedTopic};</script>`;
+              const topicJsonLd = {
+                "@context": "https://schema.org",
+                "@type": "DiscussionForumPosting",
+                mainEntityOfPage: {
+                  "@type": "WebPage",
+                  "@id": fullUrl
+                },
+                headline: foundTopic.title,
+                articleBody: foundTopic.content,
+                author: {
+                  "@type": "Person",
+                  name: authorName
+                },
+                datePublished: publishedTime,
+                publisher: {
+                  "@type": "Organization",
+                  name: "StartupCr\xE8me",
+                  logo: {
+                    "@type": "ImageObject",
+                    url: `${baseUrl}/logo.jpg`
+                  }
+                }
+              };
+              jsonLdScript = `<script type="application/ld+json">${JSON.stringify(topicJsonLd)}</script>`;
+            }
+          }
+        } catch (dbErr) {
+          console.warn("[SEO] Supabase query error for slug:", decodedSlug, dbErr);
+        }
+      }
+    }
+  }
+  if (!ssrPayloadScript && (segments.length === 0 || segments.length === 1)) {
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+    if (supabaseUrl && supabaseKey) {
+      try {
+        const scClient = createClient3(supabaseUrl, supabaseKey, {
+          db: { schema: "startupcreme" },
+          auth: { persistSession: false, autoRefreshToken: false }
+        });
+        const { data: posts } = await scClient.from("posts").select("*").eq("status", "published").order("created_at", { ascending: false }).limit(20);
+        if (posts && posts.length > 0) {
+          const sanitizedPosts = JSON.stringify(posts).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+          ssrPayloadScript = `<script id="__STARTUPCREME_SSR_DATA__">window.__INITIAL_POSTS__ = ${sanitizedPosts};</script>`;
+        }
+      } catch {
+      }
+    }
+  }
+  if (!jsonLdScript) {
+    const websiteJsonLd = {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      name: "StartupCr\xE8me",
+      url: baseUrl,
+      description: DEFAULT_DESCRIPTION,
+      potentialAction: {
+        "@type": "SearchAction",
+        target: `${baseUrl}/search?q={search_term_string}`,
+        "query-input": "required name=search_term_string"
+      }
+    };
+    jsonLdScript = `<script type="application/ld+json">${JSON.stringify(websiteJsonLd)}</script>`;
+  }
+  return {
+    title,
+    description,
+    coverImage: ensureAbsoluteUrl(coverImage, baseUrl),
+    canonicalUrl: fullUrl,
+    pageType,
+    authorName,
+    publishedTime,
+    modifiedTime,
+    section,
+    tags,
+    ssrPayloadScript,
+    jsonLdScript
+  };
+}
+async function injectDynamicMetaTags(html, reqPath, host, protocol) {
+  const meta = await resolvePageMetadata(reqPath, host, protocol);
+  const safeTitle = escapeHtml(meta.title);
+  const safeDesc = escapeHtml(meta.description);
+  const safeImage = escapeHtml(meta.coverImage);
+  const safeUrl = escapeHtml(meta.canonicalUrl);
+  const safeSite = "StartupCr\xE8me";
+  let articleMetaTags = "";
+  if (meta.pageType === "article") {
+    if (meta.publishedTime) {
+      articleMetaTags += `
+    <meta property="article:published_time" content="${escapeHtml(meta.publishedTime)}" />`;
+    }
+    if (meta.modifiedTime) {
+      articleMetaTags += `
+    <meta property="article:modified_time" content="${escapeHtml(meta.modifiedTime)}" />`;
+    }
+    if (meta.section) {
+      articleMetaTags += `
+    <meta property="article:section" content="${escapeHtml(meta.section)}" />`;
+    }
+    if (meta.authorName) {
+      articleMetaTags += `
+    <meta property="article:author" content="${escapeHtml(meta.authorName)}" />`;
+    }
+    if (meta.tags && meta.tags.length > 0) {
+      meta.tags.forEach((t) => {
+        articleMetaTags += `
+    <meta property="article:tag" content="${escapeHtml(t)}" />`;
+      });
+    }
+  }
+  const dynamicMetaBlock = `
+    <!-- Primary SEO Metadata -->
+    <title>${safeTitle}</title>
+    <meta name="description" content="${safeDesc}" />
+    <link rel="canonical" href="${safeUrl}" />
+
+    <!-- Open Graph / Facebook / WhatsApp / LinkedIn / iMessage / Telegram -->
+    <meta property="og:type" content="${meta.pageType}" />
+    <meta property="og:site_name" content="${safeSite}" />
+    <meta property="og:title" content="${safeTitle}" />
+    <meta property="og:description" content="${safeDesc}" />
+    <meta property="og:image" content="${safeImage}" />
+    <meta property="og:image:secure_url" content="${safeImage}" />
+    <meta property="og:image:alt" content="${safeTitle}" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:url" content="${safeUrl}" />${articleMetaTags}
+
+    <!-- Twitter / X Cards -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@startupcreme" />
+    <meta name="twitter:creator" content="@startupcreme" />
+    <meta name="twitter:title" content="${safeTitle}" />
+    <meta name="twitter:description" content="${safeDesc}" />
+    <meta name="twitter:image" content="${safeImage}" />
+
+    <!-- Structured Data (JSON-LD) -->
+    ${meta.jsonLdScript || ""}
+
+    <!-- Pre-rendered Hydration Payload -->
+    ${meta.ssrPayloadScript || ""}
+  `;
+  let updatedHtml = html.replace(/<title>.*?<\/title>/gis, "");
+  updatedHtml = updatedHtml.replace(/<meta\s+[^>]*(?:og:|twitter:|description|article:)[^>]*>/gis, "");
+  updatedHtml = updatedHtml.replace(/<link\s+[^>]*rel=["']canonical["'][^>]*>/gis, "");
+  updatedHtml = updatedHtml.replace(/<script\s+id=["']__STARTUPCREME_SSR_DATA__["'].*?<\/script>/gis, "");
+  if (updatedHtml.includes("</head>")) {
+    return updatedHtml.replace("</head>", `${dynamicMetaBlock}
+  </head>`);
+  }
+  return `${dynamicMetaBlock}
+${updatedHtml}`;
+}
+
 // server/app.ts
 var upload = multer({
   storage: multer.memoryStorage(),
@@ -4105,9 +4740,20 @@ function getR2Config() {
   const isConfigured = Boolean(accountId && accessKeyId && secretAccessKey && bucketName);
   return { accountId, accessKeyId, secretAccessKey, bucketName, publicUrl, isConfigured };
 }
-function createApp() {
+function createApp(options) {
   const app2 = express();
   app2.use(express.json({ limit: "10mb" }));
+  app2.use((req, res, next) => {
+    const rawMatched = req.headers["x-matched-path"] || req.headers["x-forwarded-uri"] || req.headers["x-original-url"] || req.headers["x-rewrite-url"];
+    if (rawMatched && typeof rawMatched === "string") {
+      const cleanMatched = rawMatched.split("?")[0];
+      if (cleanMatched && cleanMatched !== "/api" && cleanMatched !== "/api/" && req.url !== cleanMatched) {
+        const queryPart = req.url.includes("?") ? "?" + req.url.split("?")[1] : "";
+        req.url = cleanMatched + queryPart;
+      }
+    }
+    next();
+  });
   const uploadsDir = path.join(process.cwd(), "public", "uploads");
   if (!fs.existsSync(uploadsDir)) {
     try {
@@ -4116,6 +4762,20 @@ function createApp() {
     }
   }
   app2.use("/uploads", express.static(uploadsDir));
+  app2.get(["/api", "/api/"], (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    res.json({
+      status: "ok",
+      service: "StartupCr\xE8me Operational Platform",
+      version: "1.0.0",
+      routes: [
+        "/api/health",
+        "/api/ai/health",
+        "/api/auth/profile",
+        "/api/upload-image"
+      ]
+    });
+  });
   app2.get(["/api/health", "/health"], (req, res) => {
     res.setHeader("Content-Type", "application/json");
     res.json({ status: "ok" });
@@ -4133,7 +4793,7 @@ function createApp() {
       return res.status(503).json({ error: "Database not configured" });
     }
     try {
-      const authClient = createClient3(supabaseUrl, anonKey || serviceRoleKey, {
+      const authClient = createClient4(supabaseUrl, anonKey || serviceRoleKey, {
         auth: { persistSession: false, autoRefreshToken: false }
       });
       const { data: { user }, error: authError } = await authClient.auth.getUser(token);
@@ -4142,7 +4802,7 @@ function createApp() {
       }
       const email = (user.email || "").trim().toLowerCase();
       const userId = user.id;
-      const adminClient = createClient3(supabaseUrl, serviceRoleKey || anonKey, {
+      const adminClient = createClient4(supabaseUrl, serviceRoleKey || anonKey, {
         db: { schema: "startupcreme" },
         auth: { persistSession: false, autoRefreshToken: false }
       });
@@ -4181,7 +4841,7 @@ function createApp() {
       }
       const role = (dbUser.role || "user").trim().toLowerCase() === "admin" ? "admin" : "user";
       if (serviceRoleKey && user.user_metadata?.role !== role) {
-        const masterClient = createClient3(supabaseUrl, serviceRoleKey);
+        const masterClient = createClient4(supabaseUrl, serviceRoleKey);
         masterClient.auth.admin.updateUserById(userId, {
           user_metadata: { ...user.user_metadata, role }
         }).catch(() => {
@@ -4222,7 +4882,7 @@ function createApp() {
       let topics = [];
       if (supabaseUrl && supabaseAnonKey) {
         try {
-          const client = createClient3(supabaseUrl, supabaseAnonKey, {
+          const client = createClient4(supabaseUrl, supabaseAnonKey, {
             db: { schema: "startupcreme" }
           });
           const { data: postsData } = await client.from("posts").select("*").eq("status", "published");
@@ -4436,6 +5096,48 @@ Sitemap: ${protocol}://${host}/sitemap.xml
       });
     }
   });
+  if (options?.serveHtml !== false) {
+    const distPath = path.join(process.cwd(), "dist");
+    if (fs.existsSync(distPath)) {
+      app2.use(express.static(distPath, { index: false }));
+    }
+    const loadHtmlTemplate = () => {
+      const candidates = [
+        path.join(process.cwd(), "dist", "index.html"),
+        path.join(process.cwd(), "index.html"),
+        path.join(process.cwd(), "public", "index.html")
+      ];
+      for (const p of candidates) {
+        try {
+          if (fs.existsSync(p)) return fs.readFileSync(p, "utf-8");
+        } catch {
+        }
+      }
+      return `<!doctype html><html lang="en"><head><meta charset="UTF-8" /><title>StartupCr\xE8me</title></head><body><div id="root"></div></body></html>`;
+    };
+    app2.get("*", async (req, res, next) => {
+      const activePath = (req.url || req.path).split("?")[0].toLowerCase();
+      if (activePath.startsWith("/api") || activePath === "/sitemap.xml" || activePath === "/sitemap" || activePath === "/sitemap_index.xml" || activePath === "/robots.txt" || /\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot)$/i.test(activePath)) {
+        return next();
+      }
+      try {
+        const template = loadHtmlTemplate();
+        let host = req.headers["x-forwarded-host"] || req.headers["host"] || "www.startupcreme.com";
+        if (Array.isArray(host)) host = host[0];
+        let protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
+        if (Array.isArray(protocol)) protocol = protocol[0];
+        const targetUrl = req.url || req.originalUrl;
+        const dynamicHtml = await injectDynamicMetaTags(template, targetUrl, host, protocol);
+        res.status(200).set({
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=600"
+        }).send(dynamicHtml);
+      } catch (err) {
+        console.error("[SEO Render] Error rendering dynamic metadata:", err);
+        next(err);
+      }
+    });
+  }
   return app2;
 }
 var app = createApp();

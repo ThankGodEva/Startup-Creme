@@ -5,18 +5,21 @@ let runtimeKey: string | null = null;
 
 // Helper to retrieve environment credentials
 export function getSupabaseCredentials() {
+  const metaEnv = typeof import.meta !== 'undefined' ? (import.meta as any).env : undefined;
+  const procEnv = typeof process !== 'undefined' ? process.env : undefined;
+
   const url = 
     runtimeUrl !== null ? runtimeUrl :
-    (typeof process !== 'undefined' && process.env?.SUPABASE_URL) || 
-    (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_URL) || 
-    (import.meta.env?.VITE_SUPABASE_URL as string) || 
+    (procEnv?.SUPABASE_URL as string) || 
+    (procEnv?.VITE_SUPABASE_URL as string) || 
+    (metaEnv?.VITE_SUPABASE_URL as string) || 
     '';
 
   const anonKey = 
     runtimeKey !== null ? runtimeKey :
-    (typeof process !== 'undefined' && process.env?.SUPABASE_ANON_KEY) || 
-    (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_ANON_KEY) || 
-    (import.meta.env?.VITE_SUPABASE_ANON_KEY as string) || 
+    (procEnv?.SUPABASE_ANON_KEY as string) || 
+    (procEnv?.VITE_SUPABASE_ANON_KEY as string) || 
+    (metaEnv?.VITE_SUPABASE_ANON_KEY as string) || 
     '';
 
   const isConfigured = Boolean(
