@@ -95,4 +95,45 @@ describe('Dynamic Social Share & Open Graph Metadata Suite', () => {
     assert.ok(html.includes('Dangote Refinery IPO'));
     assert.ok(html.includes('property="og:title"'));
   });
+
+  test('Cloudflare R2 uploaded cover images are dynamically resolved in Open Graph metadata', async () => {
+    const meta = await resolvePageMetadata(
+      '/en-us/finance/why-your-startup-needs-a-legal-structure-a-global-guide-for-2026-96q5i',
+      'www.startupcreme.com',
+      'https'
+    );
+
+    assert.equal(meta.pageType, 'article');
+    assert.ok(meta.title.includes('Why Your Startup Needs a Legal Structure'));
+    assert.ok(
+      meta.coverImage.startsWith('https://asset.startupcreme.com/articles/'),
+      `Expected Cloudflare R2 asset URL, got: ${meta.coverImage}`
+    );
+
+    const res = await fetch(`${baseUrl}/en-us/finance/why-your-startup-needs-a-legal-structure-a-global-guide-for-2026-96q5i`, {
+      headers: {
+        'x-forwarded-host': 'www.startupcreme.com',
+        'x-forwarded-proto': 'https'
+      }
+    });
+
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.ok(html.includes('asset.startupcreme.com/articles/'), 'HTML should contain Cloudflare R2 cover image URL');
+  });
+
+  test('Public cover image proxy endpoint responds with 302 redirect or binary image', async () => {
+    const res = await fetch(`${baseUrl}/api/posts/why-your-startup-needs-a-legal-structure-a-global-guide-for-2026-96q5i/cover.png`, {
+      redirect: 'manual'
+    });
+
+    assert.ok(
+      res.status === 200 || res.status === 302,
+      `Expected 200 or 302 redirect for cover image, got ${res.status}`
+    );
+    if (res.status === 302) {
+      const location = res.headers.get('location') || '';
+      assert.ok(location.includes('asset.startupcreme.com'), `Expected redirect to R2 CDN, got: ${location}`);
+    }
+  });
 });

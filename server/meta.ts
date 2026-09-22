@@ -22,12 +22,15 @@ const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57
 /**
  * Normalizes an image URL to an absolute URL beginning with https:// or http://
  */
-export function ensureAbsoluteUrl(url: string | null | undefined, baseUrl: string): string {
+export function ensureAbsoluteUrl(url: string | null | undefined, baseUrl: string, postIdentifier?: string): string {
   if (!url) return DEFAULT_IMAGE;
   const trimmed = url.trim();
   if (!trimmed) return DEFAULT_IMAGE;
 
   if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
+    if (postIdentifier) {
+      return `${baseUrl.replace(/\/+$/, '')}/api/posts/${encodeURIComponent(postIdentifier)}/cover.png`;
+    }
     return DEFAULT_IMAGE;
   }
   if (trimmed.startsWith('//')) {
@@ -40,6 +43,115 @@ export function ensureAbsoluteUrl(url: string | null | undefined, baseUrl: strin
     return trimmed;
   }
   return `https://${trimmed}`;
+}
+
+/**
+ * Uploads a base64 data URL to Cloudflare R2 on demand and returns the public CDN URL.
+ */
+export async function uploadDataUrlToR2(dataUrl: string, slug: string): Promise<string | null> {
+  try {
+    const r2AccountId = (
+      process.env.R2_ACCOUNT_ID ||
+      process.env.CLOUDFLARE_R2_ACCOUNT_ID ||
+      process.env.CLOUDFLARE_ACCOUNT_ID ||
+      process.env.CF_R2_ACCOUNT_ID ||
+      process.env.VITE_R2_ACCOUNT_ID ||
+      ''
+    ).replace(/^https?:\/\//i, '').replace(/\.r2\.cloudflarestorage\.com.*$/i, '').trim();
+
+    const r2AccessKey = (
+      process.env.R2_ACCESS_KEY_ID ||
+      process.env.CLOUDFLARE_R2_ACCESS_KEY_ID ||
+      process.env.CF_R2_ACCESS_KEY_ID ||
+      process.env.R2_ACCESS_KEY ||
+      process.env.VITE_R2_ACCESS_KEY_ID ||
+      ''
+    ).trim();
+
+    const r2Secret = (
+      process.env.R2_SECRET_ACCESS_KEY ||
+      process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY ||
+      process.env.CF_R2_SECRET_ACCESS_KEY ||
+      process.env.R2_SECRET_KEY ||
+      process.env.VITE_R2_SECRET_ACCESS_KEY ||
+      ''
+    ).trim();
+
+    const r2Bucket = (
+      process.env.R2_BUCKET_NAME ||
+      process.env.CLOUDFLARE_R2_BUCKET_NAME ||
+      process.env.CF_R2_BUCKET_NAME ||
+      process.env.VITE_R2_BUCKET_NAME ||
+      'startupcreme'
+    ).trim();
+
+    const r2PublicDomain = (
+      process.env.R2_PUBLIC_URL ||
+      process.env.CLOUDFLARE_R2_PUBLIC_URL ||
+      process.env.CF_R2_PUBLIC_URL ||
+      process.env.VITE_R2_PUBLIC_URL ||
+      'asset.startupcreme.com'
+    ).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+
+    if (!r2AccountId || !r2AccessKey || !r2Secret) {
+      return null;
+    }
+
+    const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    if (!match) return null;
+
+    const mimeType = match[1];
+    const buffer = Buffer.from(match[2], 'base64');
+
+    let ext = 'jpg';
+    let outputBuffer = buffer;
+    let outputMime = 'image/jpeg';
+
+    try {
+      const sharp = (await import('sharp')).default;
+      if (mimeType.includes('webp') || mimeType.includes('avif') || (!mimeType.includes('png') && !mimeType.includes('gif'))) {
+        outputBuffer = await sharp(buffer)
+          .jpeg({ quality: 90, mozjpeg: true })
+          .toBuffer();
+        ext = 'jpg';
+        outputMime = 'image/jpeg';
+      } else if (mimeType.includes('png')) {
+        ext = 'png';
+        outputMime = 'image/png';
+      }
+    } catch (sharpErr) {
+      console.warn('[Sharp] Image conversion fallback:', sharpErr);
+    }
+
+    const cleanSlug = (slug || 'article')
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, '_')
+      .slice(0, 50);
+    const objectKey = `articles/${Date.now()}-${cleanSlug}.${ext}`;
+
+    const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
+    const s3 = new S3Client({
+      region: 'auto',
+      endpoint: `https://${r2AccountId}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: r2AccessKey,
+        secretAccessKey: r2Secret,
+      },
+    });
+
+    await s3.send(new PutObjectCommand({
+      Bucket: r2Bucket,
+      Key: objectKey,
+      Body: outputBuffer,
+      ContentType: outputMime,
+      CacheControl: 'public, max-age=31536000, immutable',
+    }));
+
+    return `https://${r2PublicDomain}/${objectKey}`;
+  } catch (err) {
+    console.warn('[R2 Upload Helper] Failed to upload data URL to R2:', err);
+    return null;
+  }
 }
 
 /**
@@ -275,7 +387,28 @@ export async function resolvePageMetadata(
           if (foundPost) {
             title = `${foundPost.title} | StartupCrème`;
             description = resolveArticleDescription(foundPost);
-            coverImage = ensureAbsoluteUrl(foundPost.cover_image, baseUrl);
+
+            // Handle base64 data URLs: auto-migrate to Cloudflare R2 on demand
+            if (foundPost.cover_image && typeof foundPost.cover_image === 'string' && foundPost.cover_image.startsWith('data:image/')) {
+              try {
+                const r2Url = await uploadDataUrlToR2(foundPost.cover_image, foundPost.slug || foundPost.id);
+                if (r2Url) {
+                  foundPost.cover_image = r2Url;
+                  // Persist asynchronously in Supabase
+                  Promise.resolve().then(async () => {
+                    try {
+                      await scClient.from('posts').update({ cover_image: r2Url }).eq('id', foundPost.id);
+                    } catch (dbErr) {
+                      console.warn('[DB Sync] Failed to sync R2 URL to Supabase:', dbErr);
+                    }
+                  });
+                }
+              } catch (migErr) {
+                console.warn('[Cover Auto-Migrate] Error uploading data URL to R2:', migErr);
+              }
+            }
+
+            coverImage = ensureAbsoluteUrl(foundPost.cover_image, baseUrl, foundPost.slug || foundPost.id);
             pageType = 'article';
             authorName = foundPost.author_name || 'Startup Crème Editorial';
             publishedTime = foundPost.created_at || new Date().toISOString();
@@ -483,11 +616,17 @@ export async function injectDynamicMetaTags(
     }
   }
 
+  let imageMime = 'image/jpeg';
+  if (meta.coverImage.toLowerCase().endsWith('.png')) imageMime = 'image/png';
+  else if (meta.coverImage.toLowerCase().endsWith('.webp')) imageMime = 'image/webp';
+  else if (meta.coverImage.toLowerCase().endsWith('.gif')) imageMime = 'image/gif';
+
   const dynamicMetaBlock = `
     <!-- Primary SEO Metadata -->
     <title>${safeTitle}</title>
     <meta name="description" content="${safeDesc}" />
     <link rel="canonical" href="${safeUrl}" />
+    <link rel="image_src" href="${safeImage}" />
 
     <!-- Open Graph / Facebook / WhatsApp / LinkedIn / iMessage / Telegram -->
     <meta property="og:type" content="${meta.pageType}" />
@@ -496,6 +635,7 @@ export async function injectDynamicMetaTags(
     <meta property="og:description" content="${safeDesc}" />
     <meta property="og:image" content="${safeImage}" />
     <meta property="og:image:secure_url" content="${safeImage}" />
+    <meta property="og:image:type" content="${imageMime}" />
     <meta property="og:image:alt" content="${safeTitle}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />

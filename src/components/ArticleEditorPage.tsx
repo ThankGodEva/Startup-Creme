@@ -196,6 +196,27 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
     setSaving(true);
     setSaveError(null);
 
+    let finalCoverImage = normalizeImageUrl(coverImage.trim());
+    if (finalCoverImage.startsWith('data:image/')) {
+      try {
+        const uploadRes = await fetch('/api/upload-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dataUrl: finalCoverImage,
+            filename: slug.trim() || 'cover-image',
+          }),
+        });
+        const uploadData = await uploadRes.json();
+        if (uploadRes.ok && uploadData.success && uploadData.url) {
+          finalCoverImage = uploadData.url;
+          setCoverImage(uploadData.url);
+        }
+      } catch (uploadErr) {
+        console.warn('Could not auto-upload cover data URL to Cloudflare R2:', uploadErr);
+      }
+    }
+
     const htmlContent = editor?.getHTML() || '';
     const tagsArray = tagsInput
       .split(',')
@@ -211,7 +232,7 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
       excerpt: excerpt.trim(),
       content: htmlContent, // Saves rich HTML from Tiptap
       status: saveStatus,
-      cover_image: normalizeImageUrl(coverImage.trim()),
+      cover_image: finalCoverImage,
       tags: tagsArray.length > 0 ? tagsArray : ['Editorial'],
       dual_silo: dualSilo,
       author_name: authorName,
@@ -1102,7 +1123,7 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
             </div>
 
             {coverImage && (
-              <div className="space-y-1">
+              <div className="space-y-2">
                 <span className="block text-[10px] font-bold uppercase text-slate-400">Cover Preview</span>
                 <div className="rounded-xl overflow-hidden border border-slate-200 aspect-video bg-slate-100">
                   <img
@@ -1114,6 +1135,56 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
                     }}
                   />
                 </div>
+
+                {coverImage.startsWith('data:image/') && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-900 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="font-bold flex items-center gap-1.5 text-amber-800">
+                        <UploadCloud className="w-3.5 h-3.5 text-amber-600" />
+                        Local Data URL Detected
+                      </span>
+                      <p className="text-[11px] text-amber-700 mt-0.5">
+                        For optimal speed & social share previews (Telegram, WhatsApp), transfer to Cloudflare R2.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={uploadingCover}
+                      onClick={async () => {
+                        setUploadingCover(true);
+                        setUploadCoverError(null);
+                        try {
+                          const res = await fetch('/api/upload-image', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              dataUrl: coverImage,
+                              filename: slug.trim() || 'article-cover',
+                            }),
+                          });
+                          const data = await res.json();
+                          if (res.ok && data.success && data.url) {
+                            setCoverImage(data.url);
+                            setUploadCoverStorage(data.storage);
+                            setUploadCoverMessage(data.message || 'Transferred to Cloudflare R2');
+                            setUploadCoverSuccess(true);
+                            setTimeout(() => setUploadCoverSuccess(false), 6000);
+                          } else {
+                            throw new Error(data.error || 'Failed to upload to Cloudflare R2');
+                          }
+                        } catch (err: any) {
+                          setUploadCoverError(err?.message || 'Error uploading to Cloudflare R2');
+                        } finally {
+                          setUploadingCover(false);
+                        }
+                      }}
+                      className="shrink-0 px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      {uploadingCover ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
+                      <span>Upload to R2</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

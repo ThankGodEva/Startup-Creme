@@ -405,31 +405,66 @@ Sitemap: ${protocol}://${host}/sitemap.xml
   // 6. Cloudflare R2 Image Upload (with server local storage fallback)
   app.post(['/api/upload-image', '/upload-image'], upload.single('image'), async (req, res) => {
     try {
-      const file = req.file;
-      if (!file) {
-        return res.status(400).json({ error: 'No image file provided in request.' });
+      let fileBuffer: Buffer;
+      let fileMime: string;
+      let fileExt: string;
+      let cleanBaseName: string;
+
+      if (req.file) {
+        fileBuffer = req.file.buffer;
+        fileMime = req.file.mimetype || 'image/jpeg';
+        fileExt = path.extname(req.file.originalname) || '.jpg';
+        cleanBaseName = path.basename(req.file.originalname, fileExt).replace(/[^a-zA-Z0-9_-]/g, '_');
+      } else if (req.body?.dataUrl && typeof req.body.dataUrl === 'string') {
+        const match = req.body.dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+        if (!match) {
+          return res.status(400).json({ error: 'Invalid dataUrl format in request body.' });
+        }
+        fileMime = match[1];
+        fileBuffer = Buffer.from(match[2], 'base64');
+        fileExt = fileMime.includes('webp') ? '.webp' : fileMime.includes('png') ? '.png' : fileMime.includes('gif') ? '.gif' : '.jpg';
+        cleanBaseName = ((req.body.filename as string) || 'image')
+          .replace(/[^a-zA-Z0-9_-]/g, '_')
+          .slice(0, 50);
+      } else {
+        return res.status(400).json({ error: 'No image file or dataUrl provided in request.' });
+      }
+
+      // Ensure universal compatibility for social previews (Telegram, WhatsApp, LinkedIn, Meta):
+      // Convert WebP and arbitrary raster types to high-quality JPEG
+      try {
+        const sharp = (await import('sharp')).default;
+        if (fileMime.includes('webp') || fileMime.includes('avif') || (!fileMime.includes('png') && !fileMime.includes('gif'))) {
+          fileBuffer = await sharp(fileBuffer).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
+          fileMime = 'image/jpeg';
+          fileExt = '.jpg';
+        }
+      } catch (sharpErr) {
+        console.warn('[Sharp] Upload conversion warning:', sharpErr);
       }
 
       const r2Config = getR2Config();
-
-      const fileExt = path.extname(file.originalname) || '.jpg';
-      const cleanBaseName = path.basename(file.originalname, fileExt).replace(/[^a-zA-Z0-9_-]/g, '_');
       const objectKey = `articles/${Date.now()}-${cleanBaseName}${fileExt}`;
 
       const saveLocally = () => {
-        const articleUploadsDir = path.join(process.cwd(), 'public', 'uploads', 'articles');
-        if (!fs.existsSync(articleUploadsDir)) {
-          fs.mkdirSync(articleUploadsDir, { recursive: true });
+        try {
+          const articleUploadsDir = path.join(process.cwd(), 'public', 'uploads', 'articles');
+          if (!fs.existsSync(articleUploadsDir)) {
+            fs.mkdirSync(articleUploadsDir, { recursive: true });
+          }
+          const localFilename = `${Date.now()}-${cleanBaseName}${fileExt}`;
+          const localFilePath = path.join(articleUploadsDir, localFilename);
+          fs.writeFileSync(localFilePath, fileBuffer);
+          return `/uploads/articles/${localFilename}`;
+        } catch (fsErr) {
+          console.warn('[Storage] Read-only filesystem detected, falling back to base64 data URI:', fsErr);
+          return `data:${fileMime};base64,${fileBuffer.toString('base64')}`;
         }
-        const localFilename = `${Date.now()}-${cleanBaseName}${fileExt}`;
-        const localFilePath = path.join(articleUploadsDir, localFilename);
-        fs.writeFileSync(localFilePath, file.buffer);
-        return `/uploads/articles/${localFilename}`;
       };
 
       if (!r2Config.isConfigured) {
         const localUrl = saveLocally();
-        console.log('R2 storage credentials not fully configured. Saved image locally:', localUrl);
+        console.log('R2 storage credentials not fully configured. Saved image locally:', localUrl.slice(0, 60));
         return res.json({
           success: true,
           url: localUrl,
@@ -454,8 +489,8 @@ Sitemap: ${protocol}://${host}/sitemap.xml
         const command = new PutObjectCommand({
           Bucket: r2Config.bucketName,
           Key: objectKey,
-          Body: file.buffer,
-          ContentType: file.mimetype || 'image/jpeg',
+          Body: fileBuffer,
+          ContentType: fileMime,
           CacheControl: 'public, max-age=31536000, immutable',
         });
 
@@ -497,6 +532,61 @@ Sitemap: ${protocol}://${host}/sitemap.xml
       return res.status(500).json({
         error: err?.message || 'Failed to process image upload.',
       });
+    }
+  });
+
+  // 6b. Public Article Cover Image Endpoint (serves or redirects to public cover image for social crawlers)
+  app.get([
+    '/api/posts/:slug/cover.png',
+    '/api/posts/:slug/cover',
+    '/api/posts/:id/cover.png',
+    '/api/posts/:id/cover'
+  ], async (req, res) => {
+    try {
+      const slugOrId = req.params.slug || req.params.id;
+      if (!slugOrId) return res.status(404).send('Not found');
+
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+      if (!supabaseUrl || !supabaseKey) {
+        return res.redirect(302, 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630');
+      }
+
+      const client = createClient(supabaseUrl, supabaseKey);
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slugOrId);
+
+      let query = client.schema('startupcreme').from('posts').select('id, slug, cover_image');
+      if (isUuid) {
+        query = query.eq('id', slugOrId);
+      } else {
+        query = query.ilike('slug', slugOrId);
+      }
+      const { data: posts } = await query.limit(1);
+      const post = posts?.[0];
+
+      if (!post || !post.cover_image) {
+        return res.redirect(302, 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630');
+      }
+
+      if (post.cover_image.startsWith('http://') || post.cover_image.startsWith('https://')) {
+        return res.redirect(302, post.cover_image);
+      }
+
+      if (post.cover_image.startsWith('data:image/')) {
+        const match = post.cover_image.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          const mimeType = match[1];
+          const buffer = Buffer.from(match[2], 'base64');
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          return res.status(200).send(buffer);
+        }
+      }
+
+      return res.redirect(302, 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630');
+    } catch (err) {
+      console.error('Error serving cover image:', err);
+      res.redirect(302, 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630');
     }
   });
 

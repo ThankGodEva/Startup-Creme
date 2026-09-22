@@ -546,6 +546,12 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
               src={normalizeImageUrl(post.cover_image)}
               alt={post.title}
               className="w-full max-h-[460px] object-cover"
+              onError={(e) => {
+                const target = e.currentTarget;
+                if (!target.src.includes('unsplash.com')) {
+                  target.src = 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&q=80&w=1200';
+                }
+              }}
             />
           </div>
         )}

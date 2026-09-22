@@ -4264,11 +4264,14 @@ import { createClient as createClient3 } from "@supabase/supabase-js";
 var DEFAULT_TITLE = "StartupCr\xE8me | Financial & Technology Intelligence";
 var DEFAULT_DESCRIPTION = "StartupCr\xE8me is the premier digital publication for Finance, Macro-economics, and Deep Technology.";
 var DEFAULT_IMAGE = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630";
-function ensureAbsoluteUrl(url, baseUrl) {
+function ensureAbsoluteUrl(url, baseUrl, postIdentifier) {
   if (!url) return DEFAULT_IMAGE;
   const trimmed = url.trim();
   if (!trimmed) return DEFAULT_IMAGE;
   if (trimmed.startsWith("data:") || trimmed.startsWith("blob:")) {
+    if (postIdentifier) {
+      return `${baseUrl.replace(/\/+$/, "")}/api/posts/${encodeURIComponent(postIdentifier)}/cover.png`;
+    }
     return DEFAULT_IMAGE;
   }
   if (trimmed.startsWith("//")) {
@@ -4281,6 +4284,60 @@ function ensureAbsoluteUrl(url, baseUrl) {
     return trimmed;
   }
   return `https://${trimmed}`;
+}
+async function uploadDataUrlToR2(dataUrl, slug) {
+  try {
+    const r2AccountId = (process.env.R2_ACCOUNT_ID || process.env.CLOUDFLARE_R2_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_R2_ACCOUNT_ID || process.env.VITE_R2_ACCOUNT_ID || "").replace(/^https?:\/\//i, "").replace(/\.r2\.cloudflarestorage\.com.*$/i, "").trim();
+    const r2AccessKey = (process.env.R2_ACCESS_KEY_ID || process.env.CLOUDFLARE_R2_ACCESS_KEY_ID || process.env.CF_R2_ACCESS_KEY_ID || process.env.R2_ACCESS_KEY || process.env.VITE_R2_ACCESS_KEY_ID || "").trim();
+    const r2Secret = (process.env.R2_SECRET_ACCESS_KEY || process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY || process.env.CF_R2_SECRET_ACCESS_KEY || process.env.R2_SECRET_KEY || process.env.VITE_R2_SECRET_ACCESS_KEY || "").trim();
+    const r2Bucket = (process.env.R2_BUCKET_NAME || process.env.CLOUDFLARE_R2_BUCKET_NAME || process.env.CF_R2_BUCKET_NAME || process.env.VITE_R2_BUCKET_NAME || "startupcreme").trim();
+    const r2PublicDomain = (process.env.R2_PUBLIC_URL || process.env.CLOUDFLARE_R2_PUBLIC_URL || process.env.CF_R2_PUBLIC_URL || process.env.VITE_R2_PUBLIC_URL || "asset.startupcreme.com").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    if (!r2AccountId || !r2AccessKey || !r2Secret) {
+      return null;
+    }
+    const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    if (!match) return null;
+    const mimeType = match[1];
+    const buffer = Buffer.from(match[2], "base64");
+    let ext = "jpg";
+    let outputBuffer = buffer;
+    let outputMime = "image/jpeg";
+    try {
+      const sharp = (await import("sharp")).default;
+      if (mimeType.includes("webp") || mimeType.includes("avif") || !mimeType.includes("png") && !mimeType.includes("gif")) {
+        outputBuffer = await sharp(buffer).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
+        ext = "jpg";
+        outputMime = "image/jpeg";
+      } else if (mimeType.includes("png")) {
+        ext = "png";
+        outputMime = "image/png";
+      }
+    } catch (sharpErr) {
+      console.warn("[Sharp] Image conversion fallback:", sharpErr);
+    }
+    const cleanSlug = (slug || "article").toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 50);
+    const objectKey = `articles/${Date.now()}-${cleanSlug}.${ext}`;
+    const { S3Client: S3Client2, PutObjectCommand: PutObjectCommand2 } = await import("@aws-sdk/client-s3");
+    const s3 = new S3Client2({
+      region: "auto",
+      endpoint: `https://${r2AccountId}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: r2AccessKey,
+        secretAccessKey: r2Secret
+      }
+    });
+    await s3.send(new PutObjectCommand2({
+      Bucket: r2Bucket,
+      Key: objectKey,
+      Body: outputBuffer,
+      ContentType: outputMime,
+      CacheControl: "public, max-age=31536000, immutable"
+    }));
+    return `https://${r2PublicDomain}/${objectKey}`;
+  } catch (err) {
+    console.warn("[R2 Upload Helper] Failed to upload data URL to R2:", err);
+    return null;
+  }
 }
 function escapeHtml(str) {
   return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -4456,7 +4513,24 @@ async function resolvePageMetadata(reqPath, host, protocol) {
           if (foundPost) {
             title = `${foundPost.title} | StartupCr\xE8me`;
             description = resolveArticleDescription(foundPost);
-            coverImage = ensureAbsoluteUrl(foundPost.cover_image, baseUrl);
+            if (foundPost.cover_image && typeof foundPost.cover_image === "string" && foundPost.cover_image.startsWith("data:image/")) {
+              try {
+                const r2Url = await uploadDataUrlToR2(foundPost.cover_image, foundPost.slug || foundPost.id);
+                if (r2Url) {
+                  foundPost.cover_image = r2Url;
+                  Promise.resolve().then(async () => {
+                    try {
+                      await scClient.from("posts").update({ cover_image: r2Url }).eq("id", foundPost.id);
+                    } catch (dbErr) {
+                      console.warn("[DB Sync] Failed to sync R2 URL to Supabase:", dbErr);
+                    }
+                  });
+                }
+              } catch (migErr) {
+                console.warn("[Cover Auto-Migrate] Error uploading data URL to R2:", migErr);
+              }
+            }
+            coverImage = ensureAbsoluteUrl(foundPost.cover_image, baseUrl, foundPost.slug || foundPost.id);
             pageType = "article";
             authorName = foundPost.author_name || "Startup Cr\xE8me Editorial";
             publishedTime = foundPost.created_at || (/* @__PURE__ */ new Date()).toISOString();
@@ -4630,11 +4704,16 @@ async function injectDynamicMetaTags(html, reqPath, host, protocol) {
       });
     }
   }
+  let imageMime = "image/jpeg";
+  if (meta.coverImage.toLowerCase().endsWith(".png")) imageMime = "image/png";
+  else if (meta.coverImage.toLowerCase().endsWith(".webp")) imageMime = "image/webp";
+  else if (meta.coverImage.toLowerCase().endsWith(".gif")) imageMime = "image/gif";
   const dynamicMetaBlock = `
     <!-- Primary SEO Metadata -->
     <title>${safeTitle}</title>
     <meta name="description" content="${safeDesc}" />
     <link rel="canonical" href="${safeUrl}" />
+    <link rel="image_src" href="${safeImage}" />
 
     <!-- Open Graph / Facebook / WhatsApp / LinkedIn / iMessage / Telegram -->
     <meta property="og:type" content="${meta.pageType}" />
@@ -4643,6 +4722,7 @@ async function injectDynamicMetaTags(html, reqPath, host, protocol) {
     <meta property="og:description" content="${safeDesc}" />
     <meta property="og:image" content="${safeImage}" />
     <meta property="og:image:secure_url" content="${safeImage}" />
+    <meta property="og:image:type" content="${imageMime}" />
     <meta property="og:image:alt" content="${safeTitle}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -5012,27 +5092,57 @@ Sitemap: ${protocol}://${host}/sitemap.xml
   });
   app2.post(["/api/upload-image", "/upload-image"], upload.single("image"), async (req, res) => {
     try {
-      const file = req.file;
-      if (!file) {
-        return res.status(400).json({ error: "No image file provided in request." });
+      let fileBuffer;
+      let fileMime;
+      let fileExt;
+      let cleanBaseName;
+      if (req.file) {
+        fileBuffer = req.file.buffer;
+        fileMime = req.file.mimetype || "image/jpeg";
+        fileExt = path.extname(req.file.originalname) || ".jpg";
+        cleanBaseName = path.basename(req.file.originalname, fileExt).replace(/[^a-zA-Z0-9_-]/g, "_");
+      } else if (req.body?.dataUrl && typeof req.body.dataUrl === "string") {
+        const match = req.body.dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+        if (!match) {
+          return res.status(400).json({ error: "Invalid dataUrl format in request body." });
+        }
+        fileMime = match[1];
+        fileBuffer = Buffer.from(match[2], "base64");
+        fileExt = fileMime.includes("webp") ? ".webp" : fileMime.includes("png") ? ".png" : fileMime.includes("gif") ? ".gif" : ".jpg";
+        cleanBaseName = (req.body.filename || "image").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 50);
+      } else {
+        return res.status(400).json({ error: "No image file or dataUrl provided in request." });
+      }
+      try {
+        const sharp = (await import("sharp")).default;
+        if (fileMime.includes("webp") || fileMime.includes("avif") || !fileMime.includes("png") && !fileMime.includes("gif")) {
+          fileBuffer = await sharp(fileBuffer).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
+          fileMime = "image/jpeg";
+          fileExt = ".jpg";
+        }
+      } catch (sharpErr) {
+        console.warn("[Sharp] Upload conversion warning:", sharpErr);
       }
       const r2Config = getR2Config();
-      const fileExt = path.extname(file.originalname) || ".jpg";
-      const cleanBaseName = path.basename(file.originalname, fileExt).replace(/[^a-zA-Z0-9_-]/g, "_");
       const objectKey = `articles/${Date.now()}-${cleanBaseName}${fileExt}`;
       const saveLocally = () => {
-        const articleUploadsDir = path.join(process.cwd(), "public", "uploads", "articles");
-        if (!fs.existsSync(articleUploadsDir)) {
-          fs.mkdirSync(articleUploadsDir, { recursive: true });
+        try {
+          const articleUploadsDir = path.join(process.cwd(), "public", "uploads", "articles");
+          if (!fs.existsSync(articleUploadsDir)) {
+            fs.mkdirSync(articleUploadsDir, { recursive: true });
+          }
+          const localFilename = `${Date.now()}-${cleanBaseName}${fileExt}`;
+          const localFilePath = path.join(articleUploadsDir, localFilename);
+          fs.writeFileSync(localFilePath, fileBuffer);
+          return `/uploads/articles/${localFilename}`;
+        } catch (fsErr) {
+          console.warn("[Storage] Read-only filesystem detected, falling back to base64 data URI:", fsErr);
+          return `data:${fileMime};base64,${fileBuffer.toString("base64")}`;
         }
-        const localFilename = `${Date.now()}-${cleanBaseName}${fileExt}`;
-        const localFilePath = path.join(articleUploadsDir, localFilename);
-        fs.writeFileSync(localFilePath, file.buffer);
-        return `/uploads/articles/${localFilename}`;
       };
       if (!r2Config.isConfigured) {
         const localUrl = saveLocally();
-        console.log("R2 storage credentials not fully configured. Saved image locally:", localUrl);
+        console.log("R2 storage credentials not fully configured. Saved image locally:", localUrl.slice(0, 60));
         return res.json({
           success: true,
           url: localUrl,
@@ -5054,8 +5164,8 @@ Sitemap: ${protocol}://${host}/sitemap.xml
         const command = new PutObjectCommand({
           Bucket: r2Config.bucketName,
           Key: objectKey,
-          Body: file.buffer,
-          ContentType: file.mimetype || "image/jpeg",
+          Body: fileBuffer,
+          ContentType: fileMime,
           CacheControl: "public, max-age=31536000, immutable"
         });
         await s3Client.send(command);
@@ -5094,6 +5204,52 @@ Sitemap: ${protocol}://${host}/sitemap.xml
       return res.status(500).json({
         error: err?.message || "Failed to process image upload."
       });
+    }
+  });
+  app2.get([
+    "/api/posts/:slug/cover.png",
+    "/api/posts/:slug/cover",
+    "/api/posts/:id/cover.png",
+    "/api/posts/:id/cover"
+  ], async (req, res) => {
+    try {
+      const slugOrId = req.params.slug || req.params.id;
+      if (!slugOrId) return res.status(404).send("Not found");
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+      if (!supabaseUrl || !supabaseKey) {
+        return res.redirect(302, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
+      }
+      const client = createClient4(supabaseUrl, supabaseKey);
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slugOrId);
+      let query = client.schema("startupcreme").from("posts").select("id, slug, cover_image");
+      if (isUuid) {
+        query = query.eq("id", slugOrId);
+      } else {
+        query = query.ilike("slug", slugOrId);
+      }
+      const { data: posts } = await query.limit(1);
+      const post = posts?.[0];
+      if (!post || !post.cover_image) {
+        return res.redirect(302, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
+      }
+      if (post.cover_image.startsWith("http://") || post.cover_image.startsWith("https://")) {
+        return res.redirect(302, post.cover_image);
+      }
+      if (post.cover_image.startsWith("data:image/")) {
+        const match = post.cover_image.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          const mimeType = match[1];
+          const buffer = Buffer.from(match[2], "base64");
+          res.setHeader("Content-Type", mimeType);
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+          return res.status(200).send(buffer);
+        }
+      }
+      return res.redirect(302, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
+    } catch (err) {
+      console.error("Error serving cover image:", err);
+      res.redirect(302, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
     }
   });
   if (options?.serveHtml !== false) {
