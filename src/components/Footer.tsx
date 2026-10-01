@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Mail, ArrowRight, ShieldCheck, Globe, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { store } from '../lib/store';
-import { NavigationTab, getTabUrl } from '../lib/router';
+import { NavigationTab, getTabUrl, isMarketsEnabled } from '../lib/router';
 
 interface FooterProps {
   currentLocale: string;
@@ -92,10 +92,48 @@ export const Footer: React.FC<FooterProps> = ({ currentLocale, onTabChange, onOp
             <li>
               <button 
                 onClick={() => onTabChange('discussion')}
-                className="hover:text-teal-300 transition-colors flex items-center gap-1.5"
+                className="hover:text-teal-300 transition-colors flex items-center gap-1.5 cursor-pointer"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-teal-500"></span>
                 <span>Community Forum</span>
+              </button>
+            </li>
+            <li>
+              <button 
+                onClick={() => onTabChange('calculators')}
+                className="hover:text-emerald-400 transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span>Founder & FinOps Calculators</span>
+              </button>
+            </li>
+            <li>
+              <button 
+                onClick={() => onTabChange('directory')}
+                className="hover:text-cyan-400 transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                <span>Startup & FinTech Directory</span>
+              </button>
+            </li>
+            {isMarketsEnabled() && (
+              <li>
+                <button 
+                  onClick={() => onTabChange('rates')}
+                  className="hover:text-emerald-400 transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  <span>Macro & Cloud Rate Trackers</span>
+                </button>
+              </li>
+            )}
+            <li>
+              <button 
+                onClick={() => onTabChange('careers')}
+                className="hover:text-teal-300 transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-teal-400"></span>
+                <span>Remote Jobs & Fractional Talent</span>
               </button>
             </li>
           </ul>

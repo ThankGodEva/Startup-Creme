@@ -11,12 +11,16 @@ import {
   Search,
   SlidersHorizontal,
   Plus,
-  RefreshCw
+  RefreshCw,
+  Calculator,
+  Building2,
+  Landmark,
+  Briefcase
 } from 'lucide-react';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { store } from '../lib/store';
 import { UserProfile } from '../types';
-import { getTabUrl, NavigationTab } from '../lib/router';
+import { getTabUrl, NavigationTab, isMarketsEnabled } from '../lib/router';
 
 interface HeaderProps {
   currentLocale: string;
@@ -326,6 +330,78 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <MessageSquare className="w-3.5 h-3.5 text-teal-600" />
             <span>Discussion Forum</span>
+          </a>
+
+          <span className="h-4 w-px bg-slate-200 mx-1 hidden sm:inline-block shrink-0" />
+
+          {/* Module 1: Calculators */}
+          <a
+            href={getTabUrl('calculators', currentLocale)}
+            onClick={(e) => {
+              e.preventDefault();
+              onTabChange('calculators');
+            }}
+            className={`px-3 py-1.5 sm:py-2 rounded-lg text-xs font-semibold transition-all shrink-0 whitespace-nowrap flex items-center gap-1.5 border ${
+              activeTab === 'calculators'
+                ? 'bg-white border-slate-300 text-slate-900 shadow-xs'
+                : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <Calculator className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Calculators</span>
+          </a>
+
+          {/* Module 2: Startup Directory */}
+          <a
+            href={getTabUrl('directory', currentLocale)}
+            onClick={(e) => {
+              e.preventDefault();
+              onTabChange('directory');
+            }}
+            className={`px-3 py-1.5 sm:py-2 rounded-lg text-xs font-semibold transition-all shrink-0 whitespace-nowrap flex items-center gap-1.5 border ${
+              activeTab === 'directory'
+                ? 'bg-white border-slate-300 text-slate-900 shadow-xs'
+                : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <Building2 className="w-3.5 h-3.5 text-cyan-600" />
+            <span>Startup Directory</span>
+          </a>
+
+          {/* Module 3: Macro & Cloud Rates */}
+          {isMarketsEnabled() && (
+            <a
+              href={getTabUrl('rates', currentLocale)}
+              onClick={(e) => {
+                e.preventDefault();
+                onTabChange('rates');
+              }}
+              className={`px-3 py-1.5 sm:py-2 rounded-lg text-xs font-semibold transition-all shrink-0 whitespace-nowrap flex items-center gap-1.5 border ${
+                activeTab === 'rates'
+                  ? 'bg-white border-slate-300 text-slate-900 shadow-xs'
+                  : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Landmark className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Macro & Cloud Rates</span>
+            </a>
+          )}
+
+          {/* Module 4: Remote Careers */}
+          <a
+            href={getTabUrl('careers', currentLocale)}
+            onClick={(e) => {
+              e.preventDefault();
+              onTabChange('careers');
+            }}
+            className={`px-3 py-1.5 sm:py-2 rounded-lg text-xs font-semibold transition-all shrink-0 whitespace-nowrap flex items-center gap-1.5 border ${
+              activeTab === 'careers'
+                ? 'bg-white border-slate-300 text-slate-900 shadow-xs'
+                : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <Briefcase className="w-3.5 h-3.5 text-teal-700" />
+            <span>Remote Careers</span>
           </a>
 
           {/* Admin CMS */}

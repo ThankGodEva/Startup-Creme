@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ShieldAlert, 
   FileText, 
@@ -20,9 +20,14 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
-  Bot
+  Bot,
+  Building2,
+  Briefcase,
+  ShieldCheck,
+  Clock,
+  ExternalLink
 } from 'lucide-react';
-import { Post, DiscussionTopic, UserProfile, ContentVertical, PublicationStatus } from '../types';
+import { Post, DiscussionTopic, UserProfile, ContentVertical, PublicationStatus, StartupEntry, JobListing } from '../types';
 import { generateSitemapXML, generateRobotsTxt } from '../lib/seo';
 import { store } from '../lib/store';
 import { ArticleEditorPage } from './ArticleEditorPage';
@@ -32,7 +37,7 @@ interface AdminDashboardProps {
   currentUser: UserProfile | null;
   posts: Post[];
   topics: DiscussionTopic[];
-  initialTab?: 'posts' | 'discussions' | 'seo' | 'ai';
+  initialTab?: 'posts' | 'discussions' | 'directory_jobs' | 'seo' | 'ai';
   onSavePost: (post: Partial<Post>) => Promise<{ success: boolean; post: Post; error?: string }>;
   onDeletePost: (id: string) => void;
   onTogglePostStatus: (id: string) => void;
@@ -51,11 +56,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onDeleteTopic,
   onSwitchRole,
 }) => {
-  const [activeTab, setActiveTab] = useState<'posts' | 'discussions' | 'seo' | 'ai'>(initialTab || 'posts');
+  const [activeTab, setActiveTab] = useState<'posts' | 'discussions' | 'directory_jobs' | 'seo' | 'ai'>(initialTab || 'posts');
   const [editingPost, setEditingPost] = useState<Partial<Post> | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [verticalFilter, setVerticalFilter] = useState<'all' | ContentVertical>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | PublicationStatus>('all');
+  const [startups, setStartups] = useState<StartupEntry[]>(() => store.getStartups(true));
+  const [jobs, setJobs] = useState<JobListing[]>(() => store.getJobs(true));
+  const [busyModerationId, setBusyModerationId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    store.fetchStartups(true).then((list) => {
+      if (mounted) setStartups(list);
+    });
+    store.fetchJobs(true).then((list) => {
+      if (mounted) setJobs(list);
+    });
+    const unsub = store.subscribe(() => {
+      if (mounted) {
+        setStartups(store.getStartups(true));
+        setJobs(store.getJobs(true));
+      }
+    });
+    return () => {
+      mounted = false;
+      unsub();
+    };
+  }, []);
 
   // Supabase Article Seeding State
   const [seeding, setSeeding] = useState(false);
@@ -250,6 +278,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('directory_jobs')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === 'directory_jobs'
+                ? 'bg-white text-slate-900 border border-slate-200 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Building2 className="w-4 h-4 text-emerald-600" />
+            <span>
+              Directory & Jobs ({startups.filter(s => !s.is_approved).length + jobs.filter(j => !j.is_active).length} Pending)
+            </span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('seo')}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
               activeTab === 'seo'
@@ -417,6 +459,188 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* DIRECTORY & JOBS MODERATION TAB */}
+        {activeTab === 'directory_jobs' && (
+          <div className="space-y-10">
+            {/* Startups Moderation */}
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-serif text-xl font-bold text-slate-900 flex items-center gap-2">
+                    <Building2 className="w-5 h-5 text-cyan-600" />
+                    <span>Startup Directory Submissions ({startups.length})</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Submissions by non-admin users remain pending until approved here or on <code className="font-mono">/directory</code>.
+                  </p>
+                </div>
+              </div>
+
+              {startups.length === 0 ? (
+                <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-xs text-slate-500">
+                  No startups submitted yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {startups.map((s) => (
+                    <div
+                      key={s.id}
+                      className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2 text-xs mb-1 flex-wrap">
+                          {s.is_approved ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-mono font-semibold">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Approved</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-mono font-semibold">
+                              <Clock className="w-3 h-3" />
+                              <span>Pending Approval</span>
+                            </span>
+                          )}
+                          <span className="font-semibold text-emerald-700">{s.vertical}</span>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-mono text-slate-500 uppercase text-[11px]">{s.stage}</span>
+                          <a
+                            href={s.website_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-cyan-700 hover:underline font-medium"
+                          >
+                            <span>{s.website_url}</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                        <h4 className="font-serif text-base font-bold text-slate-900">{s.name}</h4>
+                        <p className="text-xs text-slate-600 mt-0.5">{s.tagline}</p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {!s.is_approved && (
+                          <button
+                            type="button"
+                            disabled={busyModerationId === s.id}
+                            onClick={async () => {
+                              setBusyModerationId(s.id);
+                              await store.approveStartup(s.id, true);
+                              setBusyModerationId(null);
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            <span>Approve</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={busyModerationId === s.id}
+                          onClick={async () => {
+                            setBusyModerationId(s.id);
+                            await store.deleteStartup(s.id);
+                            setBusyModerationId(null);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete from DB</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Jobs Moderation */}
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-serif text-xl font-bold text-slate-900 flex items-center gap-2">
+                    <Briefcase className="w-5 h-5 text-teal-600" />
+                    <span>Remote Job & Fractional Talent Postings ({jobs.length})</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Job postings submitted by non-admin users remain pending until approved here or on <code className="font-mono">/careers</code>.
+                  </p>
+                </div>
+              </div>
+
+              {jobs.length === 0 ? (
+                <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-xs text-slate-500">
+                  No job listings posted yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {jobs.map((j) => (
+                    <div
+                      key={j.id}
+                      className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2 text-xs mb-1 flex-wrap">
+                          {j.is_active ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-mono font-semibold">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Approved</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-mono font-semibold">
+                              <Clock className="w-3 h-3" />
+                              <span>Pending Approval</span>
+                            </span>
+                          )}
+                          <span className="font-semibold text-slate-800">{j.company_name}</span>
+                          <span aria-hidden="true">·</span>
+                          <span className="text-emerald-700 font-medium">{j.category}</span>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-mono text-slate-600">{j.job_type}</span>
+                        </div>
+                        <h4 className="font-serif text-base font-bold text-slate-900">{j.title}</h4>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {j.location} {j.salary_range ? `• ${j.salary_range}` : ''}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {!j.is_active && (
+                          <button
+                            type="button"
+                            disabled={busyModerationId === j.id}
+                            onClick={async () => {
+                              setBusyModerationId(j.id);
+                              await store.approveJob(j.id, true);
+                              setBusyModerationId(null);
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            <span>Approve</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={busyModerationId === j.id}
+                          onClick={async () => {
+                            setBusyModerationId(j.id);
+                            await store.deleteJob(j.id);
+                            setBusyModerationId(null);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete from DB</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

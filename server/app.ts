@@ -5,6 +5,7 @@ import multer from 'multer';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { createClient } from '@supabase/supabase-js';
 import { aiRouter } from '../src/server/aiRouter';
+import { expansionRouter } from '../src/server/expansionRouter';
 import { injectDynamicMetaTags } from './meta';
 
 const upload = multer({
@@ -281,6 +282,9 @@ export function createApp(options?: CreateAppOptions): express.Express {
 
   // 3. AI Subsystem: Autonomous M2M, n8n Orchestration, and Admin Control Plane
   app.use(['/api/ai', '/ai'], aiRouter);
+
+  // 3b. Growth & Product Expansion Modules API (/api/directory, /api/markets/rates, /api/careers, /api/webhooks/n8n/rates)
+  app.use('/api', expansionRouter);
 
   // 4. Dynamic XML Sitemap for Google Search Console
   app.get(['/sitemap.xml', '/sitemap', '/sitemap_index.xml'], async (req, res) => {

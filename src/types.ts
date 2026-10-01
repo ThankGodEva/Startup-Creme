@@ -281,3 +281,143 @@ export interface ResearchOutput {
   confidence: number;
   recommended_next_action: 'draft_article' | 'further_investigation' | 'archive_idea';
 }
+
+// --------------------------------------------------------------------
+// GROWTH & PRODUCT EXPANSION MODULE TYPES
+// --------------------------------------------------------------------
+
+// Module 1: Calculators
+export interface RunwayProjectionMonth {
+  month: number;
+  label: string;
+  startingCash: number;
+  mrr: number;
+  grossMarginDollar: number;
+  grossBurn: number;
+  netBurn: number;
+  endingCash: number;
+  isDepleted: boolean;
+  isProfitable: boolean;
+}
+
+export interface CapTableStakeholder {
+  name: string;
+  role: 'founder' | 'esop' | 'seed_investor' | 'series_a_investor';
+  sharesPostSeed: number;
+  ownershipPostSeed: number;
+  sharesPostSeriesA: number;
+  ownershipPostSeriesA: number;
+  exitPayout: number;
+}
+
+// Module 2: Startup & FinTech Directory (startupcreme.startups)
+export type StartupStage = 'idea' | 'mvp' | 'seed' | 'series_a' | 'bootstrapped';
+
+export interface StartupEntry {
+  id: string;
+  name: string;
+  slug: string;
+  tagline: string;
+  description: string;
+  website_url: string;
+  logo_url: string | null;
+  stage: StartupStage;
+  vertical: string; // e.g., 'FinTech', 'AI', 'EdTech'
+  tech_stack: string[];
+  submitted_by?: string | null;
+  is_approved: boolean;
+  created_at: string;
+}
+
+export interface CreateStartupPayload {
+  name: string;
+  tagline: string;
+  description: string;
+  website_url: string;
+  logo_url?: string | null;
+  stage: StartupStage;
+  vertical: string;
+  tech_stack: string[];
+  submitted_by?: string | null;
+}
+
+// Module 3: Macro & Cloud Rate Trackers (startupcreme.rate_snapshots)
+export type RateTrend = 'up' | 'down' | 'hold';
+
+export interface CentralBankRate {
+  id: string;
+  bank_code: string; // e.g., 'FED', 'ECB', 'CBN', 'BOE', 'BOJ'
+  bank_name: string;
+  country_or_region: string;
+  currency: string;
+  rate_instrument?: string; // e.g., 'Fed Funds Target (3.75%–4.00%)', 'Deposit Facility Rate'
+  current_rate: number; // percentage e.g. 4.00
+  previous_rate: number;
+  change_bps: number; // e.g. -25 or +50
+  trend: RateTrend;
+  inflation_yoy: number;
+  real_rate: number;
+  last_decision_date: string;
+  next_meeting_date: string;
+  official_source_url?: string;
+  historical_12m: number[];
+}
+
+export interface CloudProviderIndexEntry {
+  id: string;
+  provider: string; // e.g., 'AWS', 'Google Cloud', 'Supabase', 'Vercel', 'Cloudflare', 'Neon'
+  tier_name: string;
+  category: 'Serverless Compute' | 'Managed Postgres' | 'Bandwidth & Egress' | 'AI GPU Compute';
+  serverless_per_1m_req: number; // USD per 1M invocations
+  compute_gb_sec: number; // USD per GB-sec
+  db_storage_per_gb: number; // USD per GB/month
+  egress_per_gb: number; // USD per GB transferred
+  free_egress_gb: number;
+  gpu_h100_hourly?: number | null; // USD/hr
+  trend_30d: RateTrend;
+  notes: string;
+  updated_at: string;
+}
+
+export interface RateSnapshotPayload {
+  id: string;
+  source: string;
+  recorded_at: string;
+  central_bank_rates: CentralBankRate[];
+  cloud_pricing_index: CloudProviderIndexEntry[];
+}
+
+// Module 4: Niche Remote Startup Job & Fractional Talent Board (startupcreme.jobs)
+export type JobTypeOption = 'Full-time' | 'Contract' | 'Fractional';
+export type JobCategoryOption =
+  | 'Engineering'
+  | 'FinOps'
+  | 'Financial Modeling'
+  | 'Leadership'
+  | 'Finance';
+
+export interface JobListing {
+  id: string;
+  title: string;
+  company_name: string;
+  company_logo: string | null;
+  location: string; // e.g., "Remote (Global)" or "Remote (Africa)"
+  job_type: string; // e.g., "Full-time", "Contract", "Fractional"
+  category: string; // e.g., "Engineering", "FinOps", "Financial Modeling", "Leadership"
+  apply_url: string;
+  salary_range: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface CreateJobPayload {
+  title: string;
+  company_name: string;
+  company_logo?: string | null;
+  location: string;
+  job_type: string;
+  category: string;
+  apply_url: string;
+  salary_range?: string | null;
+}
+

@@ -740,6 +740,122 @@ CREATE TRIGGER trg_sync_poll_votes
     FOR EACH ROW EXECUTE FUNCTION startupcreme.sync_poll_votes();
 
 -- ====================================================================
+-- 11. GROWTH & PRODUCT EXPANSION MODULES
+--     Module 2: Startup & FinTech Directory (startupcreme.startups)
+--     Module 3: Macro & Cloud Rate Trackers (startupcreme.rate_snapshots)
+--     Module 4: Niche Remote Startup Job Board (startupcreme.jobs)
+-- ====================================================================
+
+DO $$ BEGIN
+    CREATE TYPE startupcreme.startup_stage AS ENUM ('idea', 'mvp', 'seed', 'series_a', 'bootstrapped');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS startupcreme.startups (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  slug text NOT NULL UNIQUE,
+  tagline text NOT NULL,
+  description text NOT NULL,
+  website_url text NOT NULL,
+  logo_url text NULL,
+  stage startupcreme.startup_stage NOT NULL DEFAULT 'mvp',
+  vertical text NOT NULL, -- e.g., 'FinTech', 'AI', 'EdTech'
+  tech_stack text[] NOT NULL DEFAULT '{}', -- e.g., ['React Router', 'Supabase', 'Tailwind']
+  submitted_by uuid REFERENCES startupcreme.users(id) ON DELETE SET NULL,
+  is_approved boolean NOT NULL DEFAULT false,
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_startups_vertical ON startupcreme.startups (vertical) WHERE is_approved = true;
+CREATE INDEX IF NOT EXISTS idx_startups_stage ON startupcreme.startups (stage) WHERE is_approved = true;
+
+ALTER TABLE startupcreme.startups ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public can view approved startups" ON startupcreme.startups;
+CREATE POLICY "Public can view approved startups"
+  ON startupcreme.startups FOR SELECT
+  USING (is_approved = true OR auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "Anyone can submit a startup" ON startupcreme.startups;
+DROP POLICY IF EXISTS "Authenticated users can submit a startup" ON startupcreme.startups;
+CREATE POLICY "Authenticated users can submit a startup"
+  ON startupcreme.startups FOR INSERT
+  TO authenticated
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Admins can manage startups" ON startupcreme.startups;
+CREATE POLICY "Admins can manage startups"
+  ON startupcreme.startups FOR ALL
+  TO authenticated
+  USING (true)
+  WITH CHECK (true);
+
+CREATE TABLE IF NOT EXISTS startupcreme.rate_snapshots (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  snapshot_type text NOT NULL CHECK (snapshot_type IN ('central_bank', 'cloud_pricing', 'combined')),
+  source text NOT NULL DEFAULT 'n8n_webhook',
+  central_bank_rates jsonb NOT NULL DEFAULT '[]'::jsonb,
+  cloud_pricing_index jsonb NOT NULL DEFAULT '[]'::jsonb,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  recorded_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL,
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_snapshots_recorded_at ON startupcreme.rate_snapshots (recorded_at DESC);
+
+ALTER TABLE startupcreme.rate_snapshots ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public can read rate snapshots" ON startupcreme.rate_snapshots;
+CREATE POLICY "Public can read rate snapshots"
+  ON startupcreme.rate_snapshots FOR SELECT
+  USING (true);
+
+DROP POLICY IF EXISTS "Service and webhooks can insert rate snapshots" ON startupcreme.rate_snapshots;
+CREATE POLICY "Service and webhooks can insert rate snapshots"
+  ON startupcreme.rate_snapshots FOR INSERT
+  TO anon, authenticated, service_role
+  WITH CHECK (true);
+
+CREATE TABLE IF NOT EXISTS startupcreme.jobs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  title text NOT NULL,
+  company_name text NOT NULL,
+  company_logo text NULL,
+  location text NOT NULL, -- e.g., "Remote (Global)" or "Remote (Africa)"
+  job_type text NOT NULL, -- e.g., "Full-time", "Contract", "Fractional"
+  category text NOT NULL, -- e.g., "Engineering", "Finance", "Leadership"
+  apply_url text NOT NULL,
+  salary_range text null,
+  is_active boolean NOT NULL DEFAULT false,
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_category ON startupcreme.jobs (category) WHERE is_active = true;
+
+ALTER TABLE startupcreme.jobs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public can view active jobs" ON startupcreme.jobs;
+CREATE POLICY "Public can view active jobs"
+  ON startupcreme.jobs FOR SELECT
+  USING (is_active = true OR auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "Anyone can post a job" ON startupcreme.jobs;
+DROP POLICY IF EXISTS "Authenticated users can post a job" ON startupcreme.jobs;
+CREATE POLICY "Authenticated users can post a job"
+  ON startupcreme.jobs FOR INSERT
+  TO authenticated
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated users can manage jobs" ON startupcreme.jobs;
+CREATE POLICY "Authenticated users can manage jobs"
+  ON startupcreme.jobs FOR ALL
+  TO authenticated
+  USING (true)
+  WITH CHECK (true);
+
+-- ====================================================================
 -- OPTIONAL: Clean Up Legacy Public Schema Tables (Run ONLY if needed)
 -- ====================================================================
 -- If migrating from an earlier setup that mistakenly created tables in 'public',

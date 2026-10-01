@@ -1,12 +1,48 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { isSupabaseConfigured, supabase } from './supabase';
 import { normalizeImageUrl } from './router';
-import { Post, DiscussionTopic, DiscussionComment, PostComment, UserProfile, ContentVertical, PublicationStatus, DiscussionCategory, DiscussionPoll } from '../types';
+import {
+  Post,
+  DiscussionTopic,
+  DiscussionComment,
+  PostComment,
+  UserProfile,
+  ContentVertical,
+  PublicationStatus,
+  DiscussionCategory,
+  DiscussionPoll,
+  StartupEntry,
+  CreateStartupPayload,
+  RateSnapshotPayload,
+  JobListing,
+  CreateJobPayload,
+} from '../types';
+import {
+  INITIAL_STARTUPS,
+  INITIAL_RATE_SNAPSHOT,
+  INITIAL_JOBS,
+} from './expansionData';
 
 const SEED_POSTS: Post[] = [];
 const SAMPLE_POST_SLUGS = [
   'the-great-treasury-yield-re-alignment',
   'autonomous-agent-architectures-and-llm-compilers'
+];
+const SAMPLE_STARTUP_SLUGS = [
+  'paystack-treasury',
+  'kora-quant',
+  'vortex-inference',
+  'moniepoint-ledger',
+  'termii-omni',
+  'lazer-edtech',
+];
+const SAMPLE_JOB_TITLES = [
+  'Fractional CFO (Series A & B SaaS)',
+  'Staff Distributed Systems Engineer (Rust / Go)',
+  'Principal Cloud FinOps Architect',
+  'Senior Quantitative Financial Modeler',
+  'Fractional CTO & AI Infrastructure Advisor',
+  'Lead Full-Stack Engineer (React Router 7 + Supabase)',
 ];
 
 const POSTS_CACHE_KEY = 'startupcreme_posts_cache_v3';
@@ -76,6 +112,9 @@ class StartupCremeStore {
   private commentUserVotes: Record<string, 'up' | 'down' | null> = {};
   private pollUserVotes: Record<string, string> = {};
   private bookmarks: Set<string> = new Set();
+  private startups: StartupEntry[] = [...INITIAL_STARTUPS];
+  private rateSnapshot: RateSnapshotPayload = { ...INITIAL_RATE_SNAPSHOT };
+  private jobs: JobListing[] = [...INITIAL_JOBS];
   private subscribers: Array<() => void> = [];
 
   private hasAttemptedSeed = false;
@@ -495,10 +534,16 @@ class StartupCremeStore {
     if (!isSupabaseConfigured()) return;
 
     try {
-      // Purge any sample posts from Supabase database
+      // Purge any sample posts, startups, and jobs from Supabase database
       await supabaseExecute((client) =>
         client.from('posts').delete().in('slug', SAMPLE_POST_SLUGS)
       );
+      await supabaseExecute((client) =>
+        client.from('startups').delete().in('slug', SAMPLE_STARTUP_SLUGS)
+      ).catch(() => {});
+      await supabaseExecute((client) =>
+        client.from('jobs').delete().in('title', SAMPLE_JOB_TITLES)
+      ).catch(() => {});
 
       // Fetch Posts strictly from startupcreme schema
       const { data: postsData } = await supabaseExecute((client) =>
@@ -1857,6 +1902,502 @@ class StartupCremeStore {
       console.warn('Newsletter subscription exception:', err);
       return { success: false, error: err?.message || 'Database execution exception' };
     }
+  }
+
+  // --------------------------------------------------------------------
+  // MODULE 2: Startup & FinTech Directory (startupcreme.startups)
+  // --------------------------------------------------------------------
+  private async getRequestAuthHeaders(): Promise<Record<string, string>> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (this.currentUser) {
+      headers['x-user-id'] = this.currentUser.id;
+      headers['x-user-role'] = this.currentUser.role;
+    }
+    if (isSupabaseConfigured()) {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return headers;
+  }
+
+  public getStartups(includePending = false): StartupEntry[] {
+    return this.startups.filter(
+      s => !SAMPLE_STARTUP_SLUGS.includes(s.slug) && (includePending || s.is_approved)
+    );
+  }
+
+  public async fetchStartups(includePending = false): Promise<StartupEntry[]> {
+    try {
+      const resp = await fetch(`/api/directory?includePending=${includePending ? 'true' : 'false'}`);
+      if (resp.ok) {
+        const body = await resp.json();
+        if (Array.isArray(body.startups)) {
+          this.startups = body.startups.filter(
+            (s: StartupEntry) => !SAMPLE_STARTUP_SLUGS.includes(s.slug)
+          );
+          this.notify();
+          return this.getStartups(includePending);
+        }
+      }
+    } catch {
+      // Fallback to direct Supabase query if API unreachable
+    }
+
+    if (isSupabaseConfigured()) {
+      await supabaseExecute((client) =>
+        client.from('startups').delete().in('slug', SAMPLE_STARTUP_SLUGS)
+      ).catch(() => {});
+      const { data, error } = await supabaseExecute<StartupEntry[]>((client) => {
+        let q = client.from('startups').select('*').order('created_at', { ascending: false });
+        if (!includePending) q = q.eq('is_approved', true);
+        return q;
+      });
+      if (!error && Array.isArray(data)) {
+        this.startups = data.filter(s => !SAMPLE_STARTUP_SLUGS.includes(s.slug));
+        this.notify();
+      }
+    }
+
+    return this.getStartups(includePending);
+  }
+
+  public async submitStartup(
+    payload: CreateStartupPayload
+  ): Promise<{ success: boolean; startup?: StartupEntry; error?: string }> {
+    if (!this.currentUser) {
+      return {
+        success: false,
+        error: 'You must be signed in to submit a startup.',
+      };
+    }
+
+    const isAdmin = this.currentUser.role === 'admin';
+    const isApproved = isAdmin;
+
+    const cleanSlug =
+      payload.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '') +
+      '-' +
+      Math.random().toString(36).substring(2, 6);
+
+    const validUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      this.currentUser.id
+    )
+      ? this.currentUser.id
+      : null;
+
+    const optimisticStartup: StartupEntry = {
+      id: `st-${Date.now()}`,
+      name: payload.name.trim(),
+      slug: cleanSlug,
+      tagline: payload.tagline.trim(),
+      description: payload.description.trim(),
+      website_url: payload.website_url.trim(),
+      logo_url: payload.logo_url?.trim() || null,
+      stage: payload.stage || 'mvp',
+      vertical: payload.vertical.trim() || 'FinTech',
+      tech_stack: payload.tech_stack,
+      submitted_by: validUuid,
+      is_approved: isApproved,
+      created_at: new Date().toISOString(),
+    };
+
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      const resp = await fetch('/api/directory', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...optimisticStartup,
+          submitted_by: this.currentUser.id,
+          userRole: this.currentUser.role,
+          is_approved: isApproved,
+        }),
+      });
+      if (resp.ok) {
+        const body = await resp.json();
+        if (body.startup) {
+          this.startups = [body.startup, ...this.startups.filter(s => s.id !== body.startup.id)];
+          this.notify();
+          return { success: true, startup: body.startup };
+        }
+      }
+    } catch {
+      // Fallback to direct Supabase insert
+    }
+
+    if (isSupabaseConfigured()) {
+      const { data, error } = await supabaseExecute<StartupEntry>((client) =>
+        client
+          .from('startups')
+          .insert({
+            name: optimisticStartup.name,
+            slug: optimisticStartup.slug,
+            tagline: optimisticStartup.tagline,
+            description: optimisticStartup.description,
+            website_url: optimisticStartup.website_url,
+            logo_url: optimisticStartup.logo_url,
+            stage: optimisticStartup.stage,
+            vertical: optimisticStartup.vertical,
+            tech_stack: optimisticStartup.tech_stack,
+            submitted_by: validUuid,
+            is_approved: isApproved,
+          })
+          .select('*')
+          .single()
+      );
+      if (!error && data) {
+        this.startups = [data, ...this.startups];
+        this.notify();
+        return { success: true, startup: data };
+      }
+    }
+
+    this.startups = [optimisticStartup, ...this.startups];
+    this.notify();
+    return { success: true, startup: optimisticStartup };
+  }
+
+  public async approveStartup(
+    id: string,
+    isApproved = true
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!this.currentUser || this.currentUser.role !== 'admin') {
+      return { success: false, error: 'Admin privileges required.' };
+    }
+
+    this.startups = this.startups.map(s =>
+      s.id === id ? { ...s, is_approved: isApproved } : s
+    );
+    this.notify();
+
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      await fetch(`/api/directory/${encodeURIComponent(id)}/approve`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          is_approved: isApproved,
+          userId: this.currentUser.id,
+          userRole: this.currentUser.role,
+        }),
+      });
+    } catch {
+      // ignore
+    }
+
+    if (isSupabaseConfigured()) {
+      await supabaseExecute((client) =>
+        client.from('startups').update({ is_approved: isApproved }).eq('id', id)
+      );
+    }
+
+    return { success: true };
+  }
+
+  public async deleteStartup(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.currentUser || this.currentUser.role !== 'admin') {
+      return { success: false, error: 'Admin privileges required.' };
+    }
+
+    this.startups = this.startups.filter(s => s.id !== id && s.slug !== id);
+    this.notify();
+
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      await fetch(`/api/directory/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers,
+      });
+    } catch {
+      // ignore
+    }
+
+    if (isSupabaseConfigured()) {
+      await supabaseExecute((client) =>
+        client.from('startups').delete().eq('id', id)
+      );
+    }
+
+    return { success: true };
+  }
+
+  // --------------------------------------------------------------------
+  // MODULE 3: Macro & Cloud Rate Trackers (startupcreme.rate_snapshots)
+  // --------------------------------------------------------------------
+  public getRateSnapshot(): RateSnapshotPayload {
+    return this.rateSnapshot;
+  }
+
+  public async fetchRateSnapshot(): Promise<RateSnapshotPayload> {
+    try {
+      const resp = await fetch('/api/markets/rates');
+      if (resp.ok) {
+        const snapshot = await resp.json();
+        if (snapshot && Array.isArray(snapshot.central_bank_rates)) {
+          this.rateSnapshot = snapshot;
+          this.notify();
+          return this.rateSnapshot;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    if (isSupabaseConfigured()) {
+      const { data, error } = await supabaseExecute<any>((client) =>
+        client
+          .from('rate_snapshots')
+          .select('*')
+          .order('recorded_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      );
+      if (!error && data && Array.isArray(data.central_bank_rates) && data.central_bank_rates.length > 0) {
+        this.rateSnapshot = {
+          id: data.id,
+          source: data.source || 'supabase_rate_snapshots',
+          recorded_at: data.recorded_at || data.created_at,
+          central_bank_rates: data.central_bank_rates,
+          cloud_pricing_index: data.cloud_pricing_index || this.rateSnapshot.cloud_pricing_index,
+        };
+        this.notify();
+      }
+    }
+
+    return this.rateSnapshot;
+  }
+
+  public async triggerRateWebhookSync(): Promise<RateSnapshotPayload> {
+    try {
+      const resp = await fetch('/api/webhooks/n8n/rates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'n8n_scheduled_webhook_sync',
+          central_bank_rates: this.rateSnapshot.central_bank_rates,
+          cloud_pricing_index: this.rateSnapshot.cloud_pricing_index,
+        }),
+      });
+      if (resp.ok) {
+        const body = await resp.json();
+        if (body.snapshot) {
+          this.rateSnapshot = body.snapshot;
+          this.notify();
+          return this.rateSnapshot;
+        }
+      }
+    } catch {
+      // fallback
+    }
+
+    this.rateSnapshot = {
+      ...this.rateSnapshot,
+      recorded_at: new Date().toISOString(),
+    };
+    this.notify();
+    return this.rateSnapshot;
+  }
+
+  // --------------------------------------------------------------------
+  // MODULE 4: Niche Remote Startup Job & Fractional Talent Board (startupcreme.jobs)
+  // --------------------------------------------------------------------
+  public getJobs(includePending = false): JobListing[] {
+    return this.jobs.filter(
+      j => !SAMPLE_JOB_TITLES.includes(j.title) && (includePending || j.is_active)
+    );
+  }
+
+  public async fetchJobs(includePending = false): Promise<JobListing[]> {
+    try {
+      const resp = await fetch(`/api/careers?includePending=${includePending ? 'true' : 'false'}`);
+      if (resp.ok) {
+        const body = await resp.json();
+        if (Array.isArray(body.jobs)) {
+          this.jobs = body.jobs.filter(
+            (j: JobListing) => !SAMPLE_JOB_TITLES.includes(j.title)
+          );
+          this.notify();
+          return this.getJobs(includePending);
+        }
+      }
+    } catch {
+      // fallback
+    }
+
+    if (isSupabaseConfigured()) {
+      await supabaseExecute((client) =>
+        client.from('jobs').delete().in('title', SAMPLE_JOB_TITLES)
+      ).catch(() => {});
+      const { data, error } = await supabaseExecute<JobListing[]>((client) => {
+        let q = client.from('jobs').select('*').order('created_at', { ascending: false });
+        if (!includePending) q = q.eq('is_active', true);
+        return q;
+      });
+      if (!error && Array.isArray(data)) {
+        this.jobs = data.filter(j => !SAMPLE_JOB_TITLES.includes(j.title));
+        this.notify();
+      }
+    }
+
+    return this.getJobs(includePending);
+  }
+
+  public async postJob(
+    payload: CreateJobPayload
+  ): Promise<{ success: boolean; job?: JobListing; error?: string }> {
+    if (!this.currentUser) {
+      return {
+        success: false,
+        error: 'You must be signed in to post a job.',
+      };
+    }
+
+    const isAdmin = this.currentUser.role === 'admin';
+    const isActive = isAdmin;
+
+    const optimisticJob: JobListing = {
+      id: `job-${Date.now()}`,
+      title: payload.title.trim(),
+      company_name: payload.company_name.trim(),
+      company_logo: payload.company_logo?.trim() || null,
+      location: payload.location.trim() || 'Remote (Global)',
+      job_type: payload.job_type.trim() || 'Full-time',
+      category: payload.category.trim() || 'Engineering',
+      apply_url: payload.apply_url.trim(),
+      salary_range: payload.salary_range?.trim() || null,
+      is_active: isActive,
+      created_at: new Date().toISOString(),
+    };
+
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      const resp = await fetch('/api/careers', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...optimisticJob,
+          userId: this.currentUser.id,
+          userRole: this.currentUser.role,
+          is_active: isActive,
+        }),
+      });
+      if (resp.ok) {
+        const body = await resp.json();
+        if (body.job) {
+          this.jobs = [body.job, ...this.jobs.filter(j => j.id !== body.job.id)];
+          this.notify();
+          return { success: true, job: body.job };
+        }
+      }
+    } catch {
+      // fallback to direct Supabase insert
+    }
+
+    if (isSupabaseConfigured()) {
+      const { data, error } = await supabaseExecute<JobListing>((client) =>
+        client
+          .from('jobs')
+          .insert({
+            title: optimisticJob.title,
+            company_name: optimisticJob.company_name,
+            company_logo: optimisticJob.company_logo,
+            location: optimisticJob.location,
+            job_type: optimisticJob.job_type,
+            category: optimisticJob.category,
+            apply_url: optimisticJob.apply_url,
+            salary_range: optimisticJob.salary_range,
+            is_active: isActive,
+          })
+          .select('*')
+          .single()
+      );
+      if (!error && data) {
+        this.jobs = [data, ...this.jobs];
+        this.notify();
+        return { success: true, job: data };
+      }
+    }
+
+    this.jobs = [optimisticJob, ...this.jobs];
+    this.notify();
+    return { success: true, job: optimisticJob };
+  }
+
+  public async approveJob(
+    id: string,
+    isActive = true
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!this.currentUser || this.currentUser.role !== 'admin') {
+      return { success: false, error: 'Admin privileges required.' };
+    }
+
+    this.jobs = this.jobs.map(j =>
+      j.id === id ? { ...j, is_active: isActive } : j
+    );
+    this.notify();
+
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      await fetch(`/api/careers/${encodeURIComponent(id)}/approve`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          is_active: isActive,
+          userId: this.currentUser.id,
+          userRole: this.currentUser.role,
+        }),
+      });
+    } catch {
+      // ignore
+    }
+
+    if (isSupabaseConfigured()) {
+      await supabaseExecute((client) =>
+        client.from('jobs').update({ is_active: isActive }).eq('id', id)
+      );
+    }
+
+    return { success: true };
+  }
+
+  public async deleteJob(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.currentUser || this.currentUser.role !== 'admin') {
+      return { success: false, error: 'Admin privileges required.' };
+    }
+
+    this.jobs = this.jobs.filter(j => j.id !== id);
+    this.notify();
+
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      await fetch(`/api/careers/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers,
+      });
+    } catch {
+      // ignore
+    }
+
+    if (isSupabaseConfigured()) {
+      await supabaseExecute((client) =>
+        client.from('jobs').delete().eq('id', id)
+      );
+    }
+
+    return { success: true };
   }
 }
 

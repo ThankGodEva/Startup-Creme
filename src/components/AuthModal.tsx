@@ -1,20 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  X, 
-  User, 
-  Mail, 
-  Lock, 
-  ShieldCheck, 
-  CheckCircle2, 
-  AlertCircle, 
-  Loader2, 
+import {
+  X,
+  User,
+  Mail,
+  Lock,
+  CheckCircle2,
+  AlertCircle,
+  Loader2,
   Info,
   Eye,
   EyeOff,
   KeyRound,
-  Send,
   ArrowLeft,
-  Sparkles
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { getSupabaseClient, getSupabaseCredentials } from '../lib/supabase';
@@ -25,35 +22,39 @@ interface AuthModalProps {
   onSelectUser: (user: UserProfile) => void;
 }
 
+type ResetFlowStep = 'idle' | 'verify_code' | 'new_password';
+
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   onClose,
   onSelectUser,
 }) => {
   const [isSignUp, setIsSignUp] = useState(false);
-  const [signInMethod, setSignInMethod] = useState<'password' | 'otp'>('password');
+  const [resetStep, setResetStep] = useState<ResetFlowStep>('idle');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [otpCode, setOtpCode] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
-  const [isSettingNewPassword, setIsSettingNewPassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [statusMessage, setStatusMessage] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
 
-  // Listen for Supabase password recovery event from email links
+  // Listen for Supabase password recovery event if opened via link
   useEffect(() => {
     if (!isOpen) return;
     const supabase = getSupabaseClient();
     const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') {
-        setIsSettingNewPassword(true);
+        setResetStep('new_password');
         setStatusMessage({
           type: 'info',
-          text: 'You have followed a password recovery link. Please enter your new password below.',
+          text: 'Enter your new password below.',
         });
       }
     });
@@ -71,12 +72,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     // 1. Authoritative resolution via server endpoint with service_role
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (session?.access_token) {
         const resp = await fetch('/api/auth/profile', {
           headers: {
-            'Authorization': `Bearer ${session.access_token}`
-          }
+            Authorization: `Bearer ${session.access_token}`,
+          },
         });
         if (resp.ok) {
           const profile = await resp.json();
@@ -84,8 +87,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             return {
               id: profile.id || userObj?.id || `user-${Date.now()}`,
               email: profile.email || trimmedEmail,
-              full_name: profile.full_name || userObj?.user_metadata?.full_name || trimmedEmail.split('@')[0],
-              avatar_url: profile.avatar_url || userObj?.user_metadata?.avatar_url || `https://picsum.photos/seed/${encodeURIComponent(trimmedEmail)}/100/100`,
+              full_name:
+                profile.full_name ||
+                userObj?.user_metadata?.full_name ||
+                trimmedEmail.split('@')[0],
+              avatar_url:
+                profile.avatar_url ||
+                userObj?.user_metadata?.avatar_url ||
+                `https://picsum.photos/seed/${encodeURIComponent(trimmedEmail)}/100/100`,
               role: profile.role === 'admin' ? 'admin' : 'user',
               created_at: profile.created_at || userObj?.created_at || new Date().toISOString(),
               updated_at: new Date().toISOString(),
@@ -97,9 +106,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       console.warn('Authoritative profile fetch error in modal, using DB fallback:', apiErr);
     }
 
-    let fetchedRole: 'admin' | 'user' = (userObj?.user_metadata?.role as 'admin' | 'user') || 'user';
+    let fetchedRole: 'admin' | 'user' =
+      (userObj?.user_metadata?.role as 'admin' | 'user') || 'user';
     let fetchedName = userObj?.user_metadata?.full_name || trimmedEmail.split('@')[0];
-    let fetchedAvatar = userObj?.user_metadata?.avatar_url || `https://picsum.photos/seed/${encodeURIComponent(trimmedEmail)}/100/100`;
+    let fetchedAvatar =
+      userObj?.user_metadata?.avatar_url ||
+      `https://picsum.photos/seed/${encodeURIComponent(trimmedEmail)}/100/100`;
 
     try {
       let scUser: any = null;
@@ -158,9 +170,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email) return;
+    if (!email.trim()) return;
     if (isSignUp && !fullName.trim()) {
-      setStatusMessage({ type: 'error', text: 'Please enter your Full Name for Sign Up.' });
+      setStatusMessage({ type: 'error', text: 'Please enter your full name.' });
       return;
     }
 
@@ -182,7 +194,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       if (isSignUp) {
         if (!password) {
-          setStatusMessage({ type: 'error', text: 'Please enter a password for your account.' });
+          setStatusMessage({ type: 'error', text: 'Please enter a password.' });
           setLoading(false);
           return;
         }
@@ -199,7 +211,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           if (existingDbUser) {
             setStatusMessage({
               type: 'info',
-              text: 'This email address is already registered. Please sign in with your password instead.',
+              text: 'This email address is already registered. Please sign in instead.',
             });
             setIsSignUp(false);
             setLoading(false);
@@ -213,7 +225,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         const computedName = fullName.trim() || email.split('@')[0];
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
-          password: password,
+          password,
           options: {
             data: {
               full_name: computedName,
@@ -224,7 +236,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         });
 
         if (error) {
-          const isAlreadyRegistered = 
+          const isAlreadyRegistered =
             error.message.toLowerCase().includes('already registered') ||
             error.message.toLowerCase().includes('already in use') ||
             error.message.toLowerCase().includes('already exists') ||
@@ -233,11 +245,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           if (isAlreadyRegistered) {
             setStatusMessage({
               type: 'info',
-              text: 'This email address is already registered. Please sign in with your password instead.',
+              text: 'This email address is already registered. Please sign in instead.',
             });
             setIsSignUp(false);
           } else {
-            setStatusMessage({ type: 'error', text: `Registration Error: ${error.message}` });
+            setStatusMessage({ type: 'error', text: error.message });
           }
           setLoading(false);
           return;
@@ -246,7 +258,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
           setStatusMessage({
             type: 'info',
-            text: 'This email address is already registered. Please sign in with your password instead.',
+            text: 'This email address is already registered. Please sign in instead.',
           });
           setIsSignUp(false);
           setLoading(false);
@@ -263,17 +275,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           setTimeout(() => {
             onSelectUser(userProfile);
             onClose();
-          }, 1200);
+          }, 1000);
         } else {
           setStatusMessage({
             type: 'success',
-            text: 'Account created! Please check your email inbox to confirm your address before signing in.',
+            text: 'Account created! Please check your email to confirm your address before signing in.',
           });
           setTimeout(() => {
             setIsSignUp(false);
-          }, 2500);
+          }, 2000);
         }
-
       } else {
         // Sign In with Password Mode
         if (!password) {
@@ -284,127 +295,178 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         const { data, error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
-          password: password,
+          password,
         });
 
         if (error) {
           const errorMsg = error.message.toLowerCase();
-          const isInvalidCreds = errorMsg.includes('invalid login credentials') || errorMsg.includes('invalid credentials');
-          const isEmailNotConfirmed = errorMsg.includes('email not confirmed');
-          const isRateLimited = errorMsg.includes('too many') || (error as any).status === 429;
-
-          if (isEmailNotConfirmed) {
-            setStatusMessage({ 
-              type: 'error', 
-              text: 'Email address has not been confirmed yet. Please check your inbox for the confirmation link sent by Supabase.' 
-            });
-          } else if (isRateLimited) {
+          if (errorMsg.includes('email not confirmed')) {
             setStatusMessage({
               type: 'error',
-              text: 'Too many login attempts. Please wait 60 seconds before trying again.'
+              text: 'Please confirm your email address using the link sent to your inbox.',
             });
-          } else if (isInvalidCreds) {
+          } else if (errorMsg.includes('invalid login credentials') || errorMsg.includes('invalid credentials')) {
             setStatusMessage({
               type: 'error',
-              text: `Invalid login credentials for "${email.trim()}". The password entered does not match what is stored in Supabase. You can verify what was typed, sign in with an Email Code, or reset your password.`
+              text: 'Incorrect email or password.',
             });
           } else {
-            setStatusMessage({ 
-              type: 'error', 
-              text: `Sign In Error: ${error.message}` 
+            setStatusMessage({
+              type: 'error',
+              text: error.message,
             });
           }
-
           setLoading(false);
           return;
         }
 
         const userProfile = await resolveUserProfile(data.user, email);
-        setStatusMessage({ type: 'success', text: `Signed in successfully as ${userProfile.role.toUpperCase()}!` });
+        setStatusMessage({
+          type: 'success',
+          text: 'Signed in successfully!',
+        });
         setTimeout(() => {
           onSelectUser(userProfile);
           onClose();
-        }, 800);
+        }, 700);
       }
     } catch (err: any) {
-      setStatusMessage({ type: 'error', text: err?.message || 'Authentication request failed' });
+      setStatusMessage({ type: 'error', text: err?.message || 'Authentication failed.' });
     } finally {
       setLoading(false);
     }
   };
 
-  // Passwordless Email OTP Flow
-  const handleSendOtp = async () => {
-    if (!email.trim()) {
-      setStatusMessage({ type: 'info', text: 'Please enter your email address first.' });
+  // Step 1: Click "Forgot password?" -> Send 6-digit recovery code and open the 6-digit code input UI
+  const handleForgotPassword = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setStatusMessage({
+        type: 'error',
+        text: 'Please enter your email address first.',
+      });
       return;
     }
+
+    // Immediately show the 6-digit code verification field in the UI
+    setResetStep('verify_code');
+    setOtpCode('');
     setLoading(true);
     setStatusMessage(null);
-    const supabase = getSupabaseClient();
 
+    const supabase = getSupabaseClient();
     try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
-        options: {
-          shouldCreateUser: false,
-        },
+      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
+        redirectTo: window.location.origin,
       });
 
       if (error) {
-        setStatusMessage({ type: 'error', text: `Failed to send code: ${error.message}` });
+        const lower = error.message.toLowerCase();
+        // If Supabase rate-limits because a code was already sent within the last 60 seconds,
+        // keep the 6-digit input open so the user can enter the code already in their inbox.
+        if (lower.includes('security purposes') || lower.includes('after') || error.status === 429) {
+          setStatusMessage({
+            type: 'info',
+            text: `A 6-digit verification code was already sent to ${trimmedEmail}. Please enter it below.`,
+          });
+        } else {
+          setStatusMessage({
+            type: 'error',
+            text: error.message,
+          });
+        }
       } else {
-        setOtpSent(true);
-        setStatusMessage({ 
-          type: 'success', 
-          text: `One-Time Login Code & Magic Link sent to ${email.trim()}! Check your inbox or spam folder.` 
+        setStatusMessage({
+          type: 'success',
+          text: `A 6-digit verification code has been sent to ${trimmedEmail}. Enter it below to reset your password.`,
         });
       }
     } catch (e: any) {
-      setStatusMessage({ type: 'error', text: e?.message || 'Failed to send login code' });
+      setStatusMessage({
+        type: 'error',
+        text: e?.message || 'Failed to send verification code.',
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleVerifyOtp = async (e: React.FormEvent) => {
+  // Step 2: Verify the 6-digit code -> Transition to Set New Password screen
+  const handleVerifyResetCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !otpCode.trim()) return;
+    const trimmedEmail = email.trim();
+    const cleanCode = otpCode.replace(/\s+/g, '');
+
+    if (!trimmedEmail) {
+      setStatusMessage({ type: 'error', text: 'Please enter your email address.' });
+      return;
+    }
+    if (cleanCode.length !== 6) {
+      setStatusMessage({ type: 'error', text: 'Please enter the 6-digit verification code.' });
+      return;
+    }
 
     setLoading(true);
     setStatusMessage(null);
     const supabase = getSupabaseClient();
 
     try {
-      const { data, error } = await supabase.auth.verifyOtp({
-        email: email.trim(),
-        token: otpCode.trim(),
-        type: 'email',
+      // Verify 6-digit recovery OTP token
+      let { data, error } = await supabase.auth.verifyOtp({
+        email: trimmedEmail,
+        token: cleanCode,
+        type: 'recovery',
       });
 
+      // Fallback in case the Supabase project template issued a standard email OTP token
       if (error) {
-        setStatusMessage({ type: 'error', text: `Code Verification Error: ${error.message}` });
-      } else if (data?.user) {
-        const userProfile = await resolveUserProfile(data.user, email);
-        setStatusMessage({ type: 'success', text: `Verified! Signed in as ${userProfile.role.toUpperCase()}.` });
-        setTimeout(() => {
-          onSelectUser(userProfile);
-          onClose();
-        }, 800);
+        const fallback = await supabase.auth.verifyOtp({
+          email: trimmedEmail,
+          token: cleanCode,
+          type: 'email',
+        });
+        if (!fallback.error) {
+          data = fallback.data;
+          error = null;
+        }
+      }
+
+      if (error) {
+        setStatusMessage({
+          type: 'error',
+          text: 'Invalid or expired 6-digit code. Please check your email and try again.',
+        });
+      } else if (data?.session || data?.user) {
+        setResetStep('new_password');
+        setNewPassword('');
+        setConfirmNewPassword('');
+        setStatusMessage({
+          type: 'success',
+          text: 'Code verified! Enter your new password below.',
+        });
       }
     } catch (e: any) {
-      setStatusMessage({ type: 'error', text: e?.message || 'Verification failed' });
+      setStatusMessage({
+        type: 'error',
+        text: e?.message || 'Failed to verify code.',
+      });
     } finally {
       setLoading(false);
     }
   };
 
+  // Step 3: Submit the new password
   const handleSetNewPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPassword || newPassword.length < 6) {
       setStatusMessage({ type: 'error', text: 'Password must be at least 6 characters.' });
       return;
     }
+    if (newPassword !== confirmNewPassword) {
+      setStatusMessage({ type: 'error', text: 'Passwords do not match.' });
+      return;
+    }
+
     setLoading(true);
     setStatusMessage(null);
     const supabase = getSupabaseClient();
@@ -415,119 +477,78 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       });
 
       if (error) {
-        setStatusMessage({ type: 'error', text: `Failed to update password: ${error.message}` });
+        setStatusMessage({ type: 'error', text: error.message });
       } else if (data?.user) {
         const userProfile = await resolveUserProfile(data.user, data.user.email || email);
-        setStatusMessage({ type: 'success', text: 'Password updated successfully! Signing you in...' });
-        setIsSettingNewPassword(false);
+        setStatusMessage({
+          type: 'success',
+          text: 'Password reset successfully! Signing you in...',
+        });
         setTimeout(() => {
+          setResetStep('idle');
           onSelectUser(userProfile);
           onClose();
-        }, 1000);
+        }, 900);
       }
     } catch (e: any) {
-      setStatusMessage({ type: 'error', text: e?.message || 'Failed to update password' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleForgotPassword = async () => {
-    if (!email) {
-      setStatusMessage({ type: 'info', text: 'Please enter your email address in the field above first.' });
-      return;
-    }
-    setLoading(true);
-    const supabase = getSupabaseClient();
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: window.location.origin,
-      });
-      if (error) {
-        setStatusMessage({ type: 'error', text: `Password Reset Error: ${error.message}` });
-      } else {
-        setStatusMessage({ type: 'success', text: `Password reset link sent to ${email.trim()}! Please check your inbox and click the link to set a new password.` });
-      }
-    } catch (e: any) {
-      setStatusMessage({ type: 'error', text: e?.message || 'Failed to send reset email' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleResendConfirmation = async () => {
-    if (!email) {
-      setStatusMessage({ type: 'info', text: 'Please enter your email address in the field above first.' });
-      return;
-    }
-    setLoading(true);
-    const supabase = getSupabaseClient();
-    try {
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email: email.trim(),
-      });
-      if (error) {
-        setStatusMessage({ type: 'error', text: `Resend Error: ${error.message}` });
-      } else {
-        setStatusMessage({ type: 'success', text: `Confirmation email resent to ${email.trim()}! Please check your inbox and spam folder.` });
-      }
-    } catch (e: any) {
-      setStatusMessage({ type: 'error', text: e?.message || 'Failed to resend confirmation email' });
+      setStatusMessage({ type: 'error', text: e?.message || 'Failed to update password.' });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 sm:p-6 overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
       <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full max-h-[92vh] overflow-y-auto p-5 sm:p-8 shadow-2xl relative text-slate-800 animate-in fade-in zoom-in-95 duration-150 my-auto">
-        
         {/* Close Button */}
         <button
           onClick={onClose}
           aria-label="Close modal"
-          className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-900 rounded-lg bg-slate-100 hover:bg-slate-200 transition-colors"
+          className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-900 rounded-lg bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
         >
           <X className="w-4 h-4" />
         </button>
 
         {/* Header Branding */}
         <div className="text-center mb-5">
-          <img 
-            src="/logo.jpg" 
-            alt="StartupCrème Logo" 
+          <img
+            src="/logo.jpg"
+            alt="StartupCrème Logo"
             className="w-12 h-12 rounded-xl object-cover border border-slate-200 shadow-sm mx-auto mb-3"
           />
           <h2 className="font-serif text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-            {isSettingNewPassword 
-              ? 'Set New Password' 
-              : isSignUp 
-              ? 'Create Account' 
+            {resetStep === 'verify_code'
+              ? 'Verify Reset Code'
+              : resetStep === 'new_password'
+              ? 'Reset Password'
+              : isSignUp
+              ? 'Create Account'
               : 'Sign In'}
           </h2>
           <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
-            {isSettingNewPassword
-              ? 'Enter your new password to complete account recovery.'
-              : isSignUp 
-              ? 'Register your account with Supabase to publish articles and manage topics.' 
-              : 'Welcome back! Sign in to access your dashboard and publications.'
-            }
+            {resetStep === 'verify_code'
+              ? 'Enter the 6-digit verification code sent to your email address.'
+              : resetStep === 'new_password'
+              ? 'Create a new password for your account.'
+              : isSignUp
+              ? 'Register your account to publish articles and join discussions.'
+              : 'Welcome back! Sign in to access your dashboard and publications.'}
           </p>
         </div>
 
-        {/* Mode Switch Tabs (Sign Up / Sign In) */}
-        {!isSettingNewPassword && (
-          <div className="flex bg-slate-100 p-1 rounded-xl mb-4 text-xs font-semibold">
+        {/* Mode Switch Tabs (Sign Up / Sign In) - Hidden during password reset */}
+        {resetStep === 'idle' && (
+          <div className="flex bg-slate-100 p-1 rounded-xl mb-5 text-xs font-semibold">
             <button
               type="button"
               onClick={() => {
                 setIsSignUp(true);
                 setStatusMessage(null);
-                setOtpSent(false);
               }}
               className={`flex-1 py-2 rounded-lg transition-all cursor-pointer ${
-                isSignUp ? 'bg-white text-slate-900 shadow-xs font-bold' : 'text-slate-500 hover:text-slate-800'
+                isSignUp
+                  ? 'bg-white text-slate-900 shadow-xs font-bold'
+                  : 'text-slate-500 hover:text-slate-800'
               }`}
             >
               Sign Up
@@ -539,7 +560,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 setStatusMessage(null);
               }}
               className={`flex-1 py-2 rounded-lg transition-all cursor-pointer ${
-                !isSignUp ? 'bg-white text-slate-900 shadow-xs font-bold' : 'text-slate-500 hover:text-slate-800'
+                !isSignUp
+                  ? 'bg-white text-slate-900 shadow-xs font-bold'
+                  : 'text-slate-500 hover:text-slate-800'
               }`}
             >
               Sign In
@@ -547,166 +570,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
         )}
 
-        {/* Sign In Method Toggle: Password vs Email Code/OTP */}
-        {!isSignUp && !isSettingNewPassword && (
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <button
-              type="button"
-              onClick={() => {
-                setSignInMethod('password');
-                setStatusMessage(null);
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                signInMethod === 'password'
-                  ? 'bg-cyan-50 text-cyan-800 border border-cyan-300 font-semibold'
-                  : 'text-slate-600 hover:bg-slate-100 border border-transparent'
-              }`}
-            >
-              <KeyRound className="w-3 h-3 inline-block mr-1.5 text-cyan-600" />
-              Password
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSignInMethod('otp');
-                setStatusMessage(null);
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                signInMethod === 'otp'
-                  ? 'bg-cyan-50 text-cyan-800 border border-cyan-300 font-semibold'
-                  : 'text-slate-600 hover:bg-slate-100 border border-transparent'
-              }`}
-            >
-              <Sparkles className="w-3 h-3 inline-block mr-1.5 text-amber-500" />
-              Email Code / Magic Link
-            </button>
-          </div>
-        )}
-
-        {/* Status Alert Banner */}
+        {/* Clean Status Alert Banner (No extra button clutter) */}
         {statusMessage && (
-          <div className={`mb-4 p-3.5 rounded-xl text-xs flex flex-col gap-2.5 border ${
-            statusMessage.type === 'success' 
-              ? 'bg-emerald-50 text-emerald-900 border-emerald-200' 
-              : statusMessage.type === 'error'
-              ? 'bg-rose-50 text-rose-900 border-rose-200'
-              : 'bg-blue-50 text-blue-900 border-blue-200'
-          }`}>
-            <div className="flex items-start gap-2">
-              {statusMessage.type === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-              ) : statusMessage.type === 'error' ? (
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              ) : (
-                <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-              )}
-              <span className="font-medium leading-relaxed">{statusMessage.text}</span>
-            </div>
-
-            {/* Quick Action Recovery Suggestions */}
-            {(statusMessage.type === 'error' || statusMessage.type === 'info') && (
-              <div className="pt-2 border-t border-slate-200/70 flex flex-wrap items-center gap-2 mt-1">
-                {!isSignUp && !isSettingNewPassword && (
-                  <>
-                    {signInMethod === 'password' && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(true)}
-                          className="px-2.5 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-md font-medium text-[11px] transition-colors cursor-pointer"
-                        >
-                          Show Password
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSignInMethod('otp');
-                            setStatusMessage(null);
-                            handleSendOtp();
-                          }}
-                          className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-md font-semibold text-[11px] transition-colors cursor-pointer"
-                        >
-                          Sign in with Email Code
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleForgotPassword}
-                          className="px-2.5 py-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border border-cyan-200 rounded-md font-semibold text-[11px] transition-colors cursor-pointer"
-                        >
-                          Reset Password
-                        </button>
-                      </>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleResendConfirmation}
-                      className="px-2.5 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-md font-medium text-[11px] transition-colors cursor-pointer"
-                    >
-                      Resend Confirmation
-                    </button>
-                  </>
-                )}
-                {isSignUp && statusMessage.text.toLowerCase().includes('already') && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsSignUp(false);
-                      setStatusMessage(null);
-                    }}
-                    className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-700 text-white rounded-md font-semibold text-[11px] transition-colors cursor-pointer"
-                  >
-                    Proceed to Sign In
-                  </button>
-                )}
-              </div>
+          <div
+            className={`mb-4 p-3.5 rounded-xl text-xs flex items-start gap-2.5 border ${
+              statusMessage.type === 'success'
+                ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                : statusMessage.type === 'error'
+                ? 'bg-rose-50 text-rose-900 border-rose-200'
+                : 'bg-blue-50 text-blue-900 border-blue-200'
+            }`}
+          >
+            {statusMessage.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            ) : statusMessage.type === 'error' ? (
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            ) : (
+              <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
             )}
+            <span className="font-medium leading-relaxed">{statusMessage.text}</span>
           </div>
         )}
 
-        {/* 1. Setting New Password Form (Recovery) */}
-        {isSettingNewPassword ? (
-          <form onSubmit={handleSetNewPassword} className="space-y-4">
-            <div>
-              <label className="block text-[11px] font-mono text-slate-600 uppercase font-bold mb-1">
-                New Password
-              </label>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
-                <input
-                  type={showNewPassword ? 'text' : 'password'}
-                  required
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Min 6 characters"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-10 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-cyan-500 transition-colors"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowNewPassword(!showNewPassword)}
-                  className="absolute right-3 top-3 text-slate-400 hover:text-slate-700 transition-colors"
-                >
-                  {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 min-h-[44px]"
-            >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Update Password & Sign In</span>}
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsSettingNewPassword(false)}
-              className="w-full text-center text-xs text-slate-500 hover:text-slate-800 transition-colors"
-            >
-              Cancel
-            </button>
-          </form>
-        ) : !isSignUp && signInMethod === 'otp' ? (
-          /* 2. Email Code / OTP Form */
-          <div className="space-y-4">
+        {/* VIEW 1: 6-Digit Code Verification (After clicking "Forgot password?") */}
+        {resetStep === 'verify_code' ? (
+          <form onSubmit={handleVerifyResetCode} className="space-y-4">
             <div>
               <label className="block text-[11px] font-mono text-slate-600 uppercase font-bold mb-1">
                 Email Address
@@ -724,87 +612,139 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             </div>
 
-            {!otpSent ? (
-              <button
-                type="button"
-                onClick={handleSendOtp}
-                disabled={loading || !email.trim()}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 min-h-[44px]"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Sending Code...</span>
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4" />
-                    <span>Send Login Code to Email</span>
-                  </>
-                )}
-              </button>
-            ) : (
-              <form onSubmit={handleVerifyOtp} className="space-y-4 pt-2">
-                <div>
-                  <label className="block text-[11px] font-mono text-slate-600 uppercase font-bold mb-1">
-                    6-8 Digit Code from Email
-                  </label>
-                  <div className="relative">
-                    <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
-                    <input
-                      type="text"
-                      required
-                      value={otpCode}
-                      onChange={(e) => setOtpCode(e.target.value.trim())}
-                      placeholder="123456"
-                      autoFocus
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-xs text-slate-900 placeholder-slate-400 tracking-widest font-mono text-base focus:outline-none focus:bg-white focus:border-cyan-500 transition-colors"
-                    />
-                  </div>
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Check your email inbox or spam folder for the code. You can also click the link directly in the email.
-                  </p>
-                </div>
-
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[11px] font-mono text-slate-600 uppercase font-bold">
+                  6-Digit Verification Code
+                </label>
                 <button
-                  type="submit"
-                  disabled={loading || !otpCode.trim()}
-                  className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 min-h-[44px]"
+                  type="button"
+                  onClick={handleForgotPassword}
+                  disabled={loading}
+                  className="text-[11px] text-cyan-600 hover:text-cyan-700 hover:underline font-medium cursor-pointer disabled:opacity-50"
                 >
-                  {loading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Verifying...</span>
-                    </>
-                  ) : (
-                    <span>Verify Code & Sign In</span>
-                  )}
+                  Resend code
                 </button>
+              </div>
+              <div className="relative">
+                <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  required
+                  autoFocus
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-base font-mono font-bold tracking-[0.35em] text-slate-900 placeholder-slate-300 focus:outline-none focus:bg-white focus:border-cyan-500 transition-colors tabular-nums"
+                />
+              </div>
+            </div>
 
-                <div className="flex items-center justify-between pt-1">
-                  <button
-                    type="button"
-                    onClick={handleSendOtp}
-                    disabled={loading}
-                    className="text-[11px] text-cyan-600 hover:underline font-medium cursor-pointer"
-                  >
-                    Resend Code
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSignInMethod('password')}
-                    className="text-[11px] text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
-                  >
-                    Switch to Password Sign In
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
+            <button
+              type="submit"
+              disabled={loading || otpCode.length !== 6}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 min-h-[44px]"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Verifying Code...</span>
+                </>
+              ) : (
+                <span>Verify Code & Continue</span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setResetStep('idle');
+                setOtpCode('');
+                setStatusMessage(null);
+              }}
+              className="w-full pt-1 flex items-center justify-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Sign In</span>
+            </button>
+          </form>
+        ) : resetStep === 'new_password' ? (
+          /* VIEW 2: Set New Password Form (After 6-digit code is verified) */
+          <form onSubmit={handleSetNewPassword} className="space-y-4">
+            <div>
+              <label className="block text-[11px] font-mono text-slate-600 uppercase font-bold mb-1">
+                New Password
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
+                <input
+                  type={showNewPassword ? 'text' : 'password'}
+                  required
+                  autoFocus
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Minimum 6 characters"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-10 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-cyan-500 transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                  className="absolute right-3 top-3 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+                >
+                  {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-mono text-slate-600 uppercase font-bold mb-1">
+                Confirm New Password
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
+                <input
+                  type={showNewPassword ? 'text' : 'password'}
+                  required
+                  value={confirmNewPassword}
+                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  placeholder="Re-enter new password"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-10 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-cyan-500 transition-colors"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 min-h-[44px]"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Resetting Password...</span>
+                </>
+              ) : (
+                <span>Reset Password</span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setResetStep('idle');
+                setStatusMessage(null);
+              }}
+              className="w-full text-center text-xs text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+          </form>
         ) : (
-          /* 3. Standard Email + Password Form */
+          /* VIEW 3: Standard Email + Password Form */
           <form onSubmit={handleAuthSubmit} className="space-y-4">
-            {/* Full Name field (Sign Up Only) */}
             {isSignUp && (
               <div>
                 <label className="block text-[11px] font-mono text-slate-600 uppercase font-bold mb-1">
@@ -824,7 +764,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             )}
 
-            {/* Email Field */}
             <div>
               <label className="block text-[11px] font-mono text-slate-600 uppercase font-bold mb-1">
                 Email Address
@@ -842,7 +781,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             </div>
 
-            {/* Password Field */}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-[11px] font-mono text-slate-600 uppercase font-bold">
@@ -852,7 +790,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <button
                     type="button"
                     onClick={handleForgotPassword}
-                    className="text-[11px] text-cyan-600 hover:text-cyan-700 hover:underline font-medium cursor-pointer"
+                    disabled={loading}
+                    className="text-[11px] text-cyan-600 hover:text-cyan-700 hover:underline font-medium cursor-pointer disabled:opacity-50"
                   >
                     Forgot password?
                   </button>
@@ -879,7 +818,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             </div>
 
-            {/* Submit Button */}
             <button
               type="submit"
               disabled={loading}
@@ -898,7 +836,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         )}
 
         {/* Toggle Mode Footer */}
-        {!isSettingNewPassword && (
+        {resetStep === 'idle' && (
           <div className="mt-5 text-center">
             <p className="text-xs text-slate-500">
               {isSignUp ? 'Already have an account?' : "Don't have an account?"}{' '}
@@ -907,7 +845,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 onClick={() => {
                   setIsSignUp(!isSignUp);
                   setStatusMessage(null);
-                  setOtpSent(false);
                 }}
                 className="text-cyan-600 font-bold hover:underline cursor-pointer"
               >

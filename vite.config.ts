@@ -10,6 +10,8 @@ export default defineConfig(() => {
       'process.env.SUPABASE_ANON_KEY': JSON.stringify(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''),
       'process.env.VITE_SUPABASE_URL': JSON.stringify(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''),
       'process.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''),
+      'process.env.ENABLE_MARKETS': JSON.stringify(process.env.ENABLE_MARKETS || process.env.VITE_ENABLE_MARKETS || 'true'),
+      'process.env.VITE_ENABLE_MARKETS': JSON.stringify(process.env.VITE_ENABLE_MARKETS || process.env.ENABLE_MARKETS || 'true'),
     },
     plugins: [react(), tailwindcss()],
     resolve: {

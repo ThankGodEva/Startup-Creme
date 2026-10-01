@@ -10,11 +10,15 @@ import { AuthModal } from './components/AuthModal';
 import { BookmarksDrawer } from './components/BookmarksDrawer';
 import { Footer } from './components/Footer';
 import { LegalPage, LegalDocType } from './components/LegalPage';
+import { CalculatorsModule } from './components/CalculatorsModule';
+import { StartupDirectoryModule } from './components/StartupDirectoryModule';
+import { RatesTrackerModule } from './components/RatesTrackerModule';
+import { CareersBoardModule } from './components/CareersBoardModule';
 
 import { store } from './lib/store';
 import { Post, DiscussionTopic, UserProfile, ContentVertical } from './types';
-import { getPostUrl, getTopicUrl, getTabUrl, VALID_LOCALES, NavigationTab } from './lib/router';
-import { TrendingUp, Cpu, MessageSquare, Sparkles, SlidersHorizontal, ArrowRight, BarChart2, ThumbsUp } from 'lucide-react';
+import { getPostUrl, getTopicUrl, getTabUrl, VALID_LOCALES, NavigationTab, isMarketsEnabled } from './lib/router';
+import { TrendingUp, Cpu, MessageSquare, Sparkles, SlidersHorizontal, ArrowRight, BarChart2, ThumbsUp, Calculator, Building2, Landmark, Briefcase } from 'lucide-react';
 
 export default function App() {
   const [, setTick] = useState(0);
@@ -83,6 +87,51 @@ export default function App() {
       return;
     }
 
+    if (parts[0] === 'calculators') {
+      setActiveTab('calculators');
+      setSelectedPost(null);
+      setSelectedTopic(null);
+      setLoadingArticleSlug(null);
+      setLoadingTopicSlug(null);
+      return;
+    }
+
+    if (parts[0] === 'directory') {
+      setActiveTab('directory');
+      setSelectedPost(null);
+      setSelectedTopic(null);
+      setLoadingArticleSlug(null);
+      setLoadingTopicSlug(null);
+      return;
+    }
+
+    if (parts[0] === 'rates' || parts[0] === 'markets') {
+      if (!isMarketsEnabled()) {
+        setActiveTab('home');
+        setSelectedPost(null);
+        setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
+        window.history.replaceState({}, '', `/${currentLocale}`);
+        return;
+      }
+      setActiveTab('rates');
+      setSelectedPost(null);
+      setSelectedTopic(null);
+      setLoadingArticleSlug(null);
+      setLoadingTopicSlug(null);
+      return;
+    }
+
+    if (parts[0] === 'careers') {
+      setActiveTab('careers');
+      setSelectedPost(null);
+      setSelectedTopic(null);
+      setLoadingArticleSlug(null);
+      setLoadingTopicSlug(null);
+      return;
+    }
+
     let loc = 'en-us';
     let rest = parts;
     if (VALID_LOCALES.includes(parts[0])) {
@@ -129,6 +178,35 @@ export default function App() {
         setLoadingTopicSlug(null);
       } else if (first === 'terms' || first === 'terms-of-service' || first === 'terms-of-editorial-service') {
         setActiveTab('terms');
+        setSelectedPost(null);
+        setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
+      } else if (first === 'calculators') {
+        setActiveTab('calculators');
+        setSelectedPost(null);
+        setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
+      } else if (first === 'directory') {
+        setActiveTab('directory');
+        setSelectedPost(null);
+        setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
+      } else if (first === 'rates' || first === 'markets') {
+        if (!isMarketsEnabled()) {
+          setActiveTab('home');
+          window.history.replaceState({}, '', `/${loc}`);
+        } else {
+          setActiveTab('rates');
+        }
+        setSelectedPost(null);
+        setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
+      } else if (first === 'careers') {
+        setActiveTab('careers');
         setSelectedPost(null);
         setSelectedTopic(null);
         setLoadingArticleSlug(null);
@@ -205,6 +283,17 @@ export default function App() {
         setSelectedTopic(null);
         setLoadingArticleSlug(null);
         setLoadingTopicSlug(null);
+      } else if (first === 'markets' && slug === 'rates') {
+        if (!isMarketsEnabled()) {
+          setActiveTab('home');
+          window.history.replaceState({}, '', `/${loc}`);
+        } else {
+          setActiveTab('rates');
+        }
+        setSelectedPost(null);
+        setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
       } else {
         const post = store.getPostBySlug(slug, loc, first as ContentVertical) || store.getPostBySlug(slug);
         const winPost = typeof window !== 'undefined' ? (window as any).__INITIAL_POST__ : null;
@@ -276,16 +365,40 @@ export default function App() {
   // Bookmarked items
   const bookmarkedPosts = allPosts.filter(p => store.isBookmarked(p.id));
 
-  // Navigation handlers with browser URL updates
-  const handleTabChange = (tab: NavigationTab) => {
+  // Navigation handlers with browser URL updates and optional hash deep-linking
+  const handleTabChange = (tab: NavigationTab, customHash?: string) => {
+    if (tab === 'rates' && !isMarketsEnabled()) {
+      tab = 'home';
+      customHash = undefined;
+    }
     setActiveTab(tab);
     setSelectedPost(null);
     setSelectedTopic(null);
-    const targetUrl = getTabUrl(tab, currentLocale);
-    if (window.location.pathname !== targetUrl) {
-      window.history.pushState({}, '', targetUrl);
+    const baseTargetUrl = getTabUrl(tab, currentLocale);
+    const defaultModuleHash =
+      tab === 'calculators'
+        ? '#saas-runway'
+        : tab === 'directory'
+        ? '#startups-directory'
+        : tab === 'rates'
+        ? '#central-bank-rates'
+        : tab === 'careers'
+        ? '#remote-jobs-board'
+        : '';
+    const resolvedHash = customHash
+      ? customHash.startsWith('#')
+        ? customHash
+        : `#${customHash}`
+      : defaultModuleHash;
+
+    const fullTargetUrl = `${baseTargetUrl}${resolvedHash}`;
+    if (`${window.location.pathname}${window.location.hash}` !== fullTargetUrl) {
+      window.history.pushState({}, '', fullTargetUrl);
+      window.dispatchEvent(new CustomEvent('startupcreme:hashchange', { detail: { hash: resolvedHash } }));
     }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (!customHash) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   const handleSelectPost = (post: Post) => {
@@ -538,6 +651,24 @@ export default function App() {
               )}
             </div>
           </div>
+        ) : activeTab === 'calculators' ? (
+          /* MODULE 1: INTERACTIVE FINANCIAL & TECH CALCULATORS (/calculators) */
+          <CalculatorsModule />
+        ) : activeTab === 'directory' ? (
+          /* MODULE 2: STARTUP & FINTECH DIRECTORY (/directory) */
+          <StartupDirectoryModule
+            currentUser={currentUser}
+            onOpenAuth={() => setShowAuthModal(true)}
+          />
+        ) : activeTab === 'rates' && isMarketsEnabled() ? (
+          /* MODULE 3: MACRO & CLOUD RATE TRACKERS (/markets/rates) */
+          <RatesTrackerModule />
+        ) : activeTab === 'careers' ? (
+          /* MODULE 4: NICHE REMOTE STARTUP JOB & FRACTIONAL TALENT BOARD (/careers) */
+          <CareersBoardModule
+            currentUser={currentUser}
+            onOpenAuth={() => setShowAuthModal(true)}
+          />
         ) : (activeTab === 'privacy' || activeTab === 'terms') ? (
           /* LEGAL PAGES (Privacy Policy / Terms of Service) */
           <LegalPage
@@ -605,6 +736,245 @@ export default function App() {
                       />
                     </section>
                   )}
+
+                  {/* StartupCrème Growth & Product Expansion Suite */}
+                  <section>
+                    <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-6 border-b border-slate-200 pb-3 gap-2">
+                      <div>
+                        <h2 className="font-serif text-2xl font-bold text-slate-900">
+                          Founder, FinOps & Market Intelligence Suite
+                        </h2>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {isMarketsEnabled()
+                            ? 'Interactive financial modeling, verified startup directory, live central bank & cloud rate benchmarks, and fractional executive talent'
+                            : 'Interactive financial modeling, verified startup directory, and fractional executive talent'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className={`grid sm:grid-cols-2 ${isMarketsEnabled() ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-5`}>
+                      <div className="group bg-white border border-slate-200 hover:border-slate-300 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between text-left">
+                        <div>
+                          <div className="flex items-center justify-between text-xs font-mono text-slate-500 mb-3">
+                            <Calculator className="w-4 h-4 text-emerald-600" />
+                            <span>/calculators</span>
+                          </div>
+                          <h3
+                            onClick={() => handleTabChange('calculators', '#saas-runway')}
+                            className="font-serif text-base font-bold text-slate-900 group-hover:text-emerald-700 transition-colors mb-2 cursor-pointer"
+                          >
+                            Financial & Tech Calculators
+                          </h3>
+                          <p className="text-xs text-slate-500 leading-relaxed mb-3">
+                            12-month SaaS runway & burn simulator, Seed/Series A cap table dilution, and AWS vs. Supabase vs. Vercel cost estimator.
+                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono text-slate-500 mb-4 pt-2 border-t border-slate-100">
+                            <a
+                              href="/calculators#saas-runway"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleTabChange('calculators', '#saas-runway');
+                              }}
+                              className="hover:text-emerald-700 underline-offset-2 hover:underline"
+                            >
+                              #saas-runway
+                            </a>
+                            <span aria-hidden="true">·</span>
+                            <a
+                              href="/calculators#cap-table"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleTabChange('calculators', '#cap-table');
+                              }}
+                              className="hover:text-emerald-700 underline-offset-2 hover:underline"
+                            >
+                              #cap-table
+                            </a>
+                            <span aria-hidden="true">·</span>
+                            <a
+                              href="/calculators#cloud-cost-estimator"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleTabChange('calculators', '#cloud-cost-estimator');
+                              }}
+                              className="hover:text-emerald-700 underline-offset-2 hover:underline"
+                            >
+                              #cloud-cost-estimator
+                            </a>
+                          </div>
+                        </div>
+                        <a
+                          href="/calculators#saas-runway"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleTabChange('calculators', '#saas-runway');
+                          }}
+                          className="text-xs font-semibold text-slate-900 group-hover:text-emerald-700 flex items-center gap-1"
+                        >
+                          <span>Launch Calculators</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+
+                      <div className="group bg-white border border-slate-200 hover:border-slate-300 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between text-left">
+                        <div>
+                          <div className="flex items-center justify-between text-xs font-mono text-slate-500 mb-3">
+                            <Building2 className="w-4 h-4 text-cyan-600" />
+                            <span>/directory</span>
+                          </div>
+                          <h3
+                            onClick={() => handleTabChange('directory', '#startups-directory')}
+                            className="font-serif text-base font-bold text-slate-900 group-hover:text-cyan-700 transition-colors mb-2 cursor-pointer"
+                          >
+                            Startup & FinTech Directory
+                          </h3>
+                          <p className="text-xs text-slate-500 leading-relaxed mb-3">
+                            Explore verified early-stage and Series A startups filtered by vertical, funding stage, and production tech stack.
+                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono text-slate-500 mb-4 pt-2 border-t border-slate-100">
+                            <a
+                              href="/directory#startups-directory"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleTabChange('directory', '#startups-directory');
+                              }}
+                              className="hover:text-cyan-700 underline-offset-2 hover:underline"
+                            >
+                              #startups-directory
+                            </a>
+                            <span aria-hidden="true">·</span>
+                            <a
+                              href="/directory#submit-startup"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleTabChange('directory', '#submit-startup');
+                              }}
+                              className="hover:text-cyan-700 underline-offset-2 hover:underline"
+                            >
+                              #submit-startup
+                            </a>
+                          </div>
+                        </div>
+                        <a
+                          href="/directory#startups-directory"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleTabChange('directory', '#startups-directory');
+                          }}
+                          className="text-xs font-semibold text-slate-900 group-hover:text-cyan-700 flex items-center gap-1"
+                        >
+                          <span>Browse Directory</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+
+                      {isMarketsEnabled() && (
+                        <div className="group bg-white border border-slate-200 hover:border-slate-300 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between text-left">
+                          <div>
+                            <div className="flex items-center justify-between text-xs font-mono text-slate-500 mb-3">
+                              <Landmark className="w-4 h-4 text-emerald-700" />
+                              <span>/markets/rates</span>
+                            </div>
+                            <h3
+                              onClick={() => handleTabChange('rates', '#central-bank-rates')}
+                              className="font-serif text-base font-bold text-slate-900 group-hover:text-emerald-700 transition-colors mb-2 cursor-pointer"
+                            >
+                              Macro & Cloud Rate Trackers
+                            </h3>
+                            <p className="text-xs text-slate-500 leading-relaxed mb-3">
+                              Central bank policy rates (FED, ECB, CBN, BoE) alongside serverless compute, database egress, and GPU pricing index.
+                            </p>
+                            <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono text-slate-500 mb-4 pt-2 border-t border-slate-100">
+                              <a
+                                href="/markets/rates#central-bank-rates"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  handleTabChange('rates', '#central-bank-rates');
+                                }}
+                                className="hover:text-emerald-700 underline-offset-2 hover:underline"
+                              >
+                                #central-bank-rates
+                              </a>
+                              <span aria-hidden="true">·</span>
+                              <a
+                                href="/markets/rates#cloud-pricing-index"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  handleTabChange('rates', '#cloud-pricing-index');
+                                }}
+                                className="hover:text-emerald-700 underline-offset-2 hover:underline"
+                              >
+                                #cloud-pricing-index
+                              </a>
+                            </div>
+                          </div>
+                          <a
+                            href="/markets/rates#central-bank-rates"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleTabChange('rates', '#central-bank-rates');
+                            }}
+                            className="text-xs font-semibold text-slate-900 group-hover:text-emerald-700 flex items-center gap-1"
+                          >
+                            <span>View Live Rates</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+                      )}
+
+                      <div className="group bg-white border border-slate-200 hover:border-slate-300 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between text-left">
+                        <div>
+                          <div className="flex items-center justify-between text-xs font-mono text-slate-500 mb-3">
+                            <Briefcase className="w-4 h-4 text-teal-700" />
+                            <span>/careers</span>
+                          </div>
+                          <h3
+                            onClick={() => handleTabChange('careers', '#remote-jobs-board')}
+                            className="font-serif text-base font-bold text-slate-900 group-hover:text-teal-700 transition-colors mb-2 cursor-pointer"
+                          >
+                            Remote Job & Fractional Board
+                          </h3>
+                          <p className="text-xs text-slate-500 leading-relaxed mb-3">
+                            Curated remote software engineering, cloud FinOps, financial modeling, and fractional CTO/CFO leadership roles.
+                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono text-slate-500 mb-4 pt-2 border-t border-slate-100">
+                            <a
+                              href="/careers#remote-jobs-board"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleTabChange('careers', '#remote-jobs-board');
+                              }}
+                              className="hover:text-teal-700 underline-offset-2 hover:underline"
+                            >
+                              #remote-jobs-board
+                            </a>
+                            <span aria-hidden="true">·</span>
+                            <a
+                              href="/careers#post-job"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleTabChange('careers', '#post-job');
+                              }}
+                              className="hover:text-teal-700 underline-offset-2 hover:underline"
+                            >
+                              #post-job
+                            </a>
+                          </div>
+                        </div>
+                        <a
+                          href="/careers#remote-jobs-board"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleTabChange('careers', '#remote-jobs-board');
+                          }}
+                          className="text-xs font-semibold text-slate-900 group-hover:text-teal-700 flex items-center gap-1"
+                        >
+                          <span>Explore Open Roles</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+                    </div>
+                  </section>
 
                   {/* Finance Intelligence Grid */}
                   <section>

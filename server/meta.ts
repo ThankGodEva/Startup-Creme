@@ -256,6 +256,11 @@ export async function resolvePageMetadata(
     'tech',
     'discussion',
     'discussions',
+    'calculators',
+    'directory',
+    'markets',
+    'rates',
+    'careers',
     'admin',
     'sitemap.xml',
     'robots.txt',
@@ -273,7 +278,7 @@ export async function resolvePageMetadata(
     const rawSlug = segments[segments.length - 1];
     const lowerSlug = rawSlug.toLowerCase();
 
-    // 1. Static Silo Category Sections
+    // 1. Static Silo Category Sections & Expansion Modules
     if (lowerSlug === 'finance') {
       title = 'Finance, Markets & Venture Intelligence | StartupCrème';
       description = 'Authoritative reporting on African and global fintech, capital markets, venture capital, macroeconomics, and institutional investments.';
@@ -284,6 +289,30 @@ export async function resolvePageMetadata(
       description = 'Frontier artificial intelligence architectures, developer tooling, cloud infrastructure, and emerging startup technology ecosystems.';
       coverImage = 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=1200&h=630';
       section = 'Technology';
+    } else if (lowerSlug === 'calculators') {
+      title = 'Interactive Financial & Tech Calculators | StartupCrème';
+      description = 'SaaS runway & burn rate calculator, cap table dilution simulator across Seed and Series A, and cloud infrastructure cost estimator.';
+      section = 'Calculators';
+    } else if (lowerSlug === 'directory') {
+      title = 'The Startup & FinTech Directory | StartupCrème';
+      description = 'Curated directory of early-stage and growth startups across FinTech, AI, Cloud Infrastructure, and EdTech.';
+      section = 'Directory';
+    } else if (
+      (lowerSlug === 'rates' || cleanPath.includes('/markets/rates')) &&
+      !['false', '0', 'no', 'off'].includes(
+        String(process.env.ENABLE_MARKETS ?? process.env.VITE_ENABLE_MARKETS ?? 'true')
+          .trim()
+          .toLowerCase()
+          .replace(/^["']|["']$/g, '')
+      )
+    ) {
+      title = 'Macro Central Bank & Cloud Rate Trackers | StartupCrème';
+      description = 'Live benchmark central bank interest rates and developer cloud infrastructure pricing index across AWS, Supabase, Vercel, and Cloudflare.';
+      section = 'Markets';
+    } else if (lowerSlug === 'careers') {
+      title = 'Remote Startup Job & Fractional Talent Board | StartupCrème';
+      description = 'Curated remote software engineering, FinOps, financial modeling, and fractional CTO/CFO leadership roles.';
+      section = 'Careers';
     } else if (lowerSlug === 'discussions' || lowerSlug === 'discussion') {
       title = 'Editorial Community & Technical Discussions | StartupCrème';
       description = 'Engage with institutional analysts, technical founders, and verified engineering leaders on market strategy and AI infrastructure.';
