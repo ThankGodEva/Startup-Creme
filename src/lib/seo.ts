@@ -107,6 +107,12 @@ export function generateSitemapXML(posts: Post[], topics: DiscussionTopic[]): st
   });
 
   xml += `  <url>\n`;
+  xml += `    <loc>${baseUrl}/about</loc>\n`;
+  xml += `    <changefreq>monthly</changefreq>\n`;
+  xml += `    <priority>0.8</priority>\n`;
+  xml += `  </url>\n`;
+
+  xml += `  <url>\n`;
   xml += `    <loc>${baseUrl}/privacy</loc>\n`;
   xml += `    <changefreq>monthly</changefreq>\n`;
   xml += `    <priority>0.5</priority>\n`;

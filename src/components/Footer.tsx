@@ -136,6 +136,15 @@ export const Footer: React.FC<FooterProps> = ({ currentLocale, onTabChange, onOp
                 <span>Remote Jobs & Fractional Talent</span>
               </button>
             </li>
+            <li>
+              <button 
+                onClick={() => onTabChange('about')}
+                className="hover:text-emerald-400 transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span>About StartupCrème & Leadership</span>
+              </button>
+            </li>
           </ul>
         </div>
 
@@ -203,9 +212,29 @@ export const Footer: React.FC<FooterProps> = ({ currentLocale, onTabChange, onOp
 
       <div className="max-w-7xl mx-auto mt-12 pt-6 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between text-[11px] font-mono text-slate-400 gap-4">
         <div>
-          © {new Date().getFullYear()} Startup Crème. All rights reserved.
+          © {new Date().getFullYear()} Startup Crème · Operated by{' '}
+          <a
+            href="https://habinsoft.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-slate-300 hover:text-emerald-400 transition-colors underline-offset-2 hover:underline"
+          >
+            Habinsoft Technologies Limited
+          </a>
+          . All rights reserved.
         </div>
         <div className="flex flex-wrap items-center gap-5">
+          <a
+            href={getTabUrl('about', currentLocale)}
+            onClick={(e) => {
+              e.preventDefault();
+              onTabChange('about');
+            }}
+            className="hover:text-emerald-400 transition-colors cursor-pointer"
+          >
+            About Us
+          </a>
+          <span className="text-slate-700 hidden sm:inline">•</span>
           <a
             href={getTabUrl('privacy', currentLocale)}
             onClick={(e) => {

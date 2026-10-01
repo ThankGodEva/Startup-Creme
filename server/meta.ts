@@ -261,6 +261,8 @@ export async function resolvePageMetadata(
     'markets',
     'rates',
     'careers',
+    'about',
+    'about-us',
     'admin',
     'sitemap.xml',
     'robots.txt',
@@ -313,6 +315,47 @@ export async function resolvePageMetadata(
       title = 'Remote Startup Job & Fractional Talent Board | StartupCrème';
       description = 'Curated remote software engineering, FinOps, financial modeling, and fractional CTO/CFO leadership roles.';
       section = 'Careers';
+    } else if (lowerSlug === 'about' || lowerSlug === 'about-us') {
+      title = 'About StartupCrème | Institutional Finance, Tech & AI Intelligence';
+      description = 'StartupCrème is a global guide dedicated to helping founders, software architects, and finance professionals build, fund, and scale companies in the age of AI. Built and operated by Habinsoft Technologies Limited and led by Chibueze ThankGod.';
+      section = 'About';
+      const aboutJsonLd = {
+        '@context': 'https://schema.org',
+        '@graph': [
+          {
+            '@type': ['NewsMediaOrganization', 'Organization'],
+            '@id': `${baseUrl}/#organization`,
+            name: 'StartupCrème',
+            url: baseUrl,
+            logo: {
+              '@type': 'ImageObject',
+              url: `${baseUrl}/logo.jpg`
+            },
+            description,
+            founder: { '@id': `${baseUrl}/#founder` },
+            parentOrganization: {
+              '@type': 'Organization',
+              '@id': 'https://habinsoft.com/#organization',
+              name: 'Habinsoft Technologies Limited',
+              url: 'https://habinsoft.com',
+              founder: { '@id': `${baseUrl}/#founder` }
+            }
+          },
+          {
+            '@type': 'Person',
+            '@id': `${baseUrl}/#founder`,
+            name: 'Chibueze ThankGod',
+            jobTitle: 'Founder & Chief Executive Officer',
+            description: 'Software Engineer, Full-Stack Developer, and Tech Entrepreneur leading Habinsoft Technologies Limited and StartupCrème.',
+            url: `${baseUrl}/about#leadership`,
+            worksFor: [
+              { '@id': 'https://habinsoft.com/#organization' },
+              { '@id': `${baseUrl}/#organization` }
+            ]
+          }
+        ]
+      };
+      jsonLdScript = `<script type="application/ld+json">${JSON.stringify(aboutJsonLd)}</script>`;
     } else if (lowerSlug === 'discussions' || lowerSlug === 'discussion') {
       title = 'Editorial Community & Technical Discussions | StartupCrème';
       description = 'Engage with institutional analysts, technical founders, and verified engineering leaders on market strategy and AI infrastructure.';

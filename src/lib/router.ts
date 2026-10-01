@@ -9,6 +9,7 @@ export type NavigationTab =
   | 'directory'
   | 'rates'
   | 'careers'
+  | 'about'
   | 'admin'
   | 'privacy'
   | 'terms';
@@ -33,6 +34,7 @@ export function getTabUrl(tab: NavigationTab, locale = 'en-us'): string {
   if (tab === 'directory') return '/directory';
   if (tab === 'rates') return '/markets/rates';
   if (tab === 'careers') return '/careers';
+  if (tab === 'about') return '/about';
   if (tab === 'privacy') return `/${locale}/privacy`;
   if (tab === 'terms') return `/${locale}/terms`;
   return `/${locale}/${tab}`;

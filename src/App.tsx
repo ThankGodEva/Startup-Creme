@@ -14,6 +14,7 @@ import { CalculatorsModule } from './components/CalculatorsModule';
 import { StartupDirectoryModule } from './components/StartupDirectoryModule';
 import { RatesTrackerModule } from './components/RatesTrackerModule';
 import { CareersBoardModule } from './components/CareersBoardModule';
+import { AboutPage } from './components/AboutPage';
 
 import { store } from './lib/store';
 import { Post, DiscussionTopic, UserProfile, ContentVertical } from './types';
@@ -132,6 +133,15 @@ export default function App() {
       return;
     }
 
+    if (parts[0] === 'about' || parts[0] === 'about-us') {
+      setActiveTab('about');
+      setSelectedPost(null);
+      setSelectedTopic(null);
+      setLoadingArticleSlug(null);
+      setLoadingTopicSlug(null);
+      return;
+    }
+
     let loc = 'en-us';
     let rest = parts;
     if (VALID_LOCALES.includes(parts[0])) {
@@ -207,6 +217,12 @@ export default function App() {
         setLoadingTopicSlug(null);
       } else if (first === 'careers') {
         setActiveTab('careers');
+        setSelectedPost(null);
+        setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
+      } else if (first === 'about' || first === 'about-us') {
+        setActiveTab('about');
         setSelectedPost(null);
         setSelectedTopic(null);
         setLoadingArticleSlug(null);
@@ -668,6 +684,12 @@ export default function App() {
           <CareersBoardModule
             currentUser={currentUser}
             onOpenAuth={() => setShowAuthModal(true)}
+          />
+        ) : activeTab === 'about' ? (
+          /* INSTITUTIONAL ABOUT US PAGE (/about) */
+          <AboutPage
+            currentLocale={currentLocale}
+            onNavigateTab={handleTabChange}
           />
         ) : (activeTab === 'privacy' || activeTab === 'terms') ? (
           /* LEGAL PAGES (Privacy Policy / Terms of Service) */
