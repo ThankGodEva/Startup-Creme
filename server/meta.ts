@@ -293,7 +293,7 @@ export async function resolvePageMetadata(
       section = 'Technology';
     } else if (lowerSlug === 'calculators') {
       title = 'Interactive Financial & Tech Calculators | StartupCrème';
-      description = 'SaaS runway & burn rate calculator, cap table dilution simulator across Seed and Series A, and cloud infrastructure cost estimator.';
+      description = 'Compound interest calculator, SaaS runway & burn rate calculator, cap table dilution simulator across Seed and Series A, and cloud infrastructure cost estimator.';
       section = 'Calculators';
     } else if (lowerSlug === 'directory') {
       title = 'The Startup & FinTech Directory | StartupCrème';

@@ -4,6 +4,7 @@ import {
   TrendingUp,
   PieChart,
   Server,
+  Coins,
   Download,
   RotateCcw,
   CheckCircle2,
@@ -12,19 +13,20 @@ import {
 } from 'lucide-react';
 import { RunwayProjectionMonth, CapTableStakeholder } from '../types';
 import { useHashAnchorScroll, Route } from '../hooks/useHashAnchorScroll';
+import { CompoundInterestCalculator } from './CompoundInterestCalculator';
 
 /**
  * React Router 7 hash-aware meta export for /calculators
  */
 export function meta({ location }: Route.MetaArgs) {
-  const hash = location.hash || '#saas-runway';
+  const hash = location.hash || '#compound-interest';
   const canonicalUrl = `https://www.startupcreme.com/calculators${hash}`;
 
   return [
     { title: 'Interactive Financial & Tech Calculators | StartupCrème' },
     {
       name: 'description',
-      content: 'Institutional-grade scenario modeling for founders, CFOs, and infrastructure architects.',
+      content: 'Institutional-grade compound interest wealth accumulator, SaaS runway scenario modeling, multi-round cap table dilution, and cloud unit economics.',
     },
     { tagName: 'link', rel: 'canonical', href: canonicalUrl },
     { property: 'og:url', content: canonicalUrl },
@@ -48,14 +50,25 @@ export async function loader() {
   };
 }
 
-export type CalculatorSubTab = 'saas-runway' | 'cap-table' | 'cloud-cost-estimator';
+export type CalculatorSubTab =
+  | 'compound-interest'
+  | 'saas-runway'
+  | 'cap-table'
+  | 'cloud-cost-estimator';
 
 export const CalculatorsModule: React.FC = () => {
-  const [activeSubTab, setActiveSubTab] = useState<CalculatorSubTab>('saas-runway');
+  const [activeSubTab, setActiveSubTab] = useState<CalculatorSubTab>('compound-interest');
 
   const handleHashTabChange = useCallback((rawTab: string) => {
     const clean = rawTab.replace(/^#/, '').toLowerCase();
-    if (clean === 'saas-runway' || clean === 'runway') {
+    if (
+      clean === 'compound-interest' ||
+      clean === 'compound' ||
+      clean === 'interest' ||
+      clean === 'wealth'
+    ) {
+      setActiveSubTab('compound-interest');
+    } else if (clean === 'saas-runway' || clean === 'runway') {
       setActiveSubTab('saas-runway');
     } else if (clean === 'cap-table' || clean === 'captable') {
       setActiveSubTab('cap-table');
@@ -65,8 +78,19 @@ export const CalculatorsModule: React.FC = () => {
   }, []);
 
   const { navigateToHash } = useHashAnchorScroll(handleHashTabChange, {
-    defaultHash: 'saas-runway',
-    validHashes: ['saas-runway', 'cap-table', 'cloud-cost-estimator', 'runway', 'captable', 'cloud'],
+    defaultHash: 'compound-interest',
+    validHashes: [
+      'compound-interest',
+      'saas-runway',
+      'cap-table',
+      'cloud-cost-estimator',
+      'compound',
+      'interest',
+      'wealth',
+      'runway',
+      'captable',
+      'cloud',
+    ],
     metaFn: meta,
   });
 
@@ -408,12 +432,28 @@ export const CalculatorsModule: React.FC = () => {
             Interactive Financial & Tech Calculators
           </h1>
           <p className="text-sm text-slate-500 mt-2 max-w-2xl leading-relaxed">
-            Institutional-grade scenario modeling for founders, CFOs, and infrastructure architects. Simulate 12-month cash depletion, multi-round equity dilution, and cloud unit economics in real time.
+            Institutional-grade scenario modeling for founders, investors, CFOs, and infrastructure architects. Simulate long-term compound interest accumulation, 12-month SaaS runway, equity dilution, and cloud unit economics in real time.
           </p>
         </div>
 
         {/* Segmented Calculator Switcher (Hash-Synchronized) */}
         <div className="flex items-center gap-1 p-1 bg-slate-100 border border-slate-200 rounded-xl self-start lg:self-auto overflow-x-auto max-w-full">
+          <a
+            href="#compound-interest"
+            onClick={(e) => {
+              e.preventDefault();
+              navigateToHash('compound-interest');
+            }}
+            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+              activeSubTab === 'compound-interest'
+                ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Coins className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Compound Interest</span>
+          </a>
+
           <a
             href="#saas-runway"
             onClick={(e) => {
@@ -463,6 +503,13 @@ export const CalculatorsModule: React.FC = () => {
           </a>
         </div>
       </div>
+
+      {/* =================================================================
+          SUB-MODULE 0: COMPOUND INTEREST ACCUMULATOR (#compound-interest)
+         ================================================================= */}
+      {activeSubTab === 'compound-interest' && (
+        <CompoundInterestCalculator />
+      )}
 
       {/* =================================================================
           SUB-MODULE 1A: SAAS RUNWAY & BURN RATE CALCULATOR (#saas-runway)

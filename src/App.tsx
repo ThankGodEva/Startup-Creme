@@ -782,15 +782,26 @@ export default function App() {
                             <span>/calculators</span>
                           </div>
                           <h3
-                            onClick={() => handleTabChange('calculators', '#saas-runway')}
+                            onClick={() => handleTabChange('calculators', '#compound-interest')}
                             className="font-serif text-base font-bold text-slate-900 group-hover:text-emerald-700 transition-colors mb-2 cursor-pointer"
                           >
                             Financial & Tech Calculators
                           </h3>
                           <p className="text-xs text-slate-500 leading-relaxed mb-3">
-                            12-month SaaS runway & burn simulator, Seed/Series A cap table dilution, and AWS vs. Supabase vs. Vercel cost estimator.
+                            Compound interest wealth accumulator, 12-month SaaS runway & burn simulator, Seed/Series A cap table dilution, and cloud cost estimator.
                           </p>
                           <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono text-slate-500 mb-4 pt-2 border-t border-slate-100">
+                            <a
+                              href="/calculators#compound-interest"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleTabChange('calculators', '#compound-interest');
+                              }}
+                              className="hover:text-emerald-700 underline-offset-2 hover:underline"
+                            >
+                              #compound-interest
+                            </a>
+                            <span aria-hidden="true">·</span>
                             <a
                               href="/calculators#saas-runway"
                               onClick={(e) => {
@@ -826,10 +837,10 @@ export default function App() {
                           </div>
                         </div>
                         <a
-                          href="/calculators#saas-runway"
+                          href="/calculators#compound-interest"
                           onClick={(e) => {
                             e.preventDefault();
-                            handleTabChange('calculators', '#saas-runway');
+                            handleTabChange('calculators', '#compound-interest');
                           }}
                           className="text-xs font-semibold text-slate-900 group-hover:text-emerald-700 flex items-center gap-1"
                         >

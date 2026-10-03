@@ -310,6 +310,25 @@ export interface CapTableStakeholder {
   exitPayout: number;
 }
 
+export interface CompoundInterestYearData {
+  year: number;
+  label: string;
+  startingBalance: number;
+  annualContribution: number;
+  totalContributions: number;
+  interestEarnedYear: number;
+  totalInterest: number;
+  endingBalance: number;
+}
+
+export interface CompoundInterestSummary {
+  finalBalance: number;
+  totalInterest: number;
+  moneyPutIn: number;
+  interestMultiplier: number;
+  yearsData: CompoundInterestYearData[];
+}
+
 // Module 2: Startup & FinTech Directory (startupcreme.startups)
 export type StartupStage = 'idea' | 'mvp' | 'seed' | 'series_a' | 'bootstrapped';
 
