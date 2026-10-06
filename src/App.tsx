@@ -14,12 +14,13 @@ import { CalculatorsModule } from './components/CalculatorsModule';
 import { StartupDirectoryModule } from './components/StartupDirectoryModule';
 import { RatesTrackerModule } from './components/RatesTrackerModule';
 import { CareersBoardModule } from './components/CareersBoardModule';
+import { EventsModule } from './components/EventsModule';
 import { AboutPage } from './components/AboutPage';
 
 import { store } from './lib/store';
 import { Post, DiscussionTopic, UserProfile, ContentVertical } from './types';
 import { getPostUrl, getTopicUrl, getTabUrl, VALID_LOCALES, NavigationTab, isMarketsEnabled } from './lib/router';
-import { TrendingUp, Cpu, MessageSquare, Sparkles, SlidersHorizontal, ArrowRight, BarChart2, ThumbsUp, Calculator, Building2, Landmark, Briefcase } from 'lucide-react';
+import { TrendingUp, Cpu, MessageSquare, Sparkles, SlidersHorizontal, ArrowRight, BarChart2, ThumbsUp, Calculator, Building2, Landmark, Briefcase, Calendar } from 'lucide-react';
 
 export default function App() {
   const [, setTick] = useState(0);
@@ -133,6 +134,15 @@ export default function App() {
       return;
     }
 
+    if (parts[0] === 'events' || parts[0] === 'grants') {
+      setActiveTab('events');
+      setSelectedPost(null);
+      setSelectedTopic(null);
+      setLoadingArticleSlug(null);
+      setLoadingTopicSlug(null);
+      return;
+    }
+
     if (parts[0] === 'about' || parts[0] === 'about-us') {
       setActiveTab('about');
       setSelectedPost(null);
@@ -217,6 +227,12 @@ export default function App() {
         setLoadingTopicSlug(null);
       } else if (first === 'careers') {
         setActiveTab('careers');
+        setSelectedPost(null);
+        setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
+      } else if (first === 'events' || first === 'grants') {
+        setActiveTab('events');
         setSelectedPost(null);
         setSelectedTopic(null);
         setLoadingArticleSlug(null);
@@ -685,6 +701,13 @@ export default function App() {
             currentUser={currentUser}
             onOpenAuth={() => setShowAuthModal(true)}
           />
+        ) : activeTab === 'events' ? (
+          /* MODULE 5: GRANTS, ACCELERATORS & STARTUP EVENTS (/events) */
+          <EventsModule
+            currentUser={currentUser}
+            onSelectPost={handleSelectPost}
+            onOpenAuth={() => setShowAuthModal(true)}
+          />
         ) : activeTab === 'about' ? (
           /* INSTITUTIONAL ABOUT US PAGE (/about) */
           <AboutPage
@@ -1003,6 +1026,58 @@ export default function App() {
                           className="text-xs font-semibold text-slate-900 group-hover:text-teal-700 flex items-center gap-1"
                         >
                           <span>Explore Open Roles</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+
+                      <div className="group bg-white border border-slate-200 hover:border-slate-300 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between text-left">
+                        <div>
+                          <div className="flex items-center justify-between text-xs font-mono text-slate-500 mb-3">
+                            <Calendar className="w-4 h-4 text-amber-600" />
+                            <span>/events</span>
+                          </div>
+                          <h3
+                            onClick={() => handleTabChange('events', '#opportunities')}
+                            className="font-serif text-base font-bold text-slate-900 group-hover:text-amber-700 transition-colors mb-2 cursor-pointer"
+                          >
+                            Grants, Accelerators & Events
+                          </h3>
+                          <p className="text-xs text-slate-500 leading-relaxed mb-3">
+                            Non-dilutive startup grants, elite venture accelerators, founder fellowships, and engineering hackathons.
+                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono text-slate-500 mb-4 pt-2 border-t border-slate-100">
+                            <a
+                              href="/events#opportunities"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleTabChange('events', '#opportunities');
+                              }}
+                              className="hover:text-amber-700 underline-offset-2 hover:underline"
+                            >
+                              #opportunities
+                            </a>
+                            <span aria-hidden="true">·</span>
+                            <a
+                              href="/events#n8n"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleTabChange('events', '#n8n');
+                              }}
+                              className="hover:text-amber-700 underline-offset-2 hover:underline"
+                            >
+                              #n8n-ingestion
+                            </a>
+                          </div>
+                        </div>
+                        <a
+                          href="/events#opportunities"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleTabChange('events', '#opportunities');
+                          }}
+                          className="text-xs font-semibold text-slate-900 group-hover:text-amber-700 flex items-center gap-1"
+                        >
+                          <span>Explore Opportunities</span>
                           <ArrowRight className="w-3.5 h-3.5" />
                         </a>
                       </div>

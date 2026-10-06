@@ -25,9 +25,21 @@ import {
   Briefcase,
   ShieldCheck,
   Clock,
-  ExternalLink
+  ExternalLink,
+  Calendar,
+  DollarSign,
+  Award
 } from 'lucide-react';
-import { Post, DiscussionTopic, UserProfile, ContentVertical, PublicationStatus, StartupEntry, JobListing } from '../types';
+import { 
+  Post, 
+  DiscussionTopic, 
+  UserProfile, 
+  ContentVertical, 
+  PublicationStatus, 
+  StartupEntry, 
+  JobListing,
+  EventOpportunity 
+} from '../types';
 import { generateSitemapXML, generateRobotsTxt } from '../lib/seo';
 import { store } from '../lib/store';
 import { ArticleEditorPage } from './ArticleEditorPage';
@@ -37,7 +49,7 @@ interface AdminDashboardProps {
   currentUser: UserProfile | null;
   posts: Post[];
   topics: DiscussionTopic[];
-  initialTab?: 'posts' | 'discussions' | 'directory_jobs' | 'seo' | 'ai';
+  initialTab?: 'posts' | 'discussions' | 'directory_jobs' | 'events' | 'seo' | 'ai';
   onSavePost: (post: Partial<Post>) => Promise<{ success: boolean; post: Post; error?: string }>;
   onDeletePost: (id: string) => void;
   onTogglePostStatus: (id: string) => void;
@@ -56,14 +68,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onDeleteTopic,
   onSwitchRole,
 }) => {
-  const [activeTab, setActiveTab] = useState<'posts' | 'discussions' | 'directory_jobs' | 'seo' | 'ai'>(initialTab || 'posts');
+  const [activeTab, setActiveTab] = useState<'posts' | 'discussions' | 'directory_jobs' | 'events' | 'seo' | 'ai'>(initialTab || 'posts');
   const [editingPost, setEditingPost] = useState<Partial<Post> | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [verticalFilter, setVerticalFilter] = useState<'all' | ContentVertical>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | PublicationStatus>('all');
   const [startups, setStartups] = useState<StartupEntry[]>(() => store.getStartups(true));
   const [jobs, setJobs] = useState<JobListing[]>(() => store.getJobs(true));
+  const [events, setEvents] = useState<EventOpportunity[]>(() => store.getEvents());
   const [busyModerationId, setBusyModerationId] = useState<string | null>(null);
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+  const [webhookTestResult, setWebhookTestResult] = useState<any>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -73,10 +88,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     store.fetchJobs(true).then((list) => {
       if (mounted) setJobs(list);
     });
+    store.fetchEvents().then((evts) => {
+      if (mounted) setEvents(evts);
+    });
     const unsub = store.subscribe(() => {
       if (mounted) {
         setStartups(store.getStartups(true));
         setJobs(store.getJobs(true));
+        setEvents(store.getEvents());
       }
     });
     return () => {
@@ -289,6 +308,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>
               Directory & Jobs ({startups.filter(s => !s.is_approved).length + jobs.filter(j => !j.is_active).length} Pending)
             </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('events')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === 'events'
+                ? 'bg-white text-slate-900 border border-slate-200 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Calendar className="w-4 h-4 text-amber-600" />
+            <span>Events & Grants ({events.length})</span>
           </button>
 
           <button
@@ -634,6 +665,191 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>Delete from DB</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* EVENTS, GRANTS & N8N INGESTION TAB */}
+        {activeTab === 'events' && (
+          <div className="space-y-8">
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                <div>
+                  <div className="flex items-center gap-2 text-xs font-mono text-amber-700 font-bold uppercase mb-1">
+                    <Calendar className="w-4 h-4" />
+                    <span>Module 05 • Opportunities & Webhook Pipeline</span>
+                  </div>
+                  <h3 className="font-serif text-2xl font-bold text-slate-900">
+                    Ingested Events, Grants & Accelerators ({events.length})
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-1">
+                    Synchronized with <code className="font-mono text-slate-800">startupcreme.events</code> and <code className="font-mono text-slate-800">startupcreme.posts</code>.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isTestingWebhook}
+                  onClick={async () => {
+                    setIsTestingWebhook(true);
+                    setWebhookTestResult(null);
+                    try {
+                      const testPayload = {
+                        event_title: `National AI Scale Grant ${new Date().getFullYear()}`,
+                        application_url: `https://grants.gov/opportunity/ai-scale-${Date.now()}`,
+                        slug: `ai-scale-grant-${Date.now().toString(36)}`,
+                        vertical: 'tech',
+                        locale: 'en-us',
+                        title: `National Foundation Launches $500k AI Scale Grant for Frontier Labs`,
+                        content: {
+                          type: 'doc',
+                          content: [
+                            {
+                              type: 'paragraph',
+                              content: [
+                                {
+                                  type: 'text',
+                                  text: 'The National AI Technology Foundation has opened non-dilutive grant applications providing up to $500,000 for autonomous agent engineering teams.',
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                        opportunity_type: 'grant',
+                        funding_amount: '$500,000 Non-Dilutive Grant',
+                        location: 'Global (Remote)',
+                        deadline_date: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
+                      };
+
+                      const token = 'startupcreme-n8n-events-secret-2026';
+                      const res = await fetch('/api/events/webhook', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          Authorization: `Bearer ${token}`,
+                        },
+                        body: JSON.stringify(testPayload),
+                      });
+                      const json = await res.json();
+                      setWebhookTestResult({ status: res.status, ok: res.ok, data: json });
+                      if (res.ok) {
+                        const updated = await store.fetchEvents();
+                        setEvents(updated);
+                      }
+                    } catch (err: any) {
+                      setWebhookTestResult({ status: 500, ok: false, error: err.message });
+                    } finally {
+                      setIsTestingWebhook(false);
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isTestingWebhook ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Calendar className="w-4 h-4" />
+                  )}
+                  <span>Test n8n Webhook Ingestion</span>
+                </button>
+              </div>
+
+              {/* Webhook Test Output Alert */}
+              {webhookTestResult && (
+                <div
+                  className={`mb-6 p-4 rounded-xl border text-xs font-mono ${
+                    webhookTestResult.ok
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                      : 'bg-rose-50 border-rose-200 text-rose-900'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-bold">
+                      {webhookTestResult.ok ? '✓ Webhook Test Succeeded (HTTP 200)' : '✕ Webhook Test Failed'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setWebhookTestResult(null)}
+                      className="underline text-[11px] opacity-75 hover:opacity-100"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                  <pre className="overflow-x-auto p-2 bg-white/70 rounded-lg text-[11px]">
+                    {JSON.stringify(webhookTestResult, null, 2)}
+                  </pre>
+                </div>
+              )}
+
+              {/* Opportunity Pipeline Listing */}
+              {events.length === 0 ? (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center text-xs text-slate-500">
+                  No events ingested yet. Run the webhook test or connect an n8n scraper workflow.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {events.map((e) => (
+                    <div
+                      key={e.id}
+                      className="bg-slate-50 hover:bg-slate-100/70 border border-slate-200 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2 text-xs mb-1 flex-wrap">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-200 text-slate-800 text-[10px] font-mono uppercase font-bold">
+                            <Award className="w-3 h-3 text-amber-600" />
+                            {e.opportunity_type}
+                          </span>
+                          {e.funding_amount && (
+                            <span className="font-bold text-emerald-700 font-mono text-[11px]">
+                              {e.funding_amount}
+                            </span>
+                          )}
+                          <span aria-hidden="true">·</span>
+                          <span className="font-mono text-slate-500 text-[11px]">{e.location}</span>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-mono text-slate-500 text-[11px]">
+                            Deadline: {new Date(e.deadline_date).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <h4 className="font-serif text-base font-bold text-slate-900">{e.title}</h4>
+                        <div className="flex items-center gap-3 mt-1 text-xs">
+                          <a
+                            href={e.application_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-amber-700 hover:underline font-medium"
+                          >
+                            <span>Application Portal</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                          {e.linked_post && (
+                            <span className="text-slate-500 font-mono text-[11px]">
+                              Linked Article: <span className="text-slate-700 font-semibold">{e.linked_post.title}</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          disabled={busyModerationId === e.id}
+                          onClick={async () => {
+                            if (!window.confirm(`Delete event "${e.title}" from startupcreme.events?`)) return;
+                            setBusyModerationId(e.id);
+                            await store.deleteEvent(e.id);
+                            setEvents((prev) => prev.filter((item) => item.id !== e.id));
+                            setBusyModerationId(null);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete Event</span>
                         </button>
                       </div>
                     </div>

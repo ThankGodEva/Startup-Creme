@@ -16,11 +16,13 @@ import {
   RateSnapshotPayload,
   JobListing,
   CreateJobPayload,
+  EventOpportunity,
 } from '../types';
 import {
   INITIAL_STARTUPS,
   INITIAL_RATE_SNAPSHOT,
   INITIAL_JOBS,
+  INITIAL_EVENTS,
 } from './expansionData';
 
 const SEED_POSTS: Post[] = [];
@@ -115,6 +117,7 @@ class StartupCremeStore {
   private startups: StartupEntry[] = [...INITIAL_STARTUPS];
   private rateSnapshot: RateSnapshotPayload = { ...INITIAL_RATE_SNAPSHOT };
   private jobs: JobListing[] = [...INITIAL_JOBS];
+  private events: EventOpportunity[] = [...INITIAL_EVENTS];
   private subscribers: Array<() => void> = [];
 
   private hasAttemptedSeed = false;
@@ -732,6 +735,18 @@ class StartupCremeStore {
         });
       }
       this.postComments = groupedPostComments;
+
+      // Fetch Events strictly from startupcreme schema
+      try {
+        const { data: eventsData } = await supabaseExecute((client) =>
+          client.from('events').select('*, linked_post:posts(*)').order('deadline_date', { ascending: true })
+        );
+        if (eventsData && Array.isArray(eventsData)) {
+          this.events = eventsData;
+        }
+      } catch {
+        // ignore if events table not created yet
+      }
 
       this.persistCache();
       this.notify();
@@ -2394,6 +2409,76 @@ class StartupCremeStore {
     if (isSupabaseConfigured()) {
       await supabaseExecute((client) =>
         client.from('jobs').delete().eq('id', id)
+      );
+    }
+
+    return { success: true };
+  }
+
+  // --------------------------------------------------------------------
+  // MODULE 5: Grants, Accelerators & Events Opportunity Board (startupcreme.events)
+  // --------------------------------------------------------------------
+  public getEvents(): EventOpportunity[] {
+    return this.events;
+  }
+
+  public async fetchEvents(type?: string, search?: string): Promise<EventOpportunity[]> {
+    try {
+      const params = new URLSearchParams();
+      if (type && type !== 'all') params.set('type', type);
+      if (search) params.set('search', search);
+
+      const resp = await fetch(`/api/events?${params.toString()}`);
+      if (resp.ok) {
+        const body = await resp.json();
+        if (Array.isArray(body.events)) {
+          this.events = body.events;
+          this.notify();
+          return this.events;
+        }
+      }
+    } catch {
+      // fallback
+    }
+
+    if (isSupabaseConfigured()) {
+      const { data, error } = await supabaseExecute<EventOpportunity[]>((client) => {
+        let q = client.from('events').select('*, linked_post:posts(*)').order('deadline_date', { ascending: true });
+        if (type && type !== 'all') {
+          q = q.ilike('opportunity_type', `%${type}%`);
+        }
+        return q;
+      });
+      if (!error && Array.isArray(data)) {
+        this.events = data;
+        this.notify();
+      }
+    }
+
+    return this.events;
+  }
+
+  public async deleteEvent(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.currentUser || this.currentUser.role !== 'admin') {
+      return { success: false, error: 'Admin privileges required.' };
+    }
+
+    this.events = this.events.filter(e => e.id !== id);
+    this.notify();
+
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      await fetch(`/api/events/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers,
+      });
+    } catch {
+      // ignore
+    }
+
+    if (isSupabaseConfigured()) {
+      await supabaseExecute((client) =>
+        client.from('events').delete().eq('id', id)
       );
     }
 

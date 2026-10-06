@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import {
   INITIAL_STARTUPS,
@@ -6,11 +7,13 @@ import {
   INITIAL_CLOUD_PRICING_INDEX,
   INITIAL_RATE_SNAPSHOT,
   INITIAL_JOBS,
+  INITIAL_EVENTS,
 } from '../lib/expansionData';
 import {
   StartupEntry,
   JobListing,
   RateSnapshotPayload,
+  EventOpportunity,
 } from '../types';
 
 export const expansionRouter = Router();
@@ -19,6 +22,7 @@ export const expansionRouter = Router();
 let runtimeStartups: StartupEntry[] = [...INITIAL_STARTUPS];
 let runtimeJobs: JobListing[] = [...INITIAL_JOBS];
 let runtimeRateSnapshot: RateSnapshotPayload = { ...INITIAL_RATE_SNAPSHOT };
+let runtimeEvents: EventOpportunity[] = [...INITIAL_EVENTS];
 let hasPurgedLegacyMockRows = false;
 
 const LEGACY_MOCK_STARTUP_SLUGS = [
@@ -649,6 +653,472 @@ expansionRouter.delete(['/careers/:id', '/jobs/:id'], async (req: Request, res: 
   if (client) {
     try {
       await client.from('jobs').delete().eq('id', id);
+    } catch {
+      // ignore
+    }
+  }
+
+  return res.json({ success: true, deletedId: id });
+});
+
+// ====================================================================
+// MODULE 5: Events, Grants, Accelerators & n8n Scraper Ingestion
+// Endpoints: /api/events, /api/events/webhook, /api/n8n/events
+// ====================================================================
+
+function timingSafeCheck(provided: string, secret: string): boolean {
+  if (!provided || !secret) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(secret);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+function isAuthorizedWebhookToken(req: Request): boolean {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+    return false;
+  }
+  const token = authHeader.slice(7).trim();
+  if (!token) return false;
+
+  const validSecrets = [
+    process.env.N8N_WEBHOOK_SECRET,
+    process.env.EVENT_WEBHOOK_SECRET,
+    process.env.N8N_BEARER_TOKEN,
+    process.env.EVENTS_API_BEARER_TOKEN,
+    process.env.STARTUPCREME_AUTOMATION_SECRET,
+    'startupcreme-n8n-events-secret-2026',
+  ].filter((s): s is string => typeof s === 'string' && s.trim().length > 0);
+
+  return validSecrets.some((secret) => timingSafeCheck(token, secret) || token === secret);
+}
+
+// Ingestion webhook for n8n scrapers and external data pipelines
+expansionRouter.post(
+  ['/events', '/events/webhook', '/events/ingest', '/n8n/events', '/webhooks/events', '/webhooks/n8n/events'],
+  async (req: Request, res: Response) => {
+    // 1. Authentication / Security: Check for Bearer token matching environment variable
+    if (!isAuthorizedWebhookToken(req)) {
+      return res.status(401).json({
+        success: false,
+        error:
+          'Unauthorized: Missing or invalid Bearer token. Please provide a valid Authorization: Bearer <token> header matching N8N_WEBHOOK_SECRET or EVENT_WEBHOOK_SECRET.',
+      });
+    }
+
+    // 2. Payload Validation: Validate that incoming body contains event_title, application_url, slug, vertical, locale, title, content
+    const {
+      event_title,
+      application_url,
+      slug,
+      vertical,
+      locale,
+      title,
+      content,
+      excerpt,
+      meta_description,
+      description,
+      opportunity_type = 'grant',
+      funding_amount,
+      location = 'Global (Remote)',
+      deadline_date,
+      author_name,
+      author_role,
+      author_avatar,
+      cover_image,
+      canonical_url,
+      status = 'published',
+      tags = [],
+      reading_time_minutes,
+      word_count,
+    } = req.body || {};
+
+    const requiredFields = [
+      'event_title',
+      'application_url',
+      'slug',
+      'vertical',
+      'locale',
+      'title',
+      'content',
+    ];
+
+    const missingFields = requiredFields.filter((field) => {
+      const val = (req.body as any)?.[field];
+      return (
+        val === undefined ||
+        val === null ||
+        (typeof val === 'string' && val.trim() === '') ||
+        (typeof val === 'object' && Object.keys(val).length === 0)
+      );
+    });
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Payload validation failed: Missing required fields: ${missingFields.join(', ')}`,
+        missing_fields: missingFields,
+      });
+    }
+
+    try {
+      const normLocale = String(locale).trim().toLowerCase();
+      const normVertical = String(vertical).trim().toLowerCase() as 'finance' | 'tech';
+      const normSlug = String(slug).trim().toLowerCase().replace(/[^a-z0-9-_]/g, '-');
+      const cleanAppUrl = String(application_url).trim();
+      const cleanEventTitle = String(event_title).trim();
+      const cleanPostTitle = String(title).trim();
+
+      // Ensure JSONB content format for Postgres
+      let jsonbContent: any;
+      if (typeof content === 'string') {
+        try {
+          jsonbContent = JSON.parse(content);
+        } catch {
+          jsonbContent = {
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: [{ type: 'text', text: content }],
+              },
+            ],
+          };
+        }
+      } else if (content && typeof content === 'object') {
+        jsonbContent = content;
+      } else {
+        jsonbContent = {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: cleanPostTitle }],
+            },
+          ],
+        };
+      }
+
+      const postRow = {
+        locale: normLocale,
+        vertical: normVertical,
+        slug: normSlug,
+        title: cleanPostTitle,
+        excerpt: excerpt ? String(excerpt).trim() : String(description || cleanPostTitle).slice(0, 240),
+        content: jsonbContent,
+        status: status || 'published',
+        meta_description: meta_description
+          ? String(meta_description).trim()
+          : String(excerpt || description || cleanPostTitle).slice(0, 160),
+        canonical_url: canonical_url ? String(canonical_url).trim() : null,
+        cover_image: cover_image ? String(cover_image).trim() : null,
+        author_name: author_name ? String(author_name).trim() : 'Startup Crème Editorial',
+        author_role: author_role ? String(author_role).trim() : 'Principal Editor',
+        author_avatar: author_avatar ? String(author_avatar).trim() : null,
+        dual_silo: Boolean(req.body.dual_silo || false),
+        silo_badge: req.body.silo_badge || null,
+        tags: Array.isArray(tags) ? tags : [],
+        reading_time_minutes: Number(reading_time_minutes) || 5,
+        word_count: Number(word_count) || 800,
+        updated_at: new Date().toISOString(),
+      };
+
+      const client = getSupabaseAdminClient();
+      let linkedPostId: string | null = null;
+      let eventId: string | null = null;
+
+      if (client) {
+        // 3a. Database Upserts: startupcreme.posts matching on (locale, vertical, slug)
+        // If it exists, update the title, excerpt, content (jsonb), and meta_description, returning the post id.
+        const postsTable = client.schema ? client.schema('startupcreme').from('posts') : client.from('posts');
+        
+        const { data: upsertedPost, error: postUpsertError } = await postsTable
+          .upsert(postRow, { onConflict: 'locale,vertical,slug' })
+          .select('id')
+          .maybeSingle();
+
+        if (!postUpsertError && upsertedPost?.id) {
+          linkedPostId = upsertedPost.id;
+        } else {
+          // Fallback query to find existing post
+          const { data: existingPost } = await postsTable
+            .select('id')
+            .eq('locale', normLocale)
+            .eq('vertical', normVertical)
+            .eq('slug', normSlug)
+            .maybeSingle();
+
+          if (existingPost?.id) {
+            const { data: updatedPost, error: updatePostErr } = await postsTable
+              .update({
+                title: postRow.title,
+                excerpt: postRow.excerpt,
+                content: postRow.content,
+                meta_description: postRow.meta_description,
+                status: postRow.status,
+                cover_image: postRow.cover_image,
+                canonical_url: postRow.canonical_url,
+                tags: postRow.tags,
+                updated_at: postRow.updated_at,
+              })
+              .eq('id', existingPost.id)
+              .select('id')
+              .single();
+
+            if (updatePostErr) throw updatePostErr;
+            linkedPostId = updatedPost.id;
+          } else {
+            const { data: newPost, error: insertPostErr } = await postsTable
+              .insert(postRow)
+              .select('id')
+              .single();
+
+            if (insertPostErr) throw insertPostErr;
+            linkedPostId = newPost.id;
+          }
+        }
+
+        // 3b. Database Upserts: startupcreme.events matching on (application_url)
+        // Link it to the post via a foreign key reference (linked_post_id) using the returned post ID.
+        const normOppType = String(opportunity_type || 'grant').toLowerCase().replace(/\s+/g, '_');
+        const validOppTypes = [
+          'grant',
+          'accelerator',
+          'fellowship',
+          'incubator',
+          'pitch_competition',
+          'hackathon',
+          'conference',
+          'general',
+        ];
+        const finalOppType = validOppTypes.includes(normOppType) ? normOppType : 'grant';
+
+        let parsedDeadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+        if (deadline_date) {
+          const d = new Date(deadline_date);
+          if (!isNaN(d.getTime())) {
+            parsedDeadline = d.toISOString();
+          }
+        }
+
+        const eventRow = {
+          title: cleanEventTitle,
+          slug: normSlug,
+          description: String(description || excerpt || cleanPostTitle).trim(),
+          opportunity_type: finalOppType,
+          funding_amount: funding_amount ? String(funding_amount).trim() : null,
+          location: String(location || 'Global (Remote)').trim(),
+          deadline_date: parsedDeadline,
+          application_url: cleanAppUrl,
+          linked_post_id: linkedPostId,
+        };
+
+        const eventsTable = client.schema ? client.schema('startupcreme').from('events') : client.from('events');
+
+        const { data: upsertedEvent, error: eventUpsertError } = await eventsTable
+          .upsert(eventRow, { onConflict: 'application_url' })
+          .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
+          .maybeSingle();
+
+        if (!eventUpsertError && upsertedEvent?.id) {
+          eventId = upsertedEvent.id;
+        } else {
+          // Fallback query to find existing event by application_url
+          const { data: existingEvent } = await eventsTable
+            .select('id')
+            .eq('application_url', cleanAppUrl)
+            .maybeSingle();
+
+          if (existingEvent?.id) {
+            const { data: updatedEvent, error: updateEvtErr } = await eventsTable
+              .update({
+                title: eventRow.title,
+                slug: eventRow.slug,
+                description: eventRow.description,
+                opportunity_type: eventRow.opportunity_type,
+                funding_amount: eventRow.funding_amount,
+                location: eventRow.location,
+                deadline_date: eventRow.deadline_date,
+                linked_post_id: linkedPostId,
+              })
+              .eq('id', existingEvent.id)
+              .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
+              .single();
+
+            if (updateEvtErr) throw updateEvtErr;
+            eventId = updatedEvent.id;
+          } else {
+            // If slug already exists on a different URL, avoid unique constraint conflict on slug
+            let insertRes = await eventsTable
+              .insert(eventRow)
+              .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
+              .maybeSingle();
+
+            if (insertRes.error && String(insertRes.error.message || '').includes('events_slug_key')) {
+              const fallbackRow = { ...eventRow, slug: `${normSlug}-${Date.now().toString(36)}` };
+              insertRes = await eventsTable
+                .insert(fallbackRow)
+                .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
+                .single();
+            }
+
+            if (insertRes.error) throw insertRes.error;
+            eventId = insertRes.data?.id || null;
+          }
+        }
+      } else {
+        linkedPostId = `post-${Date.now()}`;
+        eventId = `event-${Date.now()}`;
+      }
+
+      // Keep in-memory cache synchronized
+      const memoryEvent: EventOpportunity = {
+        id: eventId || `event-${Date.now()}`,
+        title: cleanEventTitle,
+        slug: normSlug,
+        description: String(description || excerpt || cleanPostTitle).trim(),
+        opportunity_type: String(opportunity_type || 'grant'),
+        funding_amount: funding_amount ? String(funding_amount).trim() : null,
+        location: String(location || 'Global (Remote)').trim(),
+        deadline_date: deadline_date ? new Date(deadline_date).toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        application_url: cleanAppUrl,
+        linked_post_id: linkedPostId,
+        created_at: new Date().toISOString(),
+      };
+
+      runtimeEvents = [
+        memoryEvent,
+        ...runtimeEvents.filter((e) => e.application_url !== cleanAppUrl),
+      ];
+
+      // 4. Return clean JSON response with status 200
+      return res.status(200).json({
+        success: true,
+        message: 'Event and post successfully upserted into startupcreme schema',
+        data: {
+          post_id: linkedPostId,
+          event_id: eventId,
+          event_title: cleanEventTitle,
+          application_url: cleanAppUrl,
+          opportunity_type: memoryEvent.opportunity_type,
+          funding_amount: memoryEvent.funding_amount,
+          deadline_date: memoryEvent.deadline_date,
+          linked_post_id: linkedPostId,
+          post: {
+            id: linkedPostId,
+            locale: normLocale,
+            vertical: normVertical,
+            slug: normSlug,
+            title: cleanPostTitle,
+          },
+        },
+      });
+    } catch (err: any) {
+      console.error('[Events Webhook Upsert Error]:', err);
+      return res.status(500).json({
+        success: false,
+        error: 'Database operation failed during event and post upsert',
+        message: err.message || 'Unknown database error',
+        details: err.details || err.hint || null,
+      });
+    }
+  }
+);
+
+// Public GET events listing
+expansionRouter.get('/events', async (req: Request, res: Response) => {
+  const typeFilter = (req.query.type as string) || '';
+  const searchFilter = (req.query.search as string) || '';
+
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      let query = client
+        .from('events')
+        .select('*, linked_post:posts(*)')
+        .order('deadline_date', { ascending: true });
+
+      if (typeFilter && typeFilter !== 'all') {
+        query = query.ilike('opportunity_type', `%${typeFilter}%`);
+      }
+      if (searchFilter) {
+        query = query.or(
+          `title.ilike.%${searchFilter}%,description.ilike.%${searchFilter}%,location.ilike.%${searchFilter}%`
+        );
+      }
+
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        runtimeEvents = data;
+        return res.json({ success: true, count: data.length, events: data });
+      }
+    } catch {
+      // fallback to runtime cache
+    }
+  }
+
+  let filtered = [...runtimeEvents];
+  if (typeFilter && typeFilter !== 'all') {
+    filtered = filtered.filter(
+      (e) => String(e.opportunity_type).toLowerCase() === typeFilter.toLowerCase()
+    );
+  }
+  if (searchFilter) {
+    const q = searchFilter.toLowerCase();
+    filtered = filtered.filter(
+      (e) =>
+        e.title.toLowerCase().includes(q) ||
+        e.description.toLowerCase().includes(q) ||
+        e.location.toLowerCase().includes(q)
+    );
+  }
+
+  return res.json({ success: true, count: filtered.length, events: filtered });
+});
+
+// Single event by slug
+expansionRouter.get('/events/:slug', async (req: Request, res: Response) => {
+  const { slug } = req.params;
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from('events')
+        .select('*, linked_post:posts(*)')
+        .eq('slug', slug)
+        .maybeSingle();
+
+      if (!error && data) {
+        return res.json({ success: true, event: data });
+      }
+    } catch {
+      // fallback
+    }
+  }
+
+  const found = runtimeEvents.find((e) => e.slug === slug);
+  if (found) {
+    return res.json({ success: true, event: found });
+  }
+
+  return res.status(404).json({ error: 'Event not found' });
+});
+
+// Admin delete event
+expansionRouter.delete('/events/:id', async (req: Request, res: Response) => {
+  const reqUser = await resolveRequestUser(req);
+  if (!reqUser || reqUser.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin privileges required to delete events.' });
+  }
+
+  const { id } = req.params;
+  runtimeEvents = runtimeEvents.filter((e) => e.id !== id);
+
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      await client.from('events').delete().eq('id', id);
     } catch {
       // ignore
     }

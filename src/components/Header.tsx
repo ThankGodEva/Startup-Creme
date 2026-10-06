@@ -15,7 +15,8 @@ import {
   Calculator,
   Building2,
   Landmark,
-  Briefcase
+  Briefcase,
+  Calendar
 } from 'lucide-react';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { store } from '../lib/store';
@@ -402,6 +403,23 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Briefcase className="w-3.5 h-3.5 text-teal-700" />
             <span>Remote Careers</span>
+          </a>
+
+          {/* Module 5: Events, Grants & Accelerators */}
+          <a
+            href={getTabUrl('events', currentLocale)}
+            onClick={(e) => {
+              e.preventDefault();
+              onTabChange('events');
+            }}
+            className={`px-3 py-1.5 sm:py-2 rounded-lg text-xs font-semibold transition-all shrink-0 whitespace-nowrap flex items-center gap-1.5 border ${
+              activeTab === 'events'
+                ? 'bg-amber-100/80 border-amber-300 text-amber-900 shadow-xs'
+                : 'border-transparent text-slate-600 hover:text-amber-700 hover:bg-amber-50'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5 text-amber-600" />
+            <span>Events & Grants</span>
           </a>
 
           {/* Admin CMS */}

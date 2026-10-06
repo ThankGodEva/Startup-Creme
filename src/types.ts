@@ -440,3 +440,56 @@ export interface CreateJobPayload {
   salary_range?: string | null;
 }
 
+// Module 5: Grants, Accelerators & Events Opportunity Board (startupcreme.events)
+export type OpportunityType =
+  | 'grant'
+  | 'accelerator'
+  | 'fellowship'
+  | 'incubator'
+  | 'pitch_competition'
+  | 'hackathon'
+  | 'conference'
+  | 'general';
+
+export interface EventOpportunity {
+  id: string;
+  title: string;
+  slug: string;
+  description: string;
+  opportunity_type: OpportunityType | string;
+  funding_amount: string | null;
+  location: string;
+  deadline_date: string;
+  application_url: string;
+  linked_post_id: string | null;
+  created_at: string;
+  updated_at?: string;
+  linked_post?: Post | null;
+}
+
+export interface IngestEventPayload {
+  event_title: string;
+  application_url: string;
+  slug: string;
+  vertical: ContentVertical | string;
+  locale: string;
+  title: string;
+  content: PostContent | string | any;
+  excerpt?: string;
+  meta_description?: string;
+  description?: string;
+  opportunity_type?: OpportunityType | string;
+  funding_amount?: string | null;
+  location?: string;
+  deadline_date?: string;
+  author_name?: string;
+  author_role?: string;
+  author_avatar?: string | null;
+  cover_image?: string | null;
+  canonical_url?: string | null;
+  status?: PublicationStatus;
+  tags?: string[];
+  reading_time_minutes?: number;
+  word_count?: number;
+}
+

@@ -5,6 +5,7 @@ export type NavigationTab =
   | 'finance'
   | 'tech'
   | 'discussion'
+  | 'events'
   | 'calculators'
   | 'directory'
   | 'rates'
@@ -30,6 +31,7 @@ export function getTabUrl(tab: NavigationTab, locale = 'en-us'): string {
   if (tab === 'admin') return '/admin';
   if (tab === 'home') return `/${locale}`;
   if (tab === 'discussion') return `/${locale}/discussions`;
+  if (tab === 'events') return '/events';
   if (tab === 'calculators') return '/calculators';
   if (tab === 'directory') return '/directory';
   if (tab === 'rates') return '/markets/rates';

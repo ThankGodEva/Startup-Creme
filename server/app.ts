@@ -283,8 +283,16 @@ export function createApp(options?: CreateAppOptions): express.Express {
   // 3. AI Subsystem: Autonomous M2M, n8n Orchestration, and Admin Control Plane
   app.use(['/api/ai', '/ai'], aiRouter);
 
-  // 3b. Growth & Product Expansion Modules API (/api/directory, /api/markets/rates, /api/careers, /api/webhooks/n8n/rates)
+  // 3b. Growth & Product Expansion Modules API (/api/directory, /api/markets/rates, /api/careers, /api/webhooks/n8n/rates, /api/events)
   app.use('/api', expansionRouter);
+
+  // Direct root-level n8n webhook routes (/events/webhook, /n8n/events, etc.)
+  app.post(
+    ['/events/webhook', '/events/ingest', '/n8n/events', '/webhooks/events', '/webhooks/n8n/events'],
+    (req, res, next) => {
+      expansionRouter(req, res, next);
+    }
+  );
 
   // 4. Dynamic XML Sitemap for Google Search Console
   app.get(['/sitemap.xml', '/sitemap', '/sitemap_index.xml'], async (req, res) => {
@@ -345,6 +353,7 @@ export function createApp(options?: CreateAppOptions): express.Express {
       xml += `  <url>\n    <loc>${baseUrl}/privacy</loc>\n    <changefreq>monthly</changefreq>\n    <priority>0.5</priority>\n  </url>\n`;
       xml += `  <url>\n    <loc>${baseUrl}/terms</loc>\n    <changefreq>monthly</changefreq>\n    <priority>0.5</priority>\n  </url>\n`;
       xml += `  <url>\n    <loc>${baseUrl}/discussion</loc>\n    <changefreq>hourly</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
+      xml += `  <url>\n    <loc>${baseUrl}/events</loc>\n    <changefreq>daily</changefreq>\n    <priority>0.85</priority>\n  </url>\n`;
 
       posts.forEach(post => {
         const loc = post.locale || 'en-us';

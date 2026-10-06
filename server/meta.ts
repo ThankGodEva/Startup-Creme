@@ -261,6 +261,7 @@ export async function resolvePageMetadata(
     'markets',
     'rates',
     'careers',
+    'events',
     'about',
     'about-us',
     'admin',
@@ -315,6 +316,10 @@ export async function resolvePageMetadata(
       title = 'Remote Startup Job & Fractional Talent Board | StartupCrème';
       description = 'Curated remote software engineering, FinOps, financial modeling, and fractional CTO/CFO leadership roles.';
       section = 'Careers';
+    } else if (lowerSlug === 'events') {
+      title = 'Grants, Accelerators & Startup Events | StartupCrème';
+      description = 'Curated non-dilutive grants, institutional venture accelerators, founder fellowships, and tech competitions for software engineers, fintech builders, and tech entrepreneurs.';
+      section = 'Events';
     } else if (lowerSlug === 'about' || lowerSlug === 'about-us') {
       title = 'About StartupCrème | Institutional Finance, Tech & AI Intelligence';
       description = 'StartupCrème is a global guide dedicated to helping founders, software architects, and finance professionals build, fund, and scale companies in the age of AI. Built and operated by Habinsoft Technologies Limited and led by Chibueze ThankGod.';

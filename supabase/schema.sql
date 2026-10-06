@@ -148,36 +148,45 @@ CREATE POLICY "Admins full access to users"
 -- 6. EDITORIAL POSTS TABLE (startupcreme.posts)
 -- Stores native Tiptap rich content and topical silo metadata
 -- --------------------------------------------------------------------
+-- 6. DUAL-SILO EDITORIAL POSTS TABLE (startupcreme.posts)
+-- --------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS startupcreme.posts (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    slug TEXT NOT NULL,
-    locale TEXT NOT NULL DEFAULT 'en-us',
-    vertical startupcreme.content_vertical NOT NULL,
-    title TEXT NOT NULL,
-    excerpt TEXT,
-    content JSONB NOT NULL, -- Native Tiptap JSON document structure
-    status startupcreme.publication_status NOT NULL DEFAULT 'draft',
-    meta_description TEXT,
-    canonical_url TEXT,
-    cover_image TEXT,
-    author_name TEXT DEFAULT 'Startup Crème Editorial',
-    author_role TEXT DEFAULT 'Principal Editor',
-    author_avatar TEXT,
-    dual_silo BOOLEAN DEFAULT false,
-    silo_badge TEXT,
-    tags TEXT[] DEFAULT '{}',
-    reading_time_minutes INT DEFAULT 5,
-    word_count INT DEFAULT 800,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+  id uuid not null default gen_random_uuid (),
+  slug text not null,
+  locale text not null default 'en-us'::text,
+  vertical startupcreme.content_vertical not null,
+  title text not null,
+  excerpt text null,
+  content jsonb not null,
+  status startupcreme.publication_status not null default 'draft'::startupcreme.publication_status,
+  meta_description text null,
+  canonical_url text null,
+  cover_image text null,
+  author_name text null default 'Startup Crème Editorial'::text,
+  author_role text null default 'Principal Editor'::text,
+  author_avatar text null,
+  dual_silo boolean null default false,
+  silo_badge text null,
+  tags text[] null default '{}'::text[],
+  reading_time_minutes integer null default 5,
+  word_count integer null default 800,
+  created_at timestamp with time zone not null default timezone ('utc'::text, now()),
+  updated_at timestamp with time zone not null default timezone ('utc'::text, now()),
+  constraint posts_pkey primary key (id),
+  constraint unique_locale_vertical_slug unique (locale, vertical, slug)
+) TABLESPACE pg_default;
 
-    -- Enforce localized topical silo uniqueness
-    CONSTRAINT unique_sc_locale_vertical_slug UNIQUE (locale, vertical, slug)
-);
+CREATE INDEX IF NOT EXISTS idx_posts_vertical_locale on startupcreme.posts using btree (vertical, locale, status) TABLESPACE pg_default;
+CREATE INDEX IF NOT EXISTS idx_posts_slug on startupcreme.posts using btree (slug) TABLESPACE pg_default;
+CREATE INDEX IF NOT EXISTS idx_posts_updated_at on startupcreme.posts using btree (updated_at desc) TABLESPACE pg_default;
+CREATE INDEX IF NOT EXISTS idx_sc_posts_vertical_locale on startupcreme.posts using btree (vertical, locale, status) TABLESPACE pg_default;
+CREATE INDEX IF NOT EXISTS idx_sc_posts_slug on startupcreme.posts using btree (slug) TABLESPACE pg_default;
+CREATE INDEX IF NOT EXISTS idx_sc_posts_updated_at on startupcreme.posts using btree (updated_at desc) TABLESPACE pg_default;
 
-CREATE INDEX IF NOT EXISTS idx_sc_posts_vertical_locale ON startupcreme.posts (vertical, locale, status);
-CREATE INDEX IF NOT EXISTS idx_sc_posts_slug ON startupcreme.posts (slug);
-CREATE INDEX IF NOT EXISTS idx_sc_posts_updated_at ON startupcreme.posts (updated_at DESC);
+DROP TRIGGER IF EXISTS update_posts_updated_at ON startupcreme.posts;
+CREATE TRIGGER update_posts_updated_at BEFORE
+update on startupcreme.posts for EACH row
+execute FUNCTION startupcreme.update_updated_at_column ();
 
 ALTER TABLE startupcreme.posts ENABLE ROW LEVEL SECURITY;
 
@@ -854,6 +863,89 @@ CREATE POLICY "Authenticated users can manage jobs"
   TO authenticated
   USING (true)
   WITH CHECK (true);
+
+-- --------------------------------------------------------------------
+-- 15. EVENTS, GRANTS & ACCELERATORS TABLE (startupcreme.events)
+-- Stores opportunities scraped via n8n with direct links to editorial posts
+-- --------------------------------------------------------------------
+DO $$ BEGIN
+    CREATE TYPE public.opportunity_type AS ENUM (
+        'grant',
+        'accelerator',
+        'fellowship',
+        'incubator',
+        'pitch_competition',
+        'hackathon',
+        'conference',
+        'general'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE startupcreme.opportunity_type AS ENUM (
+        'grant',
+        'accelerator',
+        'fellowship',
+        'incubator',
+        'pitch_competition',
+        'hackathon',
+        'conference',
+        'general'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS startupcreme.events (
+  id uuid not null default gen_random_uuid (),
+  title text not null,
+  slug text not null,
+  description text not null,
+  opportunity_type public.opportunity_type not null,
+  funding_amount text null,
+  location text not null,
+  deadline_date timestamp with time zone not null,
+  application_url text not null,
+  linked_post_id uuid null,
+  created_at timestamp with time zone not null default timezone ('utc'::text, now()),
+  constraint events_pkey primary key (id),
+  constraint events_application_url_key unique (application_url),
+  constraint events_slug_key unique (slug),
+  constraint events_linked_post_id_fkey foreign KEY (linked_post_id) references startupcreme.posts (id) on delete set null
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_events_deadline on startupcreme.events using btree (deadline_date) TABLESPACE pg_default;
+CREATE INDEX IF NOT EXISTS idx_events_opportunity_type on startupcreme.events using btree (opportunity_type) TABLESPACE pg_default;
+
+ALTER TABLE startupcreme.events ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public can view events" ON startupcreme.events;
+CREATE POLICY "Public can view events"
+  ON startupcreme.events FOR SELECT
+  USING (true);
+
+DROP POLICY IF EXISTS "Authenticated users and service role can insert events" ON startupcreme.events;
+CREATE POLICY "Authenticated users and service role can insert events"
+  ON startupcreme.events FOR INSERT
+  TO authenticated, service_role
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated users and service role can update events" ON startupcreme.events;
+CREATE POLICY "Authenticated users and service role can update events"
+  ON startupcreme.events FOR UPDATE
+  TO authenticated, service_role
+  USING (true)
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated users and service role can delete events" ON startupcreme.events;
+CREATE POLICY "Authenticated users and service role can delete events"
+  ON startupcreme.events FOR DELETE
+  TO authenticated, service_role
+  USING (true);
+
+GRANT ALL ON TABLE startupcreme.events TO anon, authenticated, service_role, postgres;
 
 -- ====================================================================
 -- OPTIONAL: Clean Up Legacy Public Schema Tables (Run ONLY if needed)

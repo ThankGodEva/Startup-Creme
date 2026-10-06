@@ -257,3 +257,5 @@ export const INITIAL_RATE_SNAPSHOT: RateSnapshotPayload = {
 };
 
 export const INITIAL_JOBS: JobListing[] = [];
+
+export const INITIAL_EVENTS: import('../types').EventOpportunity[] = [];
