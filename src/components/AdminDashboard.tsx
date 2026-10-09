@@ -28,7 +28,8 @@ import {
   ExternalLink,
   Calendar,
   DollarSign,
-  Award
+  Award,
+  BookOpen
 } from 'lucide-react';
 import { 
   Post, 
@@ -40,7 +41,7 @@ import {
   JobListing,
   EventOpportunity 
 } from '../types';
-import { generateSitemapXML, generateRobotsTxt } from '../lib/seo';
+import { generateSitemapXML, generateRobotsTxt, generateLlmsTxt } from '../lib/seo';
 import { store } from '../lib/store';
 import { ArticleEditorPage } from './ArticleEditorPage';
 import { AiCommandCenter } from './AiCommandCenter';
@@ -77,8 +78,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [jobs, setJobs] = useState<JobListing[]>(() => store.getJobs(true));
   const [events, setEvents] = useState<EventOpportunity[]>(() => store.getEvents());
   const [busyModerationId, setBusyModerationId] = useState<string | null>(null);
-  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
-  const [webhookTestResult, setWebhookTestResult] = useState<any>(null);
+  const [isClearingEvents, setIsClearingEvents] = useState(false);
+  const [showApiDocsModal, setShowApiDocsModal] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -220,6 +221,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const sitemapXML = generateSitemapXML(posts, topics);
   const robotsTxt = generateRobotsTxt();
+  const llmsTxt = generateLlmsTxt();
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 pb-20">
@@ -380,6 +382,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <option value="all">All Verticals</option>
                   <option value="finance">Finance</option>
                   <option value="tech">Tech</option>
+                  <option value="founders-mindset">Founders Mindset</option>
                 </select>
 
                 <select
@@ -417,7 +420,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </td>
                         <td className="p-4 font-mono">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase mr-1.5 ${
-                            post.vertical === 'finance' ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : 'bg-cyan-100 text-cyan-900 border border-cyan-300'
+                            post.vertical === 'finance'
+                              ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                              : post.vertical === 'founders-mindset'
+                              ? 'bg-violet-100 text-violet-900 border border-violet-300'
+                              : 'bg-cyan-100 text-cyan-900 border border-cyan-300'
                           }`}>
                             {post.vertical}
                           </span>
@@ -521,34 +528,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       key={s.id}
                       className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
                     >
-                      <div>
-                        <div className="flex items-center gap-2 text-xs mb-1 flex-wrap">
-                          {s.is_approved ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-mono font-semibold">
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>Approved</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-mono font-semibold">
-                              <Clock className="w-3 h-3" />
-                              <span>Pending Approval</span>
-                            </span>
-                          )}
-                          <span className="font-semibold text-emerald-700">{s.vertical}</span>
-                          <span aria-hidden="true">·</span>
-                          <span className="font-mono text-slate-500 uppercase text-[11px]">{s.stage}</span>
-                          <a
-                            href={s.website_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-cyan-700 hover:underline font-medium"
-                          >
-                            <span>{s.website_url}</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
+                      <div className="flex items-start gap-4">
+                        {s.logo_url ? (
+                          <div className="h-12 min-w-12 max-w-[130px] rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0 shadow-2xs">
+                            <img
+                              src={s.logo_url}
+                              alt={`${s.name} logo`}
+                              className="max-h-9 max-w-full w-auto h-auto object-contain"
+                              loading="lazy"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLElement).style.display = 'none';
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div className="w-12 h-12 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 font-serif font-bold text-lg shrink-0">
+                            {s.name.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div>
+                          <div className="flex items-center gap-2 text-xs mb-1 flex-wrap">
+                            {s.is_approved ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-mono font-semibold">
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>Approved</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-mono font-semibold">
+                                <Clock className="w-3 h-3" />
+                                <span>Pending Approval</span>
+                              </span>
+                            )}
+                            <span className="font-semibold text-emerald-700">{s.vertical}</span>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-mono text-slate-500 uppercase text-[11px]">{s.stage}</span>
+                            <a
+                              href={s.website_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-cyan-700 hover:underline font-medium"
+                            >
+                              <span>{s.website_url}</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+                          <h4 className="font-serif text-base font-bold text-slate-900">{s.name}</h4>
+                          <p className="text-xs text-slate-600 mt-0.5">{s.tagline}</p>
                         </div>
-                        <h4 className="font-serif text-base font-bold text-slate-900">{s.name}</h4>
-                        <p className="text-xs text-slate-600 mt-0.5">{s.tagline}</p>
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
@@ -612,29 +638,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       key={j.id}
                       className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
                     >
-                      <div>
-                        <div className="flex items-center gap-2 text-xs mb-1 flex-wrap">
-                          {j.is_active ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-mono font-semibold">
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>Approved</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-mono font-semibold">
-                              <Clock className="w-3 h-3" />
-                              <span>Pending Approval</span>
-                            </span>
-                          )}
-                          <span className="font-semibold text-slate-800">{j.company_name}</span>
-                          <span aria-hidden="true">·</span>
-                          <span className="text-emerald-700 font-medium">{j.category}</span>
-                          <span aria-hidden="true">·</span>
-                          <span className="font-mono text-slate-600">{j.job_type}</span>
+                      <div className="flex items-start gap-4">
+                        {j.company_logo ? (
+                          <div className="h-12 min-w-12 max-w-[130px] rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0 shadow-2xs">
+                            <img
+                              src={j.company_logo}
+                              alt={`${j.company_name} logo`}
+                              className="max-h-9 max-w-full w-auto h-auto object-contain"
+                              loading="lazy"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLElement).style.display = 'none';
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div className="w-12 h-12 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 font-serif font-bold text-lg shrink-0">
+                            {j.company_name.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div>
+                          <div className="flex items-center gap-2 text-xs mb-1 flex-wrap">
+                            {j.is_active ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-mono font-semibold">
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>Approved</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-mono font-semibold">
+                                <Clock className="w-3 h-3" />
+                                <span>Pending Approval</span>
+                              </span>
+                            )}
+                            <span className="font-semibold text-slate-800">{j.company_name}</span>
+                            <span aria-hidden="true">·</span>
+                            <span className="text-emerald-700 font-medium">{j.category}</span>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-mono text-slate-600">{j.job_type}</span>
+                          </div>
+                          <h4 className="font-serif text-base font-bold text-slate-900">{j.title}</h4>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            {j.location} {j.salary_range ? `• ${j.salary_range}` : ''}
+                          </p>
                         </div>
-                        <h4 className="font-serif text-base font-bold text-slate-900">{j.title}</h4>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          {j.location} {j.salary_range ? `• ${j.salary_range}` : ''}
-                        </p>
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
@@ -693,103 +738,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  disabled={isTestingWebhook}
-                  onClick={async () => {
-                    setIsTestingWebhook(true);
-                    setWebhookTestResult(null);
-                    try {
-                      const testPayload = {
-                        event_title: `National AI Scale Grant ${new Date().getFullYear()}`,
-                        application_url: `https://grants.gov/opportunity/ai-scale-${Date.now()}`,
-                        slug: `ai-scale-grant-${Date.now().toString(36)}`,
-                        vertical: 'tech',
-                        locale: 'en-us',
-                        title: `National Foundation Launches $500k AI Scale Grant for Frontier Labs`,
-                        content: {
-                          type: 'doc',
-                          content: [
-                            {
-                              type: 'paragraph',
-                              content: [
-                                {
-                                  type: 'text',
-                                  text: 'The National AI Technology Foundation has opened non-dilutive grant applications providing up to $500,000 for autonomous agent engineering teams.',
-                                },
-                              ],
-                            },
-                          ],
-                        },
-                        opportunity_type: 'grant',
-                        funding_amount: '$500,000 Non-Dilutive Grant',
-                        location: 'Global (Remote)',
-                        deadline_date: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
-                      };
-
-                      const token = 'startupcreme-n8n-events-secret-2026';
-                      const res = await fetch('/api/events/webhook', {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          Authorization: `Bearer ${token}`,
-                        },
-                        body: JSON.stringify(testPayload),
-                      });
-                      const json = await res.json();
-                      setWebhookTestResult({ status: res.status, ok: res.ok, data: json });
-                      if (res.ok) {
-                        const updated = await store.fetchEvents();
-                        setEvents(updated);
-                      }
-                    } catch (err: any) {
-                      setWebhookTestResult({ status: 500, ok: false, error: err.message });
-                    } finally {
-                      setIsTestingWebhook(false);
-                    }
-                  }}
-                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  {isTestingWebhook ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Calendar className="w-4 h-4" />
-                  )}
-                  <span>Test n8n Webhook Ingestion</span>
-                </button>
-              </div>
-
-              {/* Webhook Test Output Alert */}
-              {webhookTestResult && (
-                <div
-                  className={`mb-6 p-4 rounded-xl border text-xs font-mono ${
-                    webhookTestResult.ok
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                      : 'bg-rose-50 border-rose-200 text-rose-900'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold">
-                      {webhookTestResult.ok ? '✓ Webhook Test Succeeded (HTTP 200)' : '✕ Webhook Test Failed'}
-                    </span>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  {events.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => setWebhookTestResult(null)}
-                      className="underline text-[11px] opacity-75 hover:opacity-100"
+                      disabled={isClearingEvents}
+                      onClick={async () => {
+                        if (!window.confirm(`Are you sure you want to clear all ${events.length} ingested events?`)) {
+                          return;
+                        }
+                        setIsClearingEvents(true);
+                        try {
+                          await store.clearAllEvents();
+                          setEvents([]);
+                        } finally {
+                          setIsClearingEvents(false);
+                        }
+                      }}
+                      className="px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                     >
-                      Dismiss
+                      {isClearingEvents ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                      <span>Clear All Events ({events.length})</span>
                     </button>
-                  </div>
-                  <pre className="overflow-x-auto p-2 bg-white/70 rounded-lg text-[11px]">
-                    {JSON.stringify(webhookTestResult, null, 2)}
-                  </pre>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setShowApiDocsModal(true)}
+                    className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
+                  >
+                    <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+                    <span>n8n Webhook Documentation</span>
+                  </button>
                 </div>
-              )}
+              </div>
 
               {/* Opportunity Pipeline Listing */}
               {events.length === 0 ? (
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center text-xs text-slate-500">
-                  No events ingested yet. Run the webhook test or connect an n8n scraper workflow.
+                  <div className="w-10 h-10 rounded-xl bg-slate-200 text-slate-600 flex items-center justify-center mx-auto mb-3">
+                    <Calendar className="w-5 h-5" />
+                  </div>
+                  <div className="font-semibold text-slate-800 text-sm mb-1">No Ingested Opportunities</div>
+                  <p className="max-w-md mx-auto text-slate-500 mb-3">
+                    Events and grants are populated automatically via authenticated n8n workflows, external scrapers, or editorial pipelines.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowApiDocsModal(true)}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 hover:text-amber-800 underline underline-offset-2"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>View Ingestion API Reference Specification</span>
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -883,9 +884,124 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span>robots.txt Configuration</span>
               </h3>
 
-              <pre className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-[11px] font-mono text-cyan-300">
+              <pre className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-[11px] font-mono text-cyan-300 overflow-x-auto max-h-80">
                 {robotsTxt}
               </pre>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
+              <h3 className="font-serif text-xl font-bold text-slate-900 mb-2 flex items-center gap-2">
+                <Bot className="w-5 h-5 text-amber-600" />
+                <span>llms.txt (AI Agent Context Specification)</span>
+              </h3>
+              <p className="text-xs text-slate-600 mb-4">
+                Structured markdown context served at <code className="font-mono text-amber-800 font-semibold">/llms.txt</code> for LLM agents, PerplexityBot, ClaudeBot, and GPTBot.
+              </p>
+
+              <pre className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-[11px] font-mono text-amber-300 overflow-x-auto max-h-80">
+                {llmsTxt}
+              </pre>
+            </div>
+          </div>
+        )}
+
+        {/* n8n Ingestion API Documentation Modal */}
+        {showApiDocsModal && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white border border-slate-200 rounded-3xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 sm:p-8 shadow-2xl space-y-6 text-left">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono uppercase font-bold tracking-wider bg-amber-50 text-amber-800 border border-amber-200">
+                      Pipeline Reference
+                    </span>
+                    <span className="text-xs font-mono text-slate-500">
+                      docs/N8N_EVENTS_WEBHOOK_INTEGRATION.md
+                    </span>
+                  </div>
+                  <h2 className="font-serif text-2xl font-bold text-slate-900">
+                    n8n Scraper & Webhook Ingestion API
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowApiDocsModal(false)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-4 text-xs text-slate-600 leading-relaxed">
+                <p>
+                  StartupCrème features an automated dual-table ingestion pipeline that receives grant, accelerator, and founder fellowship submissions from n8n workflows, Python scrapers, or RSS ingestors.
+                </p>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
+                  <div className="font-bold text-slate-800 uppercase font-mono text-[10px]">
+                    Authoritative Endpoints
+                  </div>
+                  <div className="font-mono text-slate-900 space-y-1">
+                    <div><span className="text-amber-700 font-bold">POST</span> /api/events/webhook</div>
+                    <div><span className="text-amber-700 font-bold">POST</span> /api/events</div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
+                  <div className="font-bold text-slate-800 uppercase font-mono text-[10px]">
+                    Authentication
+                  </div>
+                  <p>Send standard HTTP Bearer token in the request header:</p>
+                  <pre className="p-2 bg-slate-900 text-amber-300 rounded-lg font-mono text-[11px]">
+Authorization: Bearer &lt;N8N_WEBHOOK_SECRET&gt;
+                  </pre>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
+                  <div className="font-bold text-slate-800 uppercase font-mono text-[10px]">
+                    Sample Payload Schema
+                  </div>
+                  <pre className="p-3 bg-slate-900 text-slate-100 rounded-lg font-mono text-[11px] overflow-x-auto max-h-56">
+{`{
+  "event_title": "Google for Startups Accelerator: AI First",
+  "application_url": "https://startup.google.com/accelerator/ai",
+  "slug": "google-ai-accelerator-2026",
+  "vertical": "tech",
+  "locale": "en-us",
+  "title": "Google for Startups Opens 2026 AI-First Cohort",
+  "content": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "content": [{ "type": "text", "text": "Program details..." }]
+      }
+    ]
+  },
+  "opportunity_type": "accelerator",
+  "funding_amount": "$350k Equity-Free Capital",
+  "location": "Global / Remote",
+  "deadline_date": "2026-11-30T23:59:59Z"
+}`}
+                  </pre>
+                </div>
+
+                <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">
+                  <span className="font-bold block mb-1">Dual-Table Database Upsertion:</span>
+                  1. Upserts article into <code className="font-mono font-bold">startupcreme.posts</code> matching on <code className="font-mono">(locale, vertical, slug)</code>.<br />
+                  2. Upserts opportunity into <code className="font-mono font-bold">startupcreme.events</code> matching on <code className="font-mono">(application_url)</code> with foreign key link.
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowApiDocsModal(false)}
+                  className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Close Specification
+                </button>
+              </div>
             </div>
           </div>
         )}

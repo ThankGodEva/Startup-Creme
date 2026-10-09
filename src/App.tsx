@@ -20,7 +20,7 @@ import { AboutPage } from './components/AboutPage';
 import { store } from './lib/store';
 import { Post, DiscussionTopic, UserProfile, ContentVertical } from './types';
 import { getPostUrl, getTopicUrl, getTabUrl, VALID_LOCALES, NavigationTab, isMarketsEnabled } from './lib/router';
-import { TrendingUp, Cpu, MessageSquare, Sparkles, SlidersHorizontal, ArrowRight, BarChart2, ThumbsUp, Calculator, Building2, Landmark, Briefcase, Calendar } from 'lucide-react';
+import { TrendingUp, Cpu, Brain, MessageSquare, Sparkles, SlidersHorizontal, ArrowRight, BarChart2, ThumbsUp, Calculator, Building2, Landmark, Briefcase, Calendar } from 'lucide-react';
 
 export default function App() {
   const [, setTick] = useState(0);
@@ -152,6 +152,28 @@ export default function App() {
       return;
     }
 
+    if (parts[0] === 'founders-mindset') {
+      setActiveTab('founders-mindset');
+      if (parts[1]) {
+        const slug = parts[1];
+        setLoadingArticleSlug(slug);
+        setSelectedTopic(null);
+        store.fetchPostBySlug(slug, currentLocale, 'founders-mindset').then(fetched => {
+          if (fetched) {
+            setSelectedPost(fetched);
+            setActiveTab(fetched.vertical);
+          }
+          setLoadingArticleSlug(null);
+        });
+      } else {
+        setSelectedPost(null);
+        setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
+      }
+      return;
+    }
+
     let loc = 'en-us';
     let rest = parts;
     if (VALID_LOCALES.includes(parts[0])) {
@@ -169,7 +191,7 @@ export default function App() {
       return;
     }
 
-    const first = rest[0]; // 'finance', 'tech', 'discussions', 'discussion', 'privacy', 'terms'
+    const first = rest[0]; // 'finance', 'tech', 'founders-mindset', 'discussions', 'discussion', 'privacy', 'terms'
 
     if (rest.length === 1) {
       if (first === 'finance') {
@@ -180,6 +202,12 @@ export default function App() {
         setLoadingTopicSlug(null);
       } else if (first === 'tech') {
         setActiveTab('tech');
+        setSelectedPost(null);
+        setSelectedTopic(null);
+        setLoadingArticleSlug(null);
+        setLoadingTopicSlug(null);
+      } else if (first === 'founders-mindset') {
+        setActiveTab('founders-mindset');
         setSelectedPost(null);
         setSelectedTopic(null);
         setLoadingArticleSlug(null);
@@ -344,13 +372,13 @@ export default function App() {
         } else {
           setLoadingArticleSlug(slug);
           setSelectedTopic(null);
-          const targetVertical = (first === 'finance' || first === 'tech') ? (first as ContentVertical) : undefined;
+          const targetVertical = (first === 'finance' || first === 'tech' || first === 'founders-mindset') ? (first as ContentVertical) : undefined;
           store.fetchPostBySlug(slug, loc, targetVertical).then(fetched => {
             if (fetched) {
               setSelectedPost(fetched);
               setActiveTab(fetched.vertical);
             } else {
-              if (first === 'finance' || first === 'tech') {
+              if (first === 'finance' || first === 'tech' || first === 'founders-mindset') {
                 setActiveTab(first);
               } else {
                 setActiveTab('home');
@@ -389,6 +417,7 @@ export default function App() {
   const publishedPosts = store.getPosts(currentLocale, undefined, 'published');
   const financePosts = store.getPosts(currentLocale, 'finance', 'published');
   const techPosts = store.getPosts(currentLocale, 'tech', 'published');
+  const foundersMindsetPosts = store.getPosts(currentLocale, 'founders-mindset', 'published');
   const topics = store.getDiscussionTopics();
   const top3Topics = [...topics]
     .sort((a, b) => ((b.upvotes - b.downvotes) + b.comment_count * 2) - ((a.upvotes - a.downvotes) + a.comment_count * 2))
@@ -511,7 +540,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-cyan-500 selection:text-white">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-cyan-500 selection:text-white w-full max-w-full overflow-x-hidden">
       {/* Main Header */}
       <Header
         currentLocale={currentLocale}
@@ -528,7 +557,7 @@ export default function App() {
       />
 
       {/* Main Dynamic Router Content */}
-      <main className="flex-1">
+      <main className="flex-1 w-full max-w-full overflow-x-hidden">
         {/* ARTICLE DETAILED VIEW */}
         {selectedPost ? (
           <ArticleView
@@ -677,6 +706,56 @@ export default function App() {
                     className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white font-bold text-xs transition-colors cursor-pointer"
                   >
                     <span>Create Tech Article in Admin</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : activeTab === 'founders-mindset' ? (
+          /* FOUNDERS MINDSET SILO PAGE (/[locale]/founders-mindset) */
+          <div className="max-w-7xl mx-auto px-4 py-10">
+            <div className="border-b border-slate-200 pb-6 mb-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-mono text-violet-700 font-bold uppercase tracking-wider mb-2">
+                  <Brain className="w-4 h-4" />
+                  <span>Topical Silo • <code className="text-slate-600 font-mono">/{currentLocale}/founders-mindset</code></span>
+                </div>
+                <h1 className="font-serif text-3xl sm:text-4xl font-extrabold text-slate-900">
+                  Founders Mindset, Leadership & Psychology
+                </h1>
+                <p className="text-sm text-slate-600 mt-2 max-w-2xl font-sans">
+                  Actionable mental frameworks, founder resilience, executive decision-making under uncertainty, and leadership psychology for startup builders.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {foundersMindsetPosts.length > 0 ? (
+                foundersMindsetPosts.map(post => (
+                  <ArticleCard
+                    key={post.id}
+                    post={post}
+                    onSelect={handleSelectPost}
+                    isBookmarked={store.isBookmarked(post.id)}
+                    onToggleBookmark={(id, e) => {
+                      e.stopPropagation();
+                      store.toggleBookmark(id);
+                    }}
+                  />
+                ))
+              ) : (
+                <div className="col-span-full bg-slate-50 border border-dashed border-slate-300 rounded-2xl p-10 text-center">
+                  <Brain className="w-8 h-8 text-violet-600 mx-auto mb-3 opacity-60" />
+                  <h3 className="font-serif text-lg font-bold text-slate-800 mb-1">No Founders Mindset Publications Yet</h3>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto mb-4">
+                    Sample articles have been cleared. Articles created in the Admin panel under the Founders Mindset vertical will be published directly here and saved to Supabase.
+                  </p>
+                  <button
+                    onClick={() => handleTabChange('admin')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-700 hover:bg-violet-800 text-white font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    <span>Create Founders Mindset Article in Admin</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -1058,14 +1137,14 @@ export default function App() {
                             </a>
                             <span aria-hidden="true">·</span>
                             <a
-                              href="/events#n8n"
+                              href="/events#grants"
                               onClick={(e) => {
                                 e.preventDefault();
-                                handleTabChange('events', '#n8n');
+                                handleTabChange('events', '#grants');
                               }}
                               className="hover:text-amber-700 underline-offset-2 hover:underline"
                             >
-                              #n8n-ingestion
+                              #grants
                             </a>
                           </div>
                         </div>
@@ -1159,6 +1238,46 @@ export default function App() {
                       ) : (
                         <div className="col-span-full bg-slate-50 border border-dashed border-slate-300 rounded-2xl p-6 text-center">
                           <p className="text-xs text-slate-500">No tech articles published yet. Create an article in the Admin panel to publish to Supabase.</p>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  {/* Founders Mindset Grid */}
+                  <section>
+                    <div className="flex items-center justify-between mb-6 border-b border-slate-200 pb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-violet-600"></span>
+                        <h2 className="font-serif text-2xl font-bold text-slate-900">
+                          Founders Mindset & Leadership
+                        </h2>
+                      </div>
+                      <button
+                        onClick={() => handleTabChange('founders-mindset')}
+                        className="text-xs font-bold text-violet-700 hover:text-violet-800 flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        <span>Explore Mindset (/{currentLocale}/founders-mindset)</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {foundersMindsetPosts.length > 0 ? (
+                        foundersMindsetPosts.map(post => (
+                          <ArticleCard
+                            key={post.id}
+                            post={post}
+                            onSelect={handleSelectPost}
+                            isBookmarked={store.isBookmarked(post.id)}
+                            onToggleBookmark={(id, e) => {
+                              e.stopPropagation();
+                              store.toggleBookmark(id);
+                            }}
+                          />
+                        ))
+                      ) : (
+                        <div className="col-span-full bg-slate-50 border border-dashed border-slate-300 rounded-2xl p-6 text-center">
+                          <p className="text-xs text-slate-500">No founders mindset articles published yet. Create an article in the Admin panel to publish to Supabase.</p>
                         </div>
                       )}
                     </div>

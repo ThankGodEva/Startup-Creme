@@ -316,6 +316,23 @@ export const Header: React.FC<HeaderProps> = ({
             <span>Tech</span>
           </a>
 
+          {/* Founders Mindset Silo Link */}
+          <a
+            href={getTabUrl('founders-mindset', currentLocale)}
+            onClick={(e) => {
+              e.preventDefault();
+              onTabChange('founders-mindset');
+            }}
+            className={`px-3 py-1.5 sm:py-2 rounded-lg text-xs font-semibold transition-all shrink-0 whitespace-nowrap flex items-center gap-1.5 border ${
+              activeTab === 'founders-mindset'
+                ? 'bg-violet-100/80 border-violet-300 text-violet-900 shadow-xs'
+                : 'border-transparent text-slate-600 hover:text-violet-700 hover:bg-violet-50'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-violet-500"></span>
+            <span>Founders Mindset</span>
+          </a>
+
           {/* Discussion Forum */}
           <a
             href={getTabUrl('discussion', currentLocale)}

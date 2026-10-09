@@ -4,6 +4,7 @@ export type NavigationTab =
   | 'home'
   | 'finance'
   | 'tech'
+  | 'founders-mindset'
   | 'discussion'
   | 'events'
   | 'calculators'
@@ -30,6 +31,7 @@ export function getTopicUrl(topic: DiscussionTopic, locale = 'en-us'): string {
 export function getTabUrl(tab: NavigationTab, locale = 'en-us'): string {
   if (tab === 'admin') return '/admin';
   if (tab === 'home') return `/${locale}`;
+  if (tab === 'founders-mindset') return `/${locale}/founders-mindset`;
   if (tab === 'discussion') return `/${locale}/discussions`;
   if (tab === 'events') return '/events';
   if (tab === 'calculators') return '/calculators';

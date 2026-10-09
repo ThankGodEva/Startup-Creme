@@ -13,6 +13,7 @@ import {
   Tag,
   Cpu,
   TrendingUp,
+  Brain,
   ArrowUpRight
 } from 'lucide-react';
 import { Post, PostComment, UserProfile, PostContentNode } from '../types';
@@ -474,8 +475,10 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
                 window.dispatchEvent(new PopStateEvent('popstate'));
               }}
               className={`px-2 py-0.5 rounded uppercase font-bold text-[10px] ${
-                isFinance
+                post.vertical === 'finance'
                   ? 'bg-emerald-100 text-emerald-900 border border-emerald-300 hover:bg-emerald-200'
+                  : post.vertical === 'founders-mindset'
+                  ? 'bg-violet-100 text-violet-900 border border-violet-300 hover:bg-violet-200'
                   : 'bg-cyan-100 text-cyan-900 border border-cyan-300 hover:bg-cyan-200'
               }`}
             >
@@ -635,6 +638,8 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
               <div className="flex items-center gap-2.5">
                 {post.vertical === 'tech' ? (
                   <Cpu className="w-5 h-5 text-cyan-600" />
+                ) : post.vertical === 'founders-mindset' ? (
+                  <Brain className="w-5 h-5 text-violet-600" />
                 ) : (
                   <TrendingUp className="w-5 h-5 text-emerald-600" />
                 )}
@@ -646,10 +651,12 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
                 className={`text-xs font-mono font-bold uppercase px-2.5 py-0.5 rounded-full ${
                   post.vertical === 'tech'
                     ? 'bg-cyan-100 text-cyan-800 border border-cyan-200'
+                    : post.vertical === 'founders-mindset'
+                    ? 'bg-violet-100 text-violet-800 border border-violet-200'
                     : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                 }`}
               >
-                Latest {post.vertical === 'tech' ? 'Tech' : 'Finance'}
+                Latest {post.vertical === 'tech' ? 'Tech' : post.vertical === 'founders-mindset' ? 'Founders Mindset' : 'Finance'}
               </span>
             </div>
 

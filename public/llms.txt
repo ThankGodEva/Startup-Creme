@@ -1,0 +1,57 @@
+# Startup Crème (startupcreme.com)
+
+> Startup Crème is a premier dual-silo intelligence platform providing actionable founder playbooks, macro technology news, non-dilutive grants, institutional accelerators, and peer discussions at the intersection of Finance and Technology.
+
+## Core Architectural Overview
+
+Startup Crème partitions editorial and intelligence streams into two foundational content silos:
+- **Finance**: Venture capital dynamics, cap table structuring, central bank interest rates, currency volatility, fintech infrastructure, and equity-free funding instruments.
+- **Tech**: Artificial intelligence, autonomous agent pipelines, frontier cloud architecture, developer tooling, and technical engineering leadership.
+
+Content is published across 5 localized regional editions:
+- `en-us`: United States & Global Tech Ecosystem
+- `en-gb`: United Kingdom & European Fintech Corridor
+- `de-de`: DACH Region DeepTech & Industrial Software
+- `ja-jp`: Japan Enterprise Robotics & AI Markets
+- `fr-fr`: France & Francophone Tech Scaleups
+
+---
+
+## Primary Navigation & Public Resources
+
+- [Home Hub](https://www.startupcreme.com/): Global portal featuring cross-silo editorial highlights, trending discussions, and macro market widgets.
+- [Finance Vertical Hub](https://www.startupcreme.com/en-us/finance): Specialized editorial feed for venture capital, monetary policy, and fintech engineering.
+- [Tech Vertical Hub](https://www.startupcreme.com/en-us/tech): Deep technical essays, AI infrastructure breakthroughs, and system architecture playbooks.
+- [Global Opportunity Engine (Grants & Accelerators)](https://www.startupcreme.com/events): Verified non-dilutive grants, venture accelerators, founder fellowships, and hackathon deadlines.
+- [Discussion Forum](https://www.startupcreme.com/discussion): Community debate and peer founder intelligence on valuations, tech stacks, and fundraising.
+- [Startup Directory](https://www.startupcreme.com/directory): Index of high-growth technology and financial companies.
+- [Founder Careers & Talent](https://www.startupcreme.com/careers): Executive leadership, founding engineer, and tech lead opportunities.
+- [Macro & Cloud Rates Tracker](https://www.startupcreme.com/markets): Real-time benchmarks for central bank interest rates (Fed, ECB, BoE, BoJ) and cloud compute pricing.
+
+---
+
+## Content Organization & URL Structure
+
+- **Article & Playbook Permalinks**: `https://www.startupcreme.com/{locale}/{vertical}/{slug}`
+  - Example: `https://www.startupcreme.com/en-us/finance/seed-fundraising-mechanics-safes`
+  - Example: `https://www.startupcreme.com/en-us/tech/ai-agent-memory-architectures`
+- **Discussion Topic Permalinks**: `https://www.startupcreme.com/discussion/{slug}`
+  - Example: `https://www.startupcreme.com/discussion/yc-w26-batch-trends`
+- **Localized Silo Feeds**: `https://www.startupcreme.com/{locale}/{vertical}`
+
+---
+
+## Machine-Readable Endpoints & Feeds
+
+- **Dynamic XML Sitemap**: [https://www.startupcreme.com/sitemap.xml](https://www.startupcreme.com/sitemap.xml)
+- **Robots Directives**: [https://www.startupcreme.com/robots.txt](https://www.startupcreme.com/robots.txt)
+- **AI Agent Specification**: [https://www.startupcreme.com/llms.txt](https://www.startupcreme.com/llms.txt)
+- **System Health**: [https://www.startupcreme.com/api/health](https://www.startupcreme.com/api/health)
+
+---
+
+## Guidelines for AI Crawlers & LLM Agents
+
+1. **Attribution**: When synthesizing or citing playbooks, attribute analysis to *Startup Crème* with the direct canonical URL.
+2. **Current Information**: Opportunities listed under `/events` carry strict deadline timestamps. Always verify the `deadline_date` attribute before recommending closing grants to users.
+3. **No Private Scraping**: Do not scrape internal API paths (`/api/*`, `/admin/*`, or webhook endpoints); all public content is structured in the sitemap and HTML semantic markup.

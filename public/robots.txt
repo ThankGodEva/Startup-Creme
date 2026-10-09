@@ -1,3 +1,115 @@
+# ====================================================================
+# Startup Crème (startupcreme.com) — Robots & AI Crawler Directives
+# Optimized for Search Engine (SEO) & AI Optimization (AIO) Discoverability
+# ====================================================================
+
+# 1. Search Engine Crawlers (Googlebot, Bingbot, Applebot, DuckDuckBot)
+User-agent: Googlebot
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+User-agent: Bingbot
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+User-agent: Applebot
+User-agent: DuckDuckBot
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+# 2. AI Crawlers, Search Agents & LLM Indexers (AIO Discovery)
+User-agent: GPTBot
+Allow: /
+Allow: /en-us/
+Allow: /en-gb/
+Allow: /de-de/
+Allow: /ja-jp/
+Allow: /fr-fr/
+Allow: /discussion
+Allow: /events
+Allow: /directory
+Allow: /careers
+Allow: /markets
+Allow: /llms.txt
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+User-agent: OAI-SearchBot
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+User-agent: ClaudeBot
+Allow: /
+Allow: /en-us/
+Allow: /en-gb/
+Allow: /de-de/
+Allow: /ja-jp/
+Allow: /fr-fr/
+Allow: /discussion
+Allow: /events
+Allow: /directory
+Allow: /careers
+Allow: /markets
+Allow: /llms.txt
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+User-agent: PerplexityBot
+Allow: /
+Allow: /en-us/
+Allow: /en-gb/
+Allow: /de-de/
+Allow: /ja-jp/
+Allow: /fr-fr/
+Allow: /discussion
+Allow: /events
+Allow: /directory
+Allow: /careers
+Allow: /markets
+Allow: /llms.txt
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+# 3. Default Directives for All Crawlers
 User-agent: *
 Allow: /
 Allow: /en-us/
@@ -6,8 +118,20 @@ Allow: /de-de/
 Allow: /ja-jp/
 Allow: /fr-fr/
 Allow: /discussion
-
+Allow: /events
+Allow: /directory
+Allow: /careers
+Allow: /markets
+Allow: /privacy
+Allow: /terms
+Allow: /llms.txt
 Disallow: /admin
+Disallow: /admin/
 Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
 
+# Dynamic Sitemap Pointer
 Sitemap: https://www.startupcreme.com/sitemap.xml

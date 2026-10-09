@@ -17,6 +17,10 @@
       "destination": "/api"
     },
     {
+      "source": "/llms.txt",
+      "destination": "/api"
+    },
+    {
       "source": "/((?!assets/|uploads/|.*\\.(?:js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot)).*)",
       "destination": "/api"
     }

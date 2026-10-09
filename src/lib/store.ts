@@ -2484,6 +2484,36 @@ class StartupCremeStore {
 
     return { success: true };
   }
+
+  public async clearAllEvents(): Promise<{ success: boolean; error?: string }> {
+    if (!this.currentUser || this.currentUser.role !== 'admin') {
+      return { success: false, error: 'Admin privileges required.' };
+    }
+
+    const previousEvents = [...this.events];
+    this.events = [];
+    this.notify();
+
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      for (const e of previousEvents) {
+        await fetch(`/api/events/${encodeURIComponent(e.id)}`, {
+          method: 'DELETE',
+          headers,
+        }).catch(() => {});
+      }
+    } catch {
+      // ignore
+    }
+
+    if (isSupabaseConfigured()) {
+      await supabaseExecute((client) =>
+        client.from('events').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+      ).catch(() => {});
+    }
+
+    return { success: true };
+  }
 }
 
 export const store = new StartupCremeStore();

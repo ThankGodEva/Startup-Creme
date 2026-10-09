@@ -1,167 +1,214 @@
-import { Post, DiscussionTopic } from '../types';
-import { normalizeImageUrl } from './router';
+import { createClient } from '@supabase/supabase-js';
 
-function setMetaTag(selector: string, attrName: string, attrVal: string, content: string) {
-  let el = document.querySelector(selector);
-  if (!el) {
-    el = document.createElement('meta');
-    el.setAttribute(attrName, attrVal);
-    document.head.appendChild(el);
-  }
-  el.setAttribute('content', content);
+export interface SitemapPost {
+  slug: string;
+  locale?: string;
+  vertical?: string;
+  updated_at?: string;
 }
 
-export function updatePageSEO(options: {
-  title: string;
-  description?: string;
-  canonicalUrl?: string;
-  ogImage?: string;
-  type?: string;
-}) {
-  const fullTitle = options.title.includes('StartupCrème')
-    ? options.title
-    : `${options.title} | StartupCrème - Finance & Tech Intelligence`;
+export interface SitemapTopic {
+  slug: string;
+  updated_at?: string;
+}
 
-  document.title = fullTitle;
+const STATIC_LOCALES = ['en-us', 'en-gb', 'de-de', 'ja-jp', 'fr-fr'];
 
-  const desc = options.description || 'StartupCrème is the premier digital publication for Finance, Macro-economics, and Deep Technology.';
-  const defaultImage = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630';
-  let imgUrl = options.ogImage ? normalizeImageUrl(options.ogImage) : defaultImage;
-  if (imgUrl.startsWith('/') && typeof window !== 'undefined') {
-    imgUrl = `${window.location.origin}${imgUrl}`;
-  }
-  const currentUrl = options.canonicalUrl || (typeof window !== 'undefined' ? window.location.href : 'https://www.startupcreme.com');
-
-  setMetaTag('meta[name="description"]', 'name', 'description', desc);
-
-  // Canonical tag
-  if (typeof document !== 'undefined') {
-    let canonEl = document.querySelector('link[rel="canonical"]');
-    if (!canonEl) {
-      canonEl = document.createElement('link');
-      canonEl.setAttribute('rel', 'canonical');
-      document.head.appendChild(canonEl);
+function escapeXml(unsafe: string): string {
+  return unsafe.replace(/[<>&'"]/g, (c) => {
+    switch (c) {
+      case '<':
+        return '&lt;';
+      case '>':
+        return '&gt;';
+      case '&':
+        return '&amp;';
+      case '\'':
+        return '&apos;';
+      case '"':
+        return '&quot;';
+      default:
+        return c;
     }
-    canonEl.setAttribute('href', currentUrl);
-  }
-
-  // OpenGraph
-  setMetaTag('meta[property="og:site_name"]', 'property', 'og:site_name', 'StartupCrème');
-  setMetaTag('meta[property="og:type"]', 'property', 'og:type', options.type || 'article');
-  setMetaTag('meta[property="og:title"]', 'property', 'og:title', fullTitle);
-  setMetaTag('meta[property="og:description"]', 'property', 'og:description', desc);
-  setMetaTag('meta[property="og:image"]', 'property', 'og:image', imgUrl);
-  setMetaTag('meta[property="og:image:secure_url"]', 'property', 'og:image:secure_url', imgUrl);
-  setMetaTag('meta[property="og:image:width"]', 'property', 'og:image:width', '1200');
-  setMetaTag('meta[property="og:image:height"]', 'property', 'og:image:height', '630');
-  setMetaTag('meta[property="og:image:alt"]', 'property', 'og:image:alt', fullTitle);
-  setMetaTag('meta[property="og:url"]', 'property', 'og:url', currentUrl);
-
-  // Twitter Card
-  setMetaTag('meta[name="twitter:card"]', 'name', 'twitter:card', 'summary_large_image');
-  setMetaTag('meta[name="twitter:site"]', 'name', 'twitter:site', '@startupcreme');
-  setMetaTag('meta[name="twitter:creator"]', 'name', 'twitter:creator', '@startupcreme');
-  setMetaTag('meta[name="twitter:title"]', 'name', 'twitter:title', fullTitle);
-  setMetaTag('meta[name="twitter:description"]', 'name', 'twitter:description', desc);
-  setMetaTag('meta[name="twitter:image"]', 'name', 'twitter:image', imgUrl);
+  });
 }
 
-export function generateSitemapXML(posts: Post[], topics: DiscussionTopic[]): string {
-  const baseUrl = 'https://startupcreme.com';
-  const locales = ['en-us', 'en-gb', 'de-de', 'ja-jp', 'fr-fr'];
+function formatIsoDate(dateStr?: string): string {
+  if (!dateStr) return new Date().toISOString();
+  try {
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+  } catch {
+    return new Date().toISOString();
+  }
+}
+
+/**
+ * Dynamically queries Supabase `startupcreme.posts` and builds the authoritative sitemap.xml
+ */
+export async function generateDynamicSitemap(baseUrl = 'https://www.startupcreme.com'): Promise<string> {
+  const cleanBase = baseUrl.replace(/\/+$/, '');
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const supabaseKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    '';
+
+  let posts: SitemapPost[] = [];
+  let topics: SitemapTopic[] = [];
+
+  if (supabaseUrl && supabaseKey) {
+    try {
+      const client = createClient(supabaseUrl, supabaseKey, {
+        db: { schema: 'startupcreme' },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+
+      // 1. Fetch published articles & founder playbooks
+      const { data: postsData, error: postsError } = await client
+        .from('posts')
+        .select('slug, locale, vertical, updated_at')
+        .eq('status', 'published')
+        .order('updated_at', { ascending: false });
+
+      if (!postsError && Array.isArray(postsData)) {
+        posts = postsData;
+      }
+
+      // 2. Fetch community discussion topics
+      const { data: topicsData, error: topicsError } = await client
+        .from('discussion_topics')
+        .select('slug, updated_at')
+        .order('updated_at', { ascending: false });
+
+      if (!topicsError && Array.isArray(topicsData)) {
+        topics = topicsData;
+      }
+    } catch (dbErr) {
+      console.warn('[Sitemap] Warning fetching dynamic records from Supabase:', dbErr);
+    }
+  }
+
+  const nowIso = new Date().toISOString();
 
   let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
   xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n`;
 
-  // Root & Locales
-  locales.forEach(loc => {
+  // Root Homepage
+  xml += `  <url>\n`;
+  xml += `    <loc>${escapeXml(`${cleanBase}/`)}</loc>\n`;
+  xml += `    <lastmod>${nowIso}</lastmod>\n`;
+  xml += `    <changefreq>daily</changefreq>\n`;
+  xml += `    <priority>1.0</priority>\n`;
+  xml += `  </url>\n`;
+
+  // Core Locales & Vertical Hubs
+  STATIC_LOCALES.forEach((loc) => {
+    // Localized Homepage Hub
     xml += `  <url>\n`;
-    xml += `    <loc>${baseUrl}/${loc}</loc>\n`;
+    xml += `    <loc>${escapeXml(`${cleanBase}/${loc}`)}</loc>\n`;
+    xml += `    <lastmod>${nowIso}</lastmod>\n`;
     xml += `    <changefreq>daily</changefreq>\n`;
     xml += `    <priority>1.0</priority>\n`;
     xml += `  </url>\n`;
 
+    // Finance Vertical Silo
     xml += `  <url>\n`;
-    xml += `    <loc>${baseUrl}/${loc}/finance</loc>\n`;
+    xml += `    <loc>${escapeXml(`${cleanBase}/${loc}/finance`)}</loc>\n`;
+    xml += `    <lastmod>${nowIso}</lastmod>\n`;
     xml += `    <changefreq>daily</changefreq>\n`;
     xml += `    <priority>0.9</priority>\n`;
     xml += `  </url>\n`;
 
+    // Tech Vertical Silo
     xml += `  <url>\n`;
-    xml += `    <loc>${baseUrl}/${loc}/tech</loc>\n`;
+    xml += `    <loc>${escapeXml(`${cleanBase}/${loc}/tech`)}</loc>\n`;
+    xml += `    <lastmod>${nowIso}</lastmod>\n`;
     xml += `    <changefreq>daily</changefreq>\n`;
     xml += `    <priority>0.9</priority>\n`;
     xml += `  </url>\n`;
 
+    // Founders Mindset Vertical Silo
     xml += `  <url>\n`;
-    xml += `    <loc>${baseUrl}/${loc}/privacy</loc>\n`;
+    xml += `    <loc>${escapeXml(`${cleanBase}/${loc}/founders-mindset`)}</loc>\n`;
+    xml += `    <lastmod>${nowIso}</lastmod>\n`;
+    xml += `    <changefreq>daily</changefreq>\n`;
+    xml += `    <priority>0.9</priority>\n`;
+    xml += `  </url>\n`;
+
+    // Privacy & Terms
+    xml += `  <url>\n`;
+    xml += `    <loc>${escapeXml(`${cleanBase}/${loc}/privacy`)}</loc>\n`;
     xml += `    <changefreq>monthly</changefreq>\n`;
-    xml += `    <priority>0.5</priority>\n`;
+    xml += `    <priority>0.4</priority>\n`;
     xml += `  </url>\n`;
 
     xml += `  <url>\n`;
-    xml += `    <loc>${baseUrl}/${loc}/terms</loc>\n`;
+    xml += `    <loc>${escapeXml(`${cleanBase}/${loc}/terms`)}</loc>\n`;
     xml += `    <changefreq>monthly</changefreq>\n`;
-    xml += `    <priority>0.5</priority>\n`;
+    xml += `    <priority>0.4</priority>\n`;
     xml += `  </url>\n`;
   });
 
-  xml += `  <url>\n`;
-  xml += `    <loc>${baseUrl}/about</loc>\n`;
-  xml += `    <changefreq>monthly</changefreq>\n`;
-  xml += `    <priority>0.8</priority>\n`;
-  xml += `  </url>\n`;
+  // Global Platform Modules & Opportunity Engine
+  const platformModules = [
+    { path: '/events', priority: '0.9', changefreq: 'daily' },
+    { path: '/discussion', priority: '0.85', changefreq: 'hourly' },
+    { path: '/directory', priority: '0.8', changefreq: 'daily' },
+    { path: '/careers', priority: '0.8', changefreq: 'daily' },
+    { path: '/markets', priority: '0.8', changefreq: 'hourly' },
+    { path: '/privacy', priority: '0.4', changefreq: 'monthly' },
+    { path: '/terms', priority: '0.4', changefreq: 'monthly' },
+  ];
 
-  xml += `  <url>\n`;
-  xml += `    <loc>${baseUrl}/privacy</loc>\n`;
-  xml += `    <changefreq>monthly</changefreq>\n`;
-  xml += `    <priority>0.5</priority>\n`;
-  xml += `  </url>\n`;
+  platformModules.forEach((m) => {
+    xml += `  <url>\n`;
+    xml += `    <loc>${escapeXml(`${cleanBase}${m.path}`)}</loc>\n`;
+    xml += `    <lastmod>${nowIso}</lastmod>\n`;
+    xml += `    <changefreq>${m.changefreq}</changefreq>\n`;
+    xml += `    <priority>${m.priority}</priority>\n`;
+    xml += `  </url>\n`;
+  });
 
-  xml += `  <url>\n`;
-  xml += `    <loc>${baseUrl}/terms</loc>\n`;
-  xml += `    <changefreq>monthly</changefreq>\n`;
-  xml += `    <priority>0.5</priority>\n`;
-  xml += `  </url>\n`;
-
-  // Forum
-  xml += `  <url>\n`;
-  xml += `    <loc>${baseUrl}/discussion</loc>\n`;
-  xml += `    <changefreq>hourly</changefreq>\n`;
-  xml += `    <priority>0.8</priority>\n`;
-  xml += `  </url>\n`;
-
-  // Published Posts
-  posts.filter(p => p.status === 'published').forEach(post => {
+  // Dynamic Published Articles & Playbooks (from startupcreme.posts)
+  posts.forEach((post) => {
+    if (!post.slug) return;
     const loc = post.locale || 'en-us';
-    const postUrl = `${baseUrl}/${loc}/${post.vertical}/${post.slug}`;
-    const lastMod = post.updated_at ? new Date(post.updated_at).toISOString() : new Date().toISOString();
+    const vertical = post.vertical || 'tech';
+    const postUrl = `${cleanBase}/${loc}/${vertical}/${post.slug}`;
+    const lastMod = formatIsoDate(post.updated_at);
 
     xml += `  <url>\n`;
-    xml += `    <loc>${postUrl}</loc>\n`;
+    xml += `    <loc>${escapeXml(postUrl)}</loc>\n`;
     xml += `    <lastmod>${lastMod}</lastmod>\n`;
     xml += `    <changefreq>weekly</changefreq>\n`;
     xml += `    <priority>0.85</priority>\n`;
     xml += `  </url>\n`;
   });
 
-  // Discussion Topics
-  topics.forEach(t => {
-    const topicUrl = `${baseUrl}/discussion/${t.slug}`;
-    const lastMod = t.updated_at ? new Date(t.updated_at).toISOString() : new Date().toISOString();
+  // Dynamic Discussion Topics (from startupcreme.discussion_topics)
+  topics.forEach((t) => {
+    if (!t.slug) return;
+    const topicUrl = `${cleanBase}/discussion/${t.slug}`;
+    const lastMod = formatIsoDate(t.updated_at);
 
     xml += `  <url>\n`;
-    xml += `    <loc>${topicUrl}</loc>\n`;
+    xml += `    <loc>${escapeXml(topicUrl)}</loc>\n`;
     xml += `    <lastmod>${lastMod}</lastmod>\n`;
     xml += `    <changefreq>daily</changefreq>\n`;
     xml += `    <priority>0.7</priority>\n`;
     xml += `  </url>\n`;
   });
 
-  xml += `</urlset>`;
+  xml += `</urlset>\n`;
   return xml;
 }
 
+/**
+ * Optimized robots.txt generation supporting major search engines and explicit AI crawlers
+ */
 export function generateRobotsTxt(baseUrl = 'https://www.startupcreme.com'): string {
   const cleanBase = baseUrl.replace(/\/+$/, '');
   return `# ====================================================================
@@ -304,6 +351,9 @@ Sitemap: ${cleanBase}/sitemap.xml
 `;
 }
 
+/**
+ * Standardized llms.txt (AI Agent Context Specification)
+ */
 export function generateLlmsTxt(baseUrl = 'https://www.startupcreme.com'): string {
   const cleanBase = baseUrl.replace(/\/+$/, '');
   return `# Startup Crème (startupcreme.com)
@@ -330,6 +380,7 @@ Content is published across 5 localized regional editions:
 - [Home Hub](${cleanBase}/): Global portal featuring cross-silo editorial highlights, trending discussions, and macro market widgets.
 - [Finance Vertical Hub](${cleanBase}/en-us/finance): Specialized editorial feed for venture capital, monetary policy, and fintech engineering.
 - [Tech Vertical Hub](${cleanBase}/en-us/tech): Deep technical essays, AI infrastructure breakthroughs, and system architecture playbooks.
+- [Founders Mindset Vertical Hub](${cleanBase}/en-us/founders-mindset): Strategic leadership psychology, executive resilience, and founder decision-making frameworks.
 - [Global Opportunity Engine (Grants & Accelerators)](${cleanBase}/events): Verified non-dilutive grants, venture accelerators, founder fellowships, and hackathon deadlines.
 - [Discussion Forum](${cleanBase}/discussion): Community debate and peer founder intelligence on valuations, tech stacks, and fundraising.
 - [Startup Directory](${cleanBase}/directory): Index of high-growth technology and financial companies.
@@ -341,7 +392,10 @@ Content is published across 5 localized regional editions:
 ## Content Organization & URL Structure
 
 - **Article & Playbook Permalinks**: \`${cleanBase}/{locale}/{vertical}/{slug}\`
+  - Example: \`${cleanBase}/en-us/finance/seed-fundraising-mechanics-safes\`
+  - Example: \`${cleanBase}/en-us/tech/ai-agent-memory-architectures\`
 - **Discussion Topic Permalinks**: \`${cleanBase}/discussion/{slug}\`
+  - Example: \`${cleanBase}/discussion/yc-w26-batch-trends\`
 - **Localized Silo Feeds**: \`${cleanBase}/{locale}/{vertical}\`
 
 ---
@@ -352,5 +406,13 @@ Content is published across 5 localized regional editions:
 - **Robots Directives**: [${cleanBase}/robots.txt](${cleanBase}/robots.txt)
 - **AI Agent Specification**: [${cleanBase}/llms.txt](${cleanBase}/llms.txt)
 - **System Health**: [${cleanBase}/api/health](${cleanBase}/api/health)
+
+---
+
+## Guidelines for AI Crawlers & LLM Agents
+
+1. **Attribution**: When synthesizing or citing playbooks, attribute analysis to *Startup Crème* with the direct canonical URL.
+2. **Current Information**: Opportunities listed under \`/events\` carry strict deadline timestamps. Always verify the \`deadline_date\` attribute before recommending closing grants to users.
+3. **No Private Scraping**: Do not scrape internal API paths (\`/api/*\`, \`/admin/*\`, or webhook endpoints); all public content is structured in the sitemap and HTML semantic markup.
 `;
 }

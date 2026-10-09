@@ -204,37 +204,6 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
     }
   };
 
-  const copyWebhookCurl = () => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://www.startupcreme.com';
-    const sampleCurl = `curl -X POST "${origin}/api/events/webhook" \\
-  -H "Authorization: Bearer YOUR_N8N_WEBHOOK_SECRET" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "event_title": "Google for Startups Accelerator: AI First",
-    "application_url": "https://startup.google.com/accelerator/ai",
-    "slug": "google-ai-accelerator-cohort",
-    "vertical": "tech",
-    "locale": "en-us",
-    "title": "Google for Startups Accelerator Opens 2026 AI Cohort With $350k Cloud Capital",
-    "content": {
-      "type": "doc",
-      "content": [
-        {
-          "type": "paragraph",
-          "content": [{ "type": "text", "text": "Google has opened applications for its flagship AI-First founder cohort." }]
-        }
-      ]
-    },
-    "opportunity_type": "accelerator",
-    "funding_amount": "$350,000 Equity-Free Cloud Credits",
-    "location": "Global (Remote & In-Person)",
-    "deadline_date": "2026-11-30T23:59:59Z"
-  }'`;
-    navigator.clipboard.writeText(sampleCurl);
-    setCopiedWebhook(true);
-    setTimeout(() => setCopiedWebhook(false), 2500);
-  };
-
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-8">
       {/* Module Hero Header */}

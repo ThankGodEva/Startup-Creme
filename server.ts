@@ -31,6 +31,7 @@ async function startServer() {
         p === '/sitemap' ||
         p === '/sitemap_index.xml' ||
         p === '/robots.txt' ||
+        p === '/llms.txt' ||
         /\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot)$/i.test(p)
       ) {
         return next();

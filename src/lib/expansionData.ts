@@ -6,7 +6,29 @@ import {
   RateSnapshotPayload,
 } from '../types';
 
-export const INITIAL_STARTUPS: StartupEntry[] = [];
+export const INITIAL_STARTUPS: StartupEntry[] = [
+  {
+    id: '8ec5e176-acf3-45ec-8ade-42e061bd1d32',
+    name: 'Xhipa',
+    slug: 'xhipa-fzok',
+    tagline: 'Create your storefront, add your products or bookable services, and share one simple link with your customers across WhatsApp, Instagram, and TikTok.',
+    description: 'Multi-tenant digital business operating system with storefronts, services & rental bookings, real-time quantity availability, WhatsApp ordering, catalog mode, guest checkout, Paystack payments, and partner network.',
+    website_url: 'https://xhipa.com',
+    logo_url: 'https://www.xhipa.com/Xhipa-dark.png',
+    stage: 'bootstrapped',
+    vertical: 'E-Commerce',
+    tech_stack: [
+      'React Router',
+      'Supabase',
+      'Cloudflare Workers',
+      'Cloudflare for SaaS',
+      'Paystack',
+    ],
+    submitted_by: '9373b6e3-dcea-4c1b-8063-d1cd9ee3037a',
+    is_approved: true,
+    created_at: '2026-10-06T16:45:36.815461+00:00',
+  },
+];
 
 export const INITIAL_CENTRAL_BANK_RATES: CentralBankRate[] = [
   {

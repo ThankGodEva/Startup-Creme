@@ -1002,6 +1002,7 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
                 >
                   <option value="finance">Finance</option>
                   <option value="tech">Tech</option>
+                  <option value="founders-mindset">Founders Mindset</option>
                 </select>
               </div>
 

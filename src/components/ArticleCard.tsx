@@ -40,8 +40,10 @@ export const ArticleCard: React.FC<ArticleCardProps> = ({
           <div className="absolute top-4 left-4 flex items-center gap-2">
             <span
               className={`px-2.5 py-1 rounded-full text-[11px] font-mono font-bold uppercase shadow-sm ${
-                isFinance
+                post.vertical === 'finance'
                   ? 'bg-emerald-100 border border-emerald-300 text-emerald-900'
+                  : post.vertical === 'founders-mindset'
+                  ? 'bg-violet-100 border border-violet-300 text-violet-900'
                   : 'bg-cyan-100 border border-cyan-300 text-cyan-900'
               }`}
             >
@@ -137,8 +139,10 @@ export const ArticleCard: React.FC<ArticleCardProps> = ({
           <div className="absolute top-3 left-3 flex items-center gap-1.5">
             <span
               className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase shadow-xs ${
-                isFinance
+                post.vertical === 'finance'
                   ? 'bg-emerald-100 border border-emerald-300 text-emerald-900'
+                  : post.vertical === 'founders-mindset'
+                  ? 'bg-violet-100 border border-violet-300 text-violet-900'
                   : 'bg-cyan-100 border border-cyan-300 text-cyan-900'
               }`}
             >

@@ -254,6 +254,7 @@ export async function resolvePageMetadata(
   const excluded = [
     'finance',
     'tech',
+    'founders-mindset',
     'discussion',
     'discussions',
     'calculators',
@@ -267,6 +268,7 @@ export async function resolvePageMetadata(
     'admin',
     'sitemap.xml',
     'robots.txt',
+    'llms.txt',
     'privacy',
     'privacy-policy',
     'terms',
@@ -292,6 +294,11 @@ export async function resolvePageMetadata(
       description = 'Frontier artificial intelligence architectures, developer tooling, cloud infrastructure, and emerging startup technology ecosystems.';
       coverImage = 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=1200&h=630';
       section = 'Technology';
+    } else if (lowerSlug === 'founders-mindset') {
+      title = 'Founders Mindset, Leadership & Psychology | StartupCrème';
+      description = 'Strategic founder psychology, mental resilience, executive leadership frameworks, and high-performance decision-making for startup builders.';
+      coverImage = 'https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&q=80&w=1200&h=630';
+      section = 'Founders Mindset';
     } else if (lowerSlug === 'calculators') {
       title = 'Interactive Financial & Tech Calculators | StartupCrème';
       description = 'Compound interest calculator, SaaS runway & burn rate calculator, cap table dilution simulator across Seed and Series A, and cloud infrastructure cost estimator.';
