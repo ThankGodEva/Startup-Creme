@@ -49,7 +49,7 @@ export const ArticleCard: React.FC<ArticleCardProps> = ({
             >
               {post.vertical}
             </span>
-            {post.dual_silo && (
+            {post.dual_silo && post.vertical !== 'founders-mindset' && (
               <span className="px-2.5 py-1 rounded-full text-[11px] font-mono bg-purple-100 border border-purple-300 text-purple-900 flex items-center gap-1 shadow-sm font-semibold">
                 <Sparkles className="w-3 h-3 text-purple-600" />
                 <span>Dual Silo</span>
@@ -148,7 +148,7 @@ export const ArticleCard: React.FC<ArticleCardProps> = ({
             >
               {post.vertical}
             </span>
-            {post.dual_silo && (
+            {post.dual_silo && post.vertical !== 'founders-mindset' && (
               <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-purple-100 border border-purple-300 text-purple-900 font-semibold shadow-xs">
                 Dual Silo
               </span>

@@ -497,7 +497,7 @@ export async function resolvePageMetadata(
             authorName = foundPost.author_name || 'Startup Crème Editorial';
             publishedTime = foundPost.created_at || new Date().toISOString();
             modifiedTime = foundPost.updated_at || foundPost.created_at || new Date().toISOString();
-            section = foundPost.vertical === 'tech' ? 'Technology' : 'Finance';
+            section = foundPost.vertical === 'tech' ? 'Technology' : foundPost.vertical === 'founders-mindset' ? 'Founders Mindset' : 'Finance';
             tags = Array.isArray(foundPost.tags) ? foundPost.tags : [];
 
             const sanitizedPost = JSON.stringify(foundPost).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
@@ -597,7 +597,7 @@ export async function resolvePageMetadata(
   }
 
   // Pre-fetch top posts if homepage / silo to speed up client-side render
-  if (!ssrPayloadScript && (segments.length === 0 || segments.length === 1)) {
+  if (!ssrPayloadScript && (segments.length <= 2)) {
     const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
     const supabaseKey =
       process.env.SUPABASE_SERVICE_ROLE_KEY ||

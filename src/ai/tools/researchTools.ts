@@ -6,7 +6,7 @@ import { Post, ContentVertical } from '../../types';
 // 1. Search Content Tool (Safe, Green)
 export const SearchContentParamsSchema = z.object({
   query: z.string().min(2, 'Query must be at least 2 characters').max(100),
-  vertical: z.enum(['finance', 'tech', 'all']).optional().default('all'),
+  vertical: z.enum(['finance', 'tech', 'founders-mindset', 'all']).optional().default('all'),
   limit: z.number().int().min(1).max(20).optional().default(5),
 });
 
@@ -34,7 +34,10 @@ export class SearchContentTool implements ITool<SearchContentParams, { results: 
       const allPosts = store.getPosts();
       
       const filtered = allPosts.filter(p => {
-        const matchesVertical = params.vertical === 'all' || p.vertical === params.vertical || p.dual_silo;
+        const matchesVertical = params.vertical === 'all' ||
+          (params.vertical === 'founders-mindset'
+            ? p.vertical === 'founders-mindset'
+            : (p.vertical === params.vertical || (Boolean(p.dual_silo) && (p.vertical === 'finance' || p.vertical === 'tech'))));
         const matchesQuery = p.title.toLowerCase().includes(q) || 
                              p.excerpt.toLowerCase().includes(q) || 
                              p.tags.some(t => t.toLowerCase().includes(q));

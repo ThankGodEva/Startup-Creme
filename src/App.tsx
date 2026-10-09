@@ -359,13 +359,25 @@ export default function App() {
         const winPost = typeof window !== 'undefined' ? (window as any).__INITIAL_POST__ : null;
         if (post) {
           setSelectedPost(post);
-          setActiveTab(post.vertical);
+          if (first === 'tech' && post.dual_silo && post.vertical === 'finance') {
+            setActiveTab('tech');
+          } else if (first === 'finance' && post.dual_silo && post.vertical === 'tech') {
+            setActiveTab('finance');
+          } else {
+            setActiveTab(post.vertical);
+          }
           setSelectedTopic(null);
           setLoadingArticleSlug(null);
           setLoadingTopicSlug(null);
         } else if (winPost && (winPost.slug === slug || winPost.id === slug)) {
           setSelectedPost(winPost);
-          setActiveTab(winPost.vertical || (first as ContentVertical) || 'finance');
+          if (first === 'tech' && winPost.dual_silo && winPost.vertical === 'finance') {
+            setActiveTab('tech');
+          } else if (first === 'finance' && winPost.dual_silo && winPost.vertical === 'tech') {
+            setActiveTab('finance');
+          } else {
+            setActiveTab(winPost.vertical || (first as ContentVertical) || 'finance');
+          }
           setSelectedTopic(null);
           setLoadingArticleSlug(null);
           setLoadingTopicSlug(null);
@@ -376,7 +388,13 @@ export default function App() {
           store.fetchPostBySlug(slug, loc, targetVertical).then(fetched => {
             if (fetched) {
               setSelectedPost(fetched);
-              setActiveTab(fetched.vertical);
+              if (first === 'tech' && fetched.dual_silo && fetched.vertical === 'finance') {
+                setActiveTab('tech');
+              } else if (first === 'finance' && fetched.dual_silo && fetched.vertical === 'tech') {
+                setActiveTab('finance');
+              } else {
+                setActiveTab(fetched.vertical);
+              }
             } else {
               if (first === 'finance' || first === 'tech' || first === 'founders-mindset') {
                 setActiveTab(first);
@@ -529,7 +547,7 @@ export default function App() {
       .getAllPosts()
       .filter(
         p =>
-          (p.vertical === currentPost.vertical || p.dual_silo) &&
+          p.vertical === currentPost.vertical &&
           p.status === 'published' &&
           p.id !== currentPost.id &&
           p.slug !== currentPost.slug &&

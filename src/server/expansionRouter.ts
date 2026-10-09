@@ -764,7 +764,7 @@ expansionRouter.post(
 
     try {
       const normLocale = String(locale).trim().toLowerCase();
-      const normVertical = String(vertical).trim().toLowerCase() as 'finance' | 'tech';
+      const normVertical = String(vertical).trim().toLowerCase() as 'finance' | 'tech' | 'founders-mindset';
       const normSlug = String(slug).trim().toLowerCase().replace(/[^a-z0-9-_]/g, '-');
       const cleanAppUrl = String(application_url).trim();
       const cleanEventTitle = String(event_title).trim();
@@ -816,7 +816,7 @@ expansionRouter.post(
         author_name: author_name ? String(author_name).trim() : 'Startup Crème Editorial',
         author_role: author_role ? String(author_role).trim() : 'Principal Editor',
         author_avatar: author_avatar ? String(author_avatar).trim() : null,
-        dual_silo: Boolean(req.body.dual_silo || false),
+        dual_silo: normVertical === 'founders-mindset' ? false : Boolean(req.body.dual_silo || false),
         silo_badge: req.body.silo_badge || null,
         tags: Array.isArray(tags) ? tags : [],
         reading_time_minutes: Number(reading_time_minutes) || 5,

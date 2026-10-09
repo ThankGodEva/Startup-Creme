@@ -234,7 +234,7 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
       status: saveStatus,
       cover_image: finalCoverImage,
       tags: tagsArray.length > 0 ? tagsArray : ['Editorial'],
-      dual_silo: dualSilo,
+      dual_silo: vertical === 'founders-mindset' ? false : dualSilo,
       author_name: authorName,
       author_role: authorRole,
       author_avatar: currentUser?.avatar_url || post?.author_avatar,
@@ -1024,16 +1024,23 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
 
             {/* Dual Silo Toggle */}
             <div className="pt-2 border-t border-slate-100">
-              <label className="flex items-center gap-2.5 text-xs font-bold text-purple-800 cursor-pointer p-2.5 rounded-xl bg-purple-50/60 hover:bg-purple-50 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={dualSilo}
-                  onChange={(e) => setDualSilo(e.target.checked)}
-                  className="rounded bg-white border-purple-300 text-purple-600 focus:ring-0 w-4 h-4"
-                />
-                <Sparkles className="w-4 h-4 text-purple-600 shrink-0" />
-                <span>Dual Silo (Visible in both Finance & Tech)</span>
-              </label>
+              {vertical === 'founders-mindset' ? (
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-500 text-xs flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span>Dual Silo applies only between Tech & Finance (Founders Mindset is excluded)</span>
+                </div>
+              ) : (
+                <label className="flex items-center gap-2.5 text-xs font-bold text-purple-800 cursor-pointer p-2.5 rounded-xl bg-purple-50/60 hover:bg-purple-50 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={dualSilo}
+                    onChange={(e) => setDualSilo(e.target.checked)}
+                    className="rounded bg-white border-purple-300 text-purple-600 focus:ring-0 w-4 h-4"
+                  />
+                  <Sparkles className="w-4 h-4 text-purple-600 shrink-0" />
+                  <span>Dual Silo (Visible in both Finance & Tech)</span>
+                </label>
+              )}
             </div>
           </div>
 

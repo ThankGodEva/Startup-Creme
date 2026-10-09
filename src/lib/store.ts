@@ -47,7 +47,7 @@ const SAMPLE_JOB_TITLES = [
   'Lead Full-Stack Engineer (React Router 7 + Supabase)',
 ];
 
-const POSTS_CACHE_KEY = 'startupcreme_posts_cache_v3';
+const POSTS_CACHE_KEY = 'startupcreme_posts_cache_v4';
 const TOPICS_CACHE_KEY = 'startupcreme_topics_cache_v3';
 
 const SEED_TOPICS: DiscussionTopic[] = [
@@ -889,7 +889,11 @@ class StartupCremeStore {
   public getPosts(locale = 'en-us', vertical?: ContentVertical, statusOnly: PublicationStatus = 'published'): Post[] {
     return this.posts.filter(p => {
       const matchesLocale = p.locale.toLowerCase() === locale.toLowerCase() || p.locale === 'en-us';
-      const matchesVertical = !vertical || p.vertical === vertical || p.dual_silo;
+      const matchesVertical = !vertical
+        ? true
+        : vertical === 'founders-mindset'
+        ? p.vertical === 'founders-mindset'
+        : p.vertical === vertical || (Boolean(p.dual_silo) && (p.vertical === 'finance' || p.vertical === 'tech'));
       const matchesStatus = statusOnly ? p.status === statusOnly : true;
       return matchesLocale && matchesVertical && matchesStatus;
     });
@@ -903,10 +907,14 @@ class StartupCremeStore {
     if (!slug) return undefined;
     const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
 
-    // 1. Exact or case-insensitive match with vertical constraint or dual_silo
+    // 1. Exact or case-insensitive match with vertical constraint (respecting dual_silo for finance/tech, excluding founders-mindset)
     let found = this.posts.find(p => {
       const matchSlug = p.slug.toLowerCase() === decodedSlug || p.id.toLowerCase() === decodedSlug;
-      const matchVert = !vertical || p.vertical === vertical || p.dual_silo;
+      const matchVert = !vertical
+        ? true
+        : vertical === 'founders-mindset'
+        ? p.vertical === 'founders-mindset'
+        : p.vertical === vertical || (Boolean(p.dual_silo) && (p.vertical === 'finance' || p.vertical === 'tech'));
       return matchSlug && matchVert;
     });
 
@@ -1160,19 +1168,23 @@ class StartupCremeStore {
     let savedPost: Post;
 
     if (existingIndex >= 0) {
+      const mergedVertical = post.vertical || this.posts[existingIndex].vertical;
       savedPost = {
         ...this.posts[existingIndex],
         ...post,
+        vertical: mergedVertical,
+        dual_silo: mergedVertical === 'founders-mindset' ? false : (post.dual_silo !== undefined ? Boolean(post.dual_silo) : this.posts[existingIndex].dual_silo),
         cover_image: normalizeImageUrl(post.cover_image || this.posts[existingIndex].cover_image),
         updated_at: now,
       } as Post;
       this.posts[existingIndex] = savedPost;
     } else {
+      const targetVertical = post.vertical || 'finance';
       savedPost = {
         id: post.id || `post-${Date.now()}`,
         slug: post.slug || 'new-post-' + Date.now(),
         locale: post.locale || 'en-us',
-        vertical: post.vertical || 'finance',
+        vertical: targetVertical,
         title: post.title || 'Untitled Article',
         excerpt: post.excerpt || '',
         content: post.content || '',
@@ -1183,7 +1195,7 @@ class StartupCremeStore {
         author_name: post.author_name || this.currentUser?.full_name || 'Startup Crème Editorial',
         author_role: post.author_role || 'Senior Analyst',
         author_avatar: post.author_avatar || this.currentUser?.avatar_url,
-        dual_silo: Boolean(post.dual_silo),
+        dual_silo: targetVertical === 'founders-mindset' ? false : Boolean(post.dual_silo),
         silo_badge: post.silo_badge || '',
         tags: post.tags || ['Finance', 'Tech'],
         reading_time_minutes: post.reading_time_minutes || 5,

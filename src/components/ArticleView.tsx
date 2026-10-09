@@ -484,6 +484,11 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
             >
               {post.vertical}
             </a>
+            {post.dual_silo && post.vertical !== 'founders-mindset' && (
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-purple-100 text-purple-900 border border-purple-300 font-semibold shadow-2xs">
+                Dual Silo
+              </span>
+            )}
             <span>/</span>
             <span className="text-slate-700 font-semibold truncate max-w-[280px] bg-white border border-slate-200 px-2 py-0.5 rounded shadow-2xs">{post.slug}</span>
           </div>
