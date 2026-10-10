@@ -32,13 +32,19 @@ export class GeminiResearchProvider implements IResearchProvider {
 
     const systemInstructions = `
 You are the Lead Intelligence Researcher for StartupCrème (${STARTUPCREME_CONSTITUTION.tagline}).
-Your core mandate is rigorous, verified, high-conviction research on tech, venture capital, financial markets, and startups.
+Your core mandate is rigorous, verified, high-conviction research on deep technology, venture capital, financial markets, and founder mindset & leadership psychology.
 
 EDITORIAL CONSTITUTION ENFORCEMENT:
 1. Zero tolerance for hallucinations: Do NOT invent founders, funding amounts, dates, or non-existent companies.
 2. Fact-grounding: Every claim must cite the specific market evidence or known dynamic.
-3. Target Audience: Founders, VC investors, software engineers, and financial strategists.
+3. Target Audience: Founders, VC investors, software engineers, financial strategists, and executive leaders.
 4. Voice: Precise, analytical, institutional, sober, high-signal.
+
+When investigating the "founders-mindset" vertical, focus on:
+- Founder psychology under extreme uncertainty and stress
+- Executive resilience and high-stakes decision frameworks
+- Team culture design, mental models, and scaling leadership
+- Strategic long-term focus vs short-term noise
 
 You must return valid JSON matching this exact structure:
 {
@@ -57,7 +63,7 @@ You must return valid JSON matching this exact structure:
     { "date_or_timeframe": string, "significance": string }
   ],
   "potential_article_angles": [
-    { "title_proposal": string, "angle": string, "target_audience": string, "suggested_vertical": "finance" | "tech" }
+    { "title_proposal": string, "angle": string, "target_audience": string, "suggested_vertical": "finance" | "tech" | "founders-mindset" }
   ],
   "confidence": number (0.0 to 1.0),
   "recommended_next_action": "draft_article" | "further_investigation" | "archive_idea"
@@ -67,9 +73,9 @@ You must return valid JSON matching this exact structure:
     const prompt = `
 Conduct in-depth research on the following topic:
 Topic: "${input.topic}"
-Vertical Preference: ${input.vertical || 'auto-detect based on context (finance vs tech)'}
+Vertical Preference: ${input.vertical || 'auto-detect based on context (finance vs tech vs founders-mindset)'}
 Depth: ${input.depth || 'standard'}
-Focus Areas: ${input.focus_areas?.length ? input.focus_areas.join(', ') : 'core mechanics, capital implications, strategic landscape'}
+Focus Areas: ${input.focus_areas?.length ? input.focus_areas.join(', ') : 'core mechanics, capital implications, strategic landscape, founder psychology'}
 Target Locale: ${input.target_locale || 'en-us'}
 `;
 
@@ -116,7 +122,7 @@ export class ArchiveResearchProvider implements IResearchProvider {
       p.tags.some(t => t.toLowerCase().includes(q))
     ).slice(0, 5);
 
-    const vertical = input.vertical || (matches[0]?.vertical as 'finance' | 'tech') || 'tech';
+    const vertical = input.vertical || (matches[0]?.vertical as 'finance' | 'tech' | 'founders-mindset') || 'tech';
 
     return {
       topic: input.topic,
@@ -186,7 +192,10 @@ export class FallbackResearchProvider implements IResearchProvider {
   }
 
   public async conductResearch(input: ResearchInput): Promise<ResearchOutput> {
-    const vertical = input.vertical || (input.topic.toLowerCase().includes('finance') || input.topic.toLowerCase().includes('treasury') || input.topic.toLowerCase().includes('yield') ? 'finance' : 'tech');
+    const q = input.topic.toLowerCase();
+    const isFM = q.includes('mindset') || q.includes('founder') || q.includes('psychology') || q.includes('resilience') || q.includes('leadership');
+    const isFin = q.includes('finance') || q.includes('treasury') || q.includes('yield') || q.includes('capital') || q.includes('ipo');
+    const vertical = input.vertical || (isFM ? 'founders-mindset' : isFin ? 'finance' : 'tech');
 
     return {
       topic: input.topic,

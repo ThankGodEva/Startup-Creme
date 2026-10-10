@@ -96,6 +96,42 @@ export const AiCommandCenter: React.FC<AiCommandCenterProps> = ({ onNavigateToEd
     setResearchResult(null);
 
     try {
+      // 1. Try server-side API endpoint for Gemini 3.8 Flash execution
+      let completedResult: ResearchOutput | null = null;
+      try {
+        const apiRes = await fetch('/api/ai/research', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-role': 'admin'
+          },
+          body: JSON.stringify({
+            topic: researchTopic.trim(),
+            vertical: researchVertical,
+            depth: researchDepth,
+            requested_by: 'admin_command_center'
+          })
+        });
+
+        if (apiRes.ok) {
+          const apiData = await apiRes.json();
+          if (apiData.result) {
+            completedResult = apiData.result as ResearchOutput;
+          } else if (apiData.task?.result) {
+            completedResult = apiData.task.result as ResearchOutput;
+          }
+        }
+      } catch (apiErr) {
+        console.warn('API /api/ai/research unavailable, falling back to local orchestrator:', apiErr);
+      }
+
+      if (completedResult) {
+        setResearchResult(completedResult);
+        refreshData();
+        return;
+      }
+
+      // 2. Client-side TaskManager execution fallback
       const { task } = await taskManager.submitTask({
         taskType: 'research_topic',
         assignedAgent: 'agent_research',
@@ -168,7 +204,11 @@ export const AiCommandCenter: React.FC<AiCommandCenterProps> = ({ onNavigateToEd
         status: 'draft',
         author_name: 'StartupCrème Research Desk',
         author_role: 'Autonomous Intelligence Desk',
-        tags: [angle.suggested_vertical === 'finance' ? 'Finance' : 'Technology', 'Analysis', 'Market Research']
+        tags: [
+          angle.suggested_vertical === 'founders-mindset' ? 'Founders Mindset' : angle.suggested_vertical === 'finance' ? 'Finance' : 'Technology',
+          'Analysis',
+          'Market Research'
+        ]
       });
 
       if (saveRes.success) {
@@ -518,6 +558,7 @@ export const AiCommandCenter: React.FC<AiCommandCenterProps> = ({ onNavigateToEd
                   >
                     <option value="tech">Technology (Engineering, AI, Infrastructure)</option>
                     <option value="finance">Finance (Venture, Macro, Fintech)</option>
+                    <option value="founders-mindset">Founders Mindset (Psychology, Leadership, Decision-Making)</option>
                   </select>
                 </div>
 

@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const ResearchInputSchema = z.object({
   topic: z.string().min(3, 'Topic must be at least 3 characters').max(300),
-  vertical: z.enum(['finance', 'tech']).optional(),
+  vertical: z.enum(['finance', 'tech', 'founders-mindset']).optional(),
   depth: z.enum(['brief', 'standard', 'deep']).optional().default('standard'),
   focus_areas: z.array(z.string()).optional().default([]),
   target_locale: z.string().optional().default('en-us')
@@ -38,7 +38,7 @@ export const ArticleAngleProposalSchema = z.object({
   title_proposal: z.string().min(10),
   angle: z.string().min(10),
   target_audience: z.string().min(5),
-  suggested_vertical: z.enum(['finance', 'tech'])
+  suggested_vertical: z.enum(['finance', 'tech', 'founders-mindset'])
 });
 
 export const ResearchOutputSchema = z.object({

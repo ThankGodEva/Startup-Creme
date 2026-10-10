@@ -40,7 +40,7 @@ export class TaskRegistry {
       defaultPolicyLevel: 'yellow',
       schema: z.object({
         content: z.string().min(10),
-        vertical: z.enum(['finance', 'tech']).optional(),
+        vertical: z.enum(['finance', 'tech', 'founders-mindset']).optional(),
         review_focus: z.string().optional()
       }),
       timeoutMs: 45000
