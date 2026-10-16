@@ -205,6 +205,26 @@ export const DiscussionForum: React.FC<DiscussionForumProps> = ({
               <span>Startup</span>
             </button>
             <button
+              onClick={() => setActiveCategory('sales')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                activeCategory === 'sales'
+                  ? 'bg-rose-100 text-rose-900 border border-rose-300 shadow-xs'
+                  : 'text-slate-600 hover:text-rose-700'
+              }`}
+            >
+              <span>Sales</span>
+            </button>
+            <button
+              onClick={() => setActiveCategory('marketing')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                activeCategory === 'marketing'
+                  ? 'bg-indigo-100 text-indigo-900 border border-indigo-300 shadow-xs'
+                  : 'text-slate-600 hover:text-indigo-700'
+              }`}
+            >
+              <span>Marketing</span>
+            </button>
+            <button
               onClick={() => setActiveCategory('general')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1.5 ${
                 activeCategory === 'general'
@@ -423,6 +443,8 @@ export const DiscussionForum: React.FC<DiscussionForumProps> = ({
                     <option value="finance">Finance</option>
                     <option value="tech">Tech</option>
                     <option value="startup">Startup</option>
+                    <option value="sales">Sales</option>
+                    <option value="marketing">Marketing</option>
                     <option value="general">General</option>
                   </select>
                 </div>

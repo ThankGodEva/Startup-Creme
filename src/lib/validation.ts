@@ -23,7 +23,18 @@ export const PostSchema = z.object({
 export const TopicSchema = z.object({
   title: z.string().min(5, 'Title must be at least 5 characters').max(150),
   body: z.string().min(10, 'Discussion body must be at least 10 characters'),
-  category: z.enum(['Macro', 'Venture Capital', 'Fintech', 'AI Architecture', 'Hardware', 'Cloud Infrastructure']),
+  category: z.enum([
+    'Macro',
+    'Venture Capital',
+    'Fintech',
+    'AI Architecture',
+    'Hardware',
+    'Cloud Infrastructure',
+    'Sales',
+    'Marketing',
+    'sales',
+    'marketing'
+  ]),
 });
 
 export const CommentSchema = z.object({

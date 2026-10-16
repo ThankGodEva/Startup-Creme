@@ -1,6 +1,6 @@
 export type ContentVertical = 'finance' | 'tech' | 'founders-mindset';
 export type PublicationStatus = 'draft' | 'published' | 'outdated_translation';
-export type DiscussionCategory = 'finance' | 'tech' | 'startup' | 'general';
+export type DiscussionCategory = 'finance' | 'tech' | 'startup' | 'general' | 'sales' | 'marketing';
 export type UserRole = 'user' | 'admin';
 
 export interface UserProfile {
@@ -412,6 +412,8 @@ export type JobCategoryOption =
   | 'Engineering'
   | 'FinOps'
   | 'Financial Modeling'
+  | 'Sales'
+  | 'Marketing'
   | 'Leadership'
   | 'Finance';
 

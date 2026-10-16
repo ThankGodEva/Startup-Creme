@@ -76,6 +76,8 @@ const CATEGORY_TABS = [
   { id: 'Engineering', label: 'Remote Software Engineering' },
   { id: 'FinOps', label: 'FinOps' },
   { id: 'Financial Modeling', label: 'Financial Modeling' },
+  { id: 'Sales', label: 'Sales & Revenue' },
+  { id: 'Marketing', label: 'Marketing & Growth' },
   { id: 'Leadership', label: 'Fractional C-Suite (CTO/CFO)' },
 ];
 
@@ -153,7 +155,13 @@ export const CareersBoardModule: React.FC<CareersBoardModuleProps> = ({
         job.category.toLowerCase() === selectedCategory.toLowerCase() ||
         (selectedCategory === 'Financial Modeling' &&
           (job.category.toLowerCase() === 'finance' ||
-            job.category.toLowerCase() === 'financial modeling'));
+            job.category.toLowerCase() === 'financial modeling')) ||
+        (selectedCategory === 'Sales' &&
+          (job.category.toLowerCase() === 'sales' ||
+            job.category.toLowerCase().includes('sales'))) ||
+        (selectedCategory === 'Marketing' &&
+          (job.category.toLowerCase() === 'marketing' ||
+            job.category.toLowerCase().includes('marketing')));
 
       const matchesType =
         selectedJobType === 'All Types' ||
@@ -517,8 +525,8 @@ export const CareersBoardModule: React.FC<CareersBoardModuleProps> = ({
             </h3>
             <p className="text-xs text-slate-500 max-w-md mx-auto mb-5">
               {searchQuery || selectedCategory !== 'all' || selectedJobType !== 'All Types'
-                ? 'Try clearing your category or contract type filter to view all open engineering, finance, and fractional executive mandates.'
-                : 'Be the first to post a remote engineering, FinOps, or fractional executive role.'}
+                ? 'Try clearing your category or contract type filter to view all open engineering, finance, sales, marketing, and fractional executive mandates.'
+                : 'Be the first to post a remote engineering, sales, marketing, FinOps, or fractional executive role.'}
             </p>
             {searchQuery || selectedCategory !== 'all' || selectedJobType !== 'All Types' ? (
               <button
@@ -653,6 +661,8 @@ export const CareersBoardModule: React.FC<CareersBoardModuleProps> = ({
                     <option value="Engineering">Engineering</option>
                     <option value="FinOps">FinOps</option>
                     <option value="Financial Modeling">Financial Modeling</option>
+                    <option value="Sales">Sales & Revenue</option>
+                    <option value="Marketing">Marketing & Growth</option>
                     <option value="Leadership">Leadership (Fractional CTO/CFO)</option>
                   </select>
                 </div>
