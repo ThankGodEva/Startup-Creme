@@ -19,10 +19,12 @@ import {
   ChevronRight,
   Info,
   Loader2,
+  Plus,
 } from 'lucide-react';
 import { EventOpportunity, UserProfile, Post } from '../types';
 import { store } from '../lib/store';
 import { useHashAnchorScroll, Route } from '../hooks/useHashAnchorScroll';
+import { PublishEventModal } from './PublishEventModal';
 
 /**
  * React Router 7 hash-aware meta export for /events
@@ -86,6 +88,7 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
   const [deadlineFilter, setDeadlineFilter] = useState<'all' | 'closing-soon' | 'active'>('all');
   const [selectedEvent, setSelectedEvent] = useState<EventOpportunity | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showPublishModal, setShowPublishModal] = useState(false);
 
   const handleHashChange = useCallback((rawHash: string) => {
     const clean = rawHash.replace(/^#/, '').toLowerCase();
@@ -223,6 +226,28 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
             Curated non-dilutive grants, institutional venture accelerators, founder fellowships, and tech competitions. Automatically scraped, parsed, and verified for high-growth tech and finance founders.
           </p>
         </div>
+
+        {/* Action Button */}
+        <div className="flex items-center gap-3 shrink-0">
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={() => setShowPublishModal(true)}
+              className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-sm hover:shadow"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Publish Event</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenAuth}
+              className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
+            >
+              <span>Admin Sign In</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filter and Search Bar */}
@@ -285,6 +310,24 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
               ? 'Our editorial intelligence team continuously monitors and publishes verified non-dilutive grants, venture accelerators, and hackathons. Check back shortly for active windows.'
               : 'Try clearing your search query or selecting "All Opportunities" to view the full pipeline.'}
           </p>
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={() => setShowPublishModal(true)}
+              className="mt-5 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Publish Opportunity Now</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenAuth}
+              className="mt-5 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200 transition-colors cursor-pointer"
+            >
+              <span>Sign in as Admin to Publish Events</span>
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -526,6 +569,15 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
           </div>
         </div>
       )}
+
+      {/* Admin Manual Opportunity Publishing Modal */}
+      <PublishEventModal
+        isOpen={showPublishModal}
+        onClose={() => setShowPublishModal(false)}
+        onSuccess={(newEvent) => {
+          setEvents((prev) => [newEvent, ...prev.filter((e) => e.id !== newEvent.id)]);
+        }}
+      />
     </div>
   );
 };

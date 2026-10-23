@@ -45,6 +45,7 @@ import { generateSitemapXML, generateRobotsTxt, generateLlmsTxt } from '../lib/s
 import { store } from '../lib/store';
 import { ArticleEditorPage } from './ArticleEditorPage';
 import { AiCommandCenter } from './AiCommandCenter';
+import { PublishEventModal } from './PublishEventModal';
 
 interface AdminDashboardProps {
   currentUser: UserProfile | null;
@@ -80,6 +81,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [busyModerationId, setBusyModerationId] = useState<string | null>(null);
   const [isClearingEvents, setIsClearingEvents] = useState(false);
   const [showApiDocsModal, setShowApiDocsModal] = useState(false);
+  const [showPublishEventModal, setShowPublishEventModal] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -104,6 +106,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       unsub();
     };
   }, []);
+
+  // Support direct CMS deep linking: /admin?tab=posts&edit=[slug]
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const editSlug = params.get('edit') || params.get('slug');
+    if (editSlug && posts.length > 0 && !editingPost) {
+      const match = posts.find((p) => p.slug === editSlug || p.id === editSlug);
+      if (match) {
+        setEditingPost(match);
+      }
+    }
+  }, [posts]);
 
   // Supabase Article Seeding State
   const [seeding, setSeeding] = useState(false);
@@ -739,6 +754,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setShowPublishEventModal(true)}
+                    className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Publish Event Manually</span>
+                  </button>
+
                   {events.length > 0 && (
                     <button
                       type="button"
@@ -780,17 +804,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <Calendar className="w-5 h-5" />
                   </div>
                   <div className="font-semibold text-slate-800 text-sm mb-1">No Ingested Opportunities</div>
-                  <p className="max-w-md mx-auto text-slate-500 mb-3">
-                    Events and grants are populated automatically via authenticated n8n workflows, external scrapers, or editorial pipelines.
+                  <p className="max-w-md mx-auto text-slate-500 mb-4">
+                    Events and grants are populated automatically via authenticated n8n workflows, external scrapers, or manual editorial publishing.
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setShowApiDocsModal(true)}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 hover:text-amber-800 underline underline-offset-2"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>View Ingestion API Reference Specification</span>
-                  </button>
+                  <div className="flex items-center justify-center gap-3 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setShowPublishEventModal(true)}
+                      className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold inline-flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Publish Opportunity Now</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowApiDocsModal(true)}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white border border-slate-200 px-3.5 py-2 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-amber-700" />
+                      <span>View Ingestion API Reference</span>
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -1005,6 +1039,15 @@ Authorization: Bearer &lt;N8N_WEBHOOK_SECRET&gt;
             </div>
           </div>
         )}
+
+        {/* Admin Manual Opportunity Publishing Modal */}
+        <PublishEventModal
+          isOpen={showPublishEventModal}
+          onClose={() => setShowPublishEventModal(false)}
+          onSuccess={(newEvent) => {
+            setEvents((prev) => [newEvent, ...prev.filter((e) => e.id !== newEvent.id)]);
+          }}
+        />
       </div>
     </div>
   );

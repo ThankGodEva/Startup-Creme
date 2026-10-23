@@ -99,12 +99,26 @@ export const AiCommandCenter: React.FC<AiCommandCenterProps> = ({ onNavigateToEd
       // 1. Try server-side API endpoint for Gemini 3.8 Flash execution
       let completedResult: ResearchOutput | null = null;
       try {
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json'
+        };
+        try {
+          const { data } = await store.getCurrentUser() ? { data: { session: null } } : { data: { session: null } };
+          // Attempt to attach active session access token if available
+          const supabase = (window as any).__sc_supabase_client;
+          if (supabase) {
+            const { data: sessData } = await supabase.auth.getSession();
+            if (sessData?.session?.access_token) {
+              headers['Authorization'] = `Bearer ${sessData.session.access_token}`;
+            }
+          }
+        } catch {
+          // Session retrieval fallback
+        }
+
         const apiRes = await fetch('/api/ai/research', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-admin-role': 'admin'
-          },
+          headers,
           body: JSON.stringify({
             topic: researchTopic.trim(),
             vertical: researchVertical,

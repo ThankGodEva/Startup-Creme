@@ -17,6 +17,7 @@ import {
   JobListing,
   CreateJobPayload,
   EventOpportunity,
+  OpportunityType,
 } from '../types';
 import {
   INITIAL_STARTUPS,
@@ -2475,7 +2476,13 @@ class StartupCremeStore {
       return { success: false, error: 'Admin privileges required.' };
     }
 
+    const eventToDelete = this.events.find(e => e.id === id);
+    const linkedPostId = eventToDelete?.linked_post_id;
+
     this.events = this.events.filter(e => e.id !== id);
+    if (linkedPostId) {
+      this.posts = this.posts.filter(p => p.id !== linkedPostId);
+    }
     this.notify();
 
     try {
@@ -2489,9 +2496,12 @@ class StartupCremeStore {
     }
 
     if (isSupabaseConfigured()) {
-      await supabaseExecute((client) =>
-        client.from('events').delete().eq('id', id)
-      );
+      await supabaseExecute(async (client) => {
+        await client.from('events').delete().eq('id', id);
+        if (linkedPostId) {
+          await client.from('posts').delete().eq('id', linkedPostId);
+        }
+      });
     }
 
     return { success: true };
@@ -2525,6 +2535,149 @@ class StartupCremeStore {
     }
 
     return { success: true };
+  }
+
+  public async publishEvent(eventData: {
+    title: string;
+    description: string;
+    opportunity_type: OpportunityType | string;
+    funding_amount?: string | null;
+    location?: string;
+    deadline_date: string;
+    application_url: string;
+    vertical?: 'finance' | 'tech' | 'founders-mindset';
+    locale?: string;
+    slug?: string;
+    content?: string;
+    cover_image?: string | null;
+  }): Promise<{ success: boolean; event?: EventOpportunity; error?: string }> {
+    if (!this.currentUser || this.currentUser.role !== 'admin') {
+      return { success: false, error: 'Admin privileges required to manually publish events.' };
+    }
+
+    const normTitle = eventData.title.trim();
+    const generatedSlug = normTitle
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const normSlug = (eventData.slug?.trim() || generatedSlug) || `event-${Date.now()}`;
+    const normAppUrl = eventData.application_url.trim();
+    const normLocation = (eventData.location || 'Global (Remote)').trim();
+    const normVertical = eventData.vertical || 'tech';
+    const normLocale = eventData.locale || 'en-us';
+    const normDeadline = eventData.deadline_date;
+    const normFunding = eventData.funding_amount?.trim() || null;
+    const normDescription = eventData.description.trim();
+    const normContent = eventData.content?.trim() || normDescription;
+
+    const payload = {
+      event_title: normTitle,
+      title: normTitle,
+      slug: normSlug,
+      description: normDescription,
+      opportunity_type: eventData.opportunity_type || 'grant',
+      funding_amount: normFunding,
+      location: normLocation,
+      deadline_date: normDeadline,
+      application_url: normAppUrl,
+      vertical: normVertical,
+      locale: normLocale,
+      content: normContent,
+      cover_image: eventData.cover_image || null,
+      status: 'published',
+    };
+
+    let serverEventId: string | null = null;
+    let serverPostId: string | null = null;
+
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      const resp = await fetch('/api/events', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      if (resp.ok) {
+        const body = await resp.json();
+        if (body.success && body.data) {
+          serverEventId = body.data.event_id;
+          serverPostId = body.data.post_id;
+        }
+      }
+    } catch {
+      // Backend fetch error - proceed to direct Supabase or local state
+    }
+
+    // Direct Supabase upsert fallback if configured and not yet assigned
+    if (isSupabaseConfigured() && !serverEventId) {
+      try {
+        const postResult = await supabaseExecute<any>((client) =>
+          client.from('posts').upsert({
+            locale: normLocale,
+            vertical: normVertical,
+            slug: normSlug,
+            title: normTitle,
+            excerpt: normDescription.slice(0, 240),
+            content: {
+              type: 'doc',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [{ type: 'text', text: normContent }],
+                },
+              ],
+            },
+            status: 'published',
+            meta_description: normDescription.slice(0, 160),
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'locale,vertical,slug' }).select('id').maybeSingle()
+        );
+
+        serverPostId = postResult.data?.id || null;
+
+        const eventResult = await supabaseExecute<any>((client) =>
+          client.from('events').upsert({
+            title: normTitle,
+            slug: normSlug,
+            description: normDescription,
+            opportunity_type: eventData.opportunity_type || 'grant',
+            funding_amount: normFunding,
+            location: normLocation,
+            deadline_date: new Date(normDeadline).toISOString(),
+            application_url: normAppUrl,
+            linked_post_id: serverPostId,
+          }, { onConflict: 'application_url' }).select('id').maybeSingle()
+        );
+
+        serverEventId = eventResult.data?.id || null;
+      } catch {
+        // Fall through to in-memory store
+      }
+    }
+
+    const finalEvent: EventOpportunity = {
+      id: serverEventId || `event-${Date.now()}`,
+      title: normTitle,
+      slug: normSlug,
+      description: normDescription,
+      opportunity_type: eventData.opportunity_type || 'grant',
+      funding_amount: normFunding,
+      location: normLocation,
+      deadline_date: normDeadline,
+      application_url: normAppUrl,
+      linked_post_id: serverPostId,
+      created_at: new Date().toISOString(),
+    };
+
+    // Update in-memory state
+    this.events = [
+      finalEvent,
+      ...this.events.filter((e) => e.application_url !== normAppUrl && e.id !== finalEvent.id),
+    ];
+    this.notify();
+
+    return { success: true, event: finalEvent };
   }
 }
 

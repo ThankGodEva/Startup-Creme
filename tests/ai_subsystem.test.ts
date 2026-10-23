@@ -311,9 +311,5 @@ describe('StartupCrème AI Operating Subsystem - Foundation Phase Tests', () => 
     });
   });
 
-  after(() => {
-    setTimeout(() => {
-      process.exit(0);
-    }, 200).unref();
-  });
 });
+

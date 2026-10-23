@@ -56,6 +56,18 @@ describe('Phase 2.1: Production Orchestration + n8n Control Plane', () => {
       assert.ok(json.correlation.requestId);
     });
 
+    test('Rejects x-admin-role header alone with 401 UNAUTHORIZED_AUTOMATION', async () => {
+      const res = await fetch(`${baseUrl}/health`, {
+        headers: {
+          'x-admin-role': 'admin'
+        }
+      });
+
+      assert.equal(res.status, 401);
+      const json = await res.json();
+      assert.equal(json.code, AIErrorCodes.UNAUTHORIZED_AUTOMATION);
+    });
+
     test('Rejects invalid credentials with 401 UNAUTHORIZED_AUTOMATION', async () => {
       const res = await fetch(`${baseUrl}/health`, {
         headers: {
@@ -463,9 +475,6 @@ describe('Phase 2.1: Production Orchestration + n8n Control Plane', () => {
     if (server) {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
-    // Allow any pending microtasks to flush, then cleanly exit
-    setTimeout(() => {
-      process.exit(0);
-    }, 100).unref();
   });
 });
+

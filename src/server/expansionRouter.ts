@@ -43,6 +43,10 @@ const LEGACY_MOCK_JOB_TITLES = [
   'Lead Full-Stack Engineer (React Router 7 + Supabase)',
 ];
 
+const LEGACY_MOCK_EVENT_SLUGS = [
+  'manual-admin-opportunity-test-2026',
+];
+
 async function purgeLegacyMockRowsIfNeeded(client: any) {
   if (hasPurgedLegacyMockRows || !client) return;
   hasPurgedLegacyMockRows = true;
@@ -53,6 +57,22 @@ async function purgeLegacyMockRowsIfNeeded(client: any) {
   }
   try {
     await client.from('jobs').delete().in('title', LEGACY_MOCK_JOB_TITLES);
+  } catch {
+    // ignore
+  }
+  try {
+    const { data: mockEvents } = await client
+      .from('events')
+      .select('id, linked_post_id')
+      .in('slug', LEGACY_MOCK_EVENT_SLUGS);
+    if (mockEvents && mockEvents.length > 0) {
+      const linkedPostIds = mockEvents.map((e: any) => e.linked_post_id).filter(Boolean);
+      await client.from('events').delete().in('slug', LEGACY_MOCK_EVENT_SLUGS);
+      if (linkedPostIds.length > 0) {
+        await client.from('posts').delete().in('id', linkedPostIds);
+      }
+    }
+    await client.from('posts').delete().in('slug', LEGACY_MOCK_EVENT_SLUGS);
   } catch {
     // ignore
   }
@@ -76,11 +96,28 @@ function getSupabaseAdminClient() {
 }
 
 /**
- * Resolves the authenticated user and their role ('admin' | 'user') from Authorization header or body fallback.
+ * Resolves the authenticated user and their verified role ('admin' | 'user').
+ * STRICT SECURITY:
+ * 1. Admin role is NEVER granted based on request body or headers.
+ * 2. Identity is resolved ONLY from trusted server session ((req as any).user) or cryptographically verified Supabase JWT.
+ * 3. Role is resolved EXCLUSIVELY from authoritative startupcreme.users database record.
+ * 4. All unverified fallbacks (guest submissions) strictly receive role 'user'.
  */
 async function resolveRequestUser(
   req: Request
 ): Promise<{ id: string; role: 'admin' | 'user'; email?: string } | null> {
+  // 1. Check if trusted server-side authentication middleware already populated req.user
+  if ((req as any).user?.id) {
+    const serverUser = (req as any).user;
+    const trustedRole: 'admin' | 'user' = serverUser.role === 'admin' ? 'admin' : 'user';
+    return {
+      id: String(serverUser.id),
+      role: trustedRole,
+      email: serverUser.email ? String(serverUser.email) : undefined,
+    };
+  }
+
+  // 2. Cryptographically verify Supabase Auth Bearer token if provided
   const authHeader = req.headers.authorization;
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || '';
@@ -88,76 +125,74 @@ async function resolveRequestUser(
 
   if (authHeader && authHeader.startsWith('Bearer ') && supabaseUrl && (anonKey || serviceRoleKey)) {
     const token = authHeader.substring(7).trim();
-    try {
-      const authClient = createClient(supabaseUrl, anonKey || serviceRoleKey, {
-        auth: { persistSession: false, autoRefreshToken: false },
-      });
-      const {
-        data: { user },
-        error,
-      } = await authClient.auth.getUser(token);
+    if (token) {
+      try {
+        const authClient = createClient(supabaseUrl, anonKey || serviceRoleKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const {
+          data: { user },
+          error,
+        } = await authClient.auth.getUser(token);
 
-      if (!error && user) {
-        let role: 'admin' | 'user' =
-          user.user_metadata?.role === 'admin' ? 'admin' : 'user';
-        const adminClient = getSupabaseAdminClient();
-        if (adminClient) {
-          try {
-            const { data: dbUser } = await adminClient
-              .from('users')
-              .select('role')
-              .eq('id', user.id)
-              .maybeSingle();
-            if (dbUser?.role && String(dbUser.role).trim().toLowerCase() === 'admin') {
-              role = 'admin';
-            } else if (!dbUser && user.email) {
-              const { data: byEmail } = await adminClient
+        if (!error && user && user.id) {
+          // Authoritative role lookup: MUST come exclusively from startupcreme.users database record.
+          // user_metadata is user-editable in Supabase and MUST NEVER grant admin access.
+          let role: 'admin' | 'user' = 'user';
+          const adminClient = getSupabaseAdminClient();
+          if (adminClient && serviceRoleKey) {
+            try {
+              const { data: dbUser, error: dbError } = await adminClient
                 .from('users')
                 .select('role')
-                .ilike('email', user.email.trim())
+                .eq('id', user.id)
                 .maybeSingle();
-              if (byEmail?.role && String(byEmail.role).trim().toLowerCase() === 'admin') {
+
+              if (!dbError && dbUser?.role && String(dbUser.role).trim().toLowerCase() === 'admin') {
                 role = 'admin';
               }
+            } catch {
+              // On lookup error, fail closed: role remains 'user'
+              role = 'user';
             }
-          } catch {
-            // ignore DB role lookup error
           }
+          return { id: user.id, role, email: user.email };
         }
-        return { id: user.id, role, email: user.email };
+      } catch {
+        // Token verification failed; fall through
       }
-    } catch {
-      // Fall through to body/header user check
     }
   }
 
-  // Fallback for local/client session when token is not attached
-  const bodyUserId = req.body?.submitted_by || req.body?.userId || req.headers['x-user-id'];
-  const bodyRole = req.body?.userRole || req.headers['x-user-role'];
-  if (bodyUserId && typeof bodyUserId === 'string' && bodyUserId.trim().length > 0) {
-    const cleanId = bodyUserId.trim();
-    let resolvedRole: 'admin' | 'user' =
-      String(bodyRole || '').trim().toLowerCase() === 'admin' ? 'admin' : 'user';
-
-    const adminClient = getSupabaseAdminClient();
-    if (adminClient && /^[0-9a-f-]{36}$/i.test(cleanId)) {
-      try {
-        const { data: dbUser } = await adminClient
-          .from('users')
-          .select('role')
-          .eq('id', cleanId)
-          .maybeSingle();
-        if (dbUser?.role) {
-          resolvedRole = String(dbUser.role).trim().toLowerCase() === 'admin' ? 'admin' : 'user';
-        }
-      } catch {
-        // ignore
-      }
-    }
-    return { id: cleanId, role: resolvedRole };
+  // 3. Fallback for unauthenticated client submissions (e.g. guest startup or job posting)
+  // NEVER grant admin role from request headers or body. All unauthenticated/unverified inputs are strictly 'user'.
+  const fallbackUserId = req.body?.submitted_by || req.body?.userId || req.headers['x-user-id'];
+  if (fallbackUserId && typeof fallbackUserId === 'string' && fallbackUserId.trim().length > 0) {
+    const cleanId = fallbackUserId.trim();
+    // Non-admin identity only; can never bypass authorization or obtain admin status
+    return { id: cleanId, role: 'user' };
   }
 
   return null;
+}
+
+/**
+ * Route-level admin authorization guard
+ * Enforces admin authorization at the route level, rejecting any non-admin callers.
+ */
+async function requireRouteAdminAuth(
+  req: Request,
+  res: Response
+): Promise<{ id: string; role: 'admin'; email?: string } | null> {
+  const reqUser = await resolveRequestUser(req);
+  if (!reqUser || reqUser.role !== 'admin') {
+    res.status(403).json({
+      error: 'Forbidden: Admin privileges required for this action.',
+      code: 'ADMIN_PRIVILEGES_REQUIRED',
+    });
+    return null;
+  }
+  return reqUser as { id: string; role: 'admin'; email?: string };
 }
 
 // --------------------------------------------------------------------
@@ -306,10 +341,8 @@ expansionRouter.post(['/directory', '/startups'], async (req: Request, res: Resp
 });
 
 expansionRouter.patch(['/directory/:id/approve', '/startups/:id/approve'], async (req: Request, res: Response) => {
-  const reqUser = await resolveRequestUser(req);
-  if (!reqUser || reqUser.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin privileges required to approve startups.' });
-  }
+  const adminUser = await requireRouteAdminAuth(req, res);
+  if (!adminUser) return;
 
   const { id } = req.params;
   const { is_approved = true } = req.body || {};
@@ -342,10 +375,8 @@ expansionRouter.patch(['/directory/:id/approve', '/startups/:id/approve'], async
 });
 
 expansionRouter.delete(['/directory/:id', '/startups/:id'], async (req: Request, res: Response) => {
-  const reqUser = await resolveRequestUser(req);
-  if (!reqUser || reqUser.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin privileges required to delete startups.' });
-  }
+  const adminUser = await requireRouteAdminAuth(req, res);
+  if (!adminUser) return;
 
   const { id } = req.params;
   runtimeStartups = runtimeStartups.filter((s) => s.id !== id && s.slug !== id);
@@ -605,10 +636,8 @@ expansionRouter.post(['/careers', '/jobs'], async (req: Request, res: Response) 
 });
 
 expansionRouter.patch(['/careers/:id/approve', '/jobs/:id/approve'], async (req: Request, res: Response) => {
-  const reqUser = await resolveRequestUser(req);
-  if (!reqUser || reqUser.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin privileges required to approve job listings.' });
-  }
+  const adminUser = await requireRouteAdminAuth(req, res);
+  if (!adminUser) return;
 
   const { id } = req.params;
   const { is_active = true } = req.body || {};
@@ -641,10 +670,8 @@ expansionRouter.patch(['/careers/:id/approve', '/jobs/:id/approve'], async (req:
 });
 
 expansionRouter.delete(['/careers/:id', '/jobs/:id'], async (req: Request, res: Response) => {
-  const reqUser = await resolveRequestUser(req);
-  if (!reqUser || reqUser.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin privileges required to delete job listings.' });
-  }
+  const adminUser = await requireRouteAdminAuth(req, res);
+  if (!adminUser) return;
 
   const { id } = req.params;
   runtimeJobs = runtimeJobs.filter((j) => j.id !== id);
@@ -688,37 +715,61 @@ function isAuthorizedWebhookToken(req: Request): boolean {
     process.env.N8N_BEARER_TOKEN,
     process.env.EVENTS_API_BEARER_TOKEN,
     process.env.STARTUPCREME_AUTOMATION_SECRET,
-    'startupcreme-n8n-events-secret-2026',
-  ].filter((s): s is string => typeof s === 'string' && s.trim().length > 0);
+  ]
+    .map((s) => s?.trim())
+    .filter((s): s is string => typeof s === 'string' && s.length > 0 && s !== 'your_m2m_automation_secret_key');
 
-  return validSecrets.some((secret) => timingSafeCheck(token, secret) || token === secret);
+  if (validSecrets.length === 0) {
+    // Fail closed: Webhook authorization is strictly rejected if no secret is configured
+    return false;
+  }
+
+  return validSecrets.some((secret) => timingSafeCheck(token, secret));
 }
+
 
 // Ingestion webhook for n8n scrapers and external data pipelines
 expansionRouter.post(
   ['/events', '/events/webhook', '/events/ingest', '/n8n/events', '/webhooks/events', '/webhooks/n8n/events'],
   async (req: Request, res: Response) => {
-    // 1. Authentication / Security: Check for Bearer token matching environment variable
-    if (!isAuthorizedWebhookToken(req)) {
+    // 1. Authentication / Security: Check for Webhook Bearer token OR verified Admin session
+    const isWebhookAuthorized = isAuthorizedWebhookToken(req);
+    let isAdminAuthorized = false;
+
+    if (!isWebhookAuthorized) {
+      const reqUser = await resolveRequestUser(req);
+      if (reqUser && reqUser.role === 'admin') {
+        isAdminAuthorized = true;
+      }
+    }
+
+    if (!isWebhookAuthorized && !isAdminAuthorized) {
       return res.status(401).json({
         success: false,
         error:
-          'Unauthorized: Missing or invalid Bearer token. Please provide a valid Authorization: Bearer <token> header matching N8N_WEBHOOK_SECRET or EVENT_WEBHOOK_SECRET.',
+          'Unauthorized: Missing or invalid Bearer token. Please provide a valid Authorization: Bearer <token> header matching N8N_WEBHOOK_SECRET or EVENT_WEBHOOK_SECRET, or authenticate with an admin session.',
       });
     }
 
-    // 2. Payload Validation: Validate that incoming body contains event_title, application_url, slug, vertical, locale, title, content
+    // 2. Payload Validation & Normalization: Support both n8n webhook and manual admin submissions
+    const rawBody = req.body || {};
+    const normTitle = String(rawBody.title || rawBody.event_title || '').trim();
+    const normEventTitle = String(rawBody.event_title || rawBody.title || '').trim();
+    const generatedSlug = (normTitle || normEventTitle)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const normSlug = String(rawBody.slug || generatedSlug).trim();
+    const normVertical = String(rawBody.vertical || 'tech').trim().toLowerCase() as 'finance' | 'tech' | 'founders-mindset';
+    const normLocale = String(rawBody.locale || 'en-us').trim().toLowerCase();
+    const normDescription = String(rawBody.description || rawBody.excerpt || normTitle).trim();
+    const normContent = rawBody.content || normDescription;
+    const cleanAppUrl = String(rawBody.application_url || '').trim();
+    const description = normDescription;
+
     const {
-      event_title,
-      application_url,
-      slug,
-      vertical,
-      locale,
-      title,
-      content,
       excerpt,
       meta_description,
-      description,
       opportunity_type = 'grant',
       funding_amount,
       location = 'Global (Remote)',
@@ -732,7 +783,17 @@ expansionRouter.post(
       tags = [],
       reading_time_minutes,
       word_count,
-    } = req.body || {};
+    } = rawBody;
+
+    const resolvedPayload = {
+      event_title: normEventTitle,
+      application_url: cleanAppUrl,
+      slug: normSlug,
+      vertical: normVertical,
+      locale: normLocale,
+      title: normTitle,
+      content: normContent,
+    };
 
     const requiredFields = [
       'event_title',
@@ -745,7 +806,7 @@ expansionRouter.post(
     ];
 
     const missingFields = requiredFields.filter((field) => {
-      const val = (req.body as any)?.[field];
+      const val = (resolvedPayload as any)?.[field];
       return (
         val === undefined ||
         val === null ||
@@ -763,31 +824,27 @@ expansionRouter.post(
     }
 
     try {
-      const normLocale = String(locale).trim().toLowerCase();
-      const normVertical = String(vertical).trim().toLowerCase() as 'finance' | 'tech' | 'founders-mindset';
-      const normSlug = String(slug).trim().toLowerCase().replace(/[^a-z0-9-_]/g, '-');
-      const cleanAppUrl = String(application_url).trim();
-      const cleanEventTitle = String(event_title).trim();
-      const cleanPostTitle = String(title).trim();
+      const cleanEventTitle = normEventTitle;
+      const cleanPostTitle = normTitle;
 
       // Ensure JSONB content format for Postgres
       let jsonbContent: any;
-      if (typeof content === 'string') {
+      if (typeof normContent === 'string') {
         try {
-          jsonbContent = JSON.parse(content);
+          jsonbContent = JSON.parse(normContent);
         } catch {
           jsonbContent = {
             type: 'doc',
             content: [
               {
                 type: 'paragraph',
-                content: [{ type: 'text', text: content }],
+                content: [{ type: 'text', text: normContent }],
               },
             ],
           };
         }
-      } else if (content && typeof content === 'object') {
-        jsonbContent = content;
+      } else if (normContent && typeof normContent === 'object') {
+        jsonbContent = normContent;
       } else {
         jsonbContent = {
           type: 'doc',
@@ -1033,6 +1090,7 @@ expansionRouter.get('/events', async (req: Request, res: Response) => {
 
   const client = getSupabaseAdminClient();
   if (client) {
+    await purgeLegacyMockRowsIfNeeded(client);
     try {
       let query = client
         .from('events')
@@ -1107,18 +1165,30 @@ expansionRouter.get('/events/:slug', async (req: Request, res: Response) => {
 
 // Admin delete event
 expansionRouter.delete('/events/:id', async (req: Request, res: Response) => {
-  const reqUser = await resolveRequestUser(req);
-  if (!reqUser || reqUser.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin privileges required to delete events.' });
-  }
+  const adminUser = await requireRouteAdminAuth(req, res);
+  if (!adminUser) return;
 
   const { id } = req.params;
+  const existingMemory = runtimeEvents.find((e) => e.id === id);
+  const memoryLinkedPostId = existingMemory?.linked_post_id;
   runtimeEvents = runtimeEvents.filter((e) => e.id !== id);
 
   const client = getSupabaseAdminClient();
   if (client) {
     try {
+      const { data: dbEvent } = await client
+        .from('events')
+        .select('id, linked_post_id')
+        .eq('id', id)
+        .maybeSingle();
+
+      const linkedPostId = dbEvent?.linked_post_id || memoryLinkedPostId;
+
       await client.from('events').delete().eq('id', id);
+
+      if (linkedPostId) {
+        await client.from('posts').delete().eq('id', linkedPostId);
+      }
     } catch {
       // ignore
     }

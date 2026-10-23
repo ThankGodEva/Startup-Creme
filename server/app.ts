@@ -6,6 +6,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { createClient } from '@supabase/supabase-js';
 import { aiRouter } from '../src/server/aiRouter';
 import { expansionRouter } from '../src/server/expansionRouter';
+import { editorialRouter } from '../src/server/editorialRouter';
 import { injectDynamicMetaTags } from './meta';
 import { generateDynamicSitemap, generateRobotsTxt, generateLlmsTxt } from './sitemap';
 
@@ -286,6 +287,9 @@ export function createApp(options?: CreateAppOptions): express.Express {
 
   // 3b. Growth & Product Expansion Modules API (/api/directory, /api/markets/rates, /api/careers, /api/webhooks/n8n/rates, /api/events)
   app.use('/api', expansionRouter);
+
+  // 3c. Editorial Draft Ingestion API (/api/editorial/drafts)
+  app.use(['/api/editorial', '/editorial'], editorialRouter);
 
   // Direct root-level n8n webhook routes (/events/webhook, /n8n/events, etc.)
   app.post(

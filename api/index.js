@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import multer from "multer";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import { createClient as createClient4 } from "@supabase/supabase-js";
+import { createClient as createClient7 } from "@supabase/supabase-js";
 
 // src/server/aiRouter.ts
 import { Router } from "express";
@@ -16,7 +16,7 @@ import crypto3 from "crypto";
 import { z } from "zod";
 var ResearchInputSchema = z.object({
   topic: z.string().min(3, "Topic must be at least 3 characters").max(300),
-  vertical: z.enum(["finance", "tech"]).optional(),
+  vertical: z.enum(["finance", "tech", "founders-mindset"]).optional(),
   depth: z.enum(["brief", "standard", "deep"]).optional().default("standard"),
   focus_areas: z.array(z.string()).optional().default([]),
   target_locale: z.string().optional().default("en-us")
@@ -45,7 +45,7 @@ var ArticleAngleProposalSchema = z.object({
   title_proposal: z.string().min(10),
   angle: z.string().min(10),
   target_audience: z.string().min(5),
-  suggested_vertical: z.enum(["finance", "tech"])
+  suggested_vertical: z.enum(["finance", "tech", "founders-mindset"])
 });
 var ResearchOutputSchema = z.object({
   topic: z.string(),
@@ -232,13 +232,301 @@ function normalizeImageUrl(url) {
   return trimmed;
 }
 
+// src/lib/expansionData.ts
+var INITIAL_STARTUPS = [
+  {
+    id: "8ec5e176-acf3-45ec-8ade-42e061bd1d32",
+    name: "Xhipa",
+    slug: "xhipa-fzok",
+    tagline: "Create your storefront, add your products or bookable services, and share one simple link with your customers across WhatsApp, Instagram, and TikTok.",
+    description: "Multi-tenant digital business operating system with storefronts, services & rental bookings, real-time quantity availability, WhatsApp ordering, catalog mode, guest checkout, Paystack payments, and partner network.",
+    website_url: "https://xhipa.com",
+    logo_url: "https://www.xhipa.com/Xhipa-dark.png",
+    stage: "bootstrapped",
+    vertical: "E-Commerce",
+    tech_stack: [
+      "React Router",
+      "Supabase",
+      "Cloudflare Workers",
+      "Cloudflare for SaaS",
+      "Paystack"
+    ],
+    submitted_by: "9373b6e3-dcea-4c1b-8063-d1cd9ee3037a",
+    is_approved: true,
+    created_at: "2026-10-06T16:45:36.815461+00:00"
+  }
+];
+var INITIAL_CENTRAL_BANK_RATES = [
+  {
+    id: "cb-fed",
+    bank_code: "FED",
+    bank_name: "US Federal Reserve",
+    country_or_region: "United States",
+    currency: "USD",
+    rate_instrument: "Fed Funds Target (3.75%\u20134.00%)",
+    current_rate: 4,
+    previous_rate: 3.75,
+    change_bps: 25,
+    trend: "up",
+    inflation_yoy: 2.6,
+    real_rate: 1.4,
+    last_decision_date: "2026-09-16",
+    next_meeting_date: "2026-11-05",
+    official_source_url: "https://www.federalreserve.gov/monetarypolicy/openmarket.htm",
+    historical_12m: [3.75, 3.5, 3.5, 3.5, 3.75, 3.75, 4]
+  },
+  {
+    id: "cb-ecb",
+    bank_code: "ECB",
+    bank_name: "European Central Bank",
+    country_or_region: "Eurozone",
+    currency: "EUR",
+    rate_instrument: "Deposit Facility Rate",
+    current_rate: 2.5,
+    previous_rate: 2.25,
+    change_bps: 25,
+    trend: "up",
+    inflation_yoy: 2.1,
+    real_rate: 0.4,
+    last_decision_date: "2026-09-10",
+    next_meeting_date: "2026-10-29",
+    official_source_url: "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/key_ecb_interest_rates/html/index.en.html",
+    historical_12m: [2, 2, 2, 2.25, 2.25, 2.25, 2.5]
+  },
+  {
+    id: "cb-cbn",
+    bank_code: "CBN",
+    bank_name: "Central Bank of Nigeria",
+    country_or_region: "Nigeria",
+    currency: "NGN",
+    rate_instrument: "Monetary Policy Rate (MPR)",
+    current_rate: 23,
+    previous_rate: 26.5,
+    change_bps: -350,
+    trend: "down",
+    inflation_yoy: 24.8,
+    real_rate: -1.8,
+    last_decision_date: "2026-09-22",
+    next_meeting_date: "2026-11-24",
+    official_source_url: "https://www.cbn.gov.ng/rates/mnymp.asp",
+    historical_12m: [27.25, 27.5, 27.5, 26.75, 26.5, 26.5, 23]
+  },
+  {
+    id: "cb-boe",
+    bank_code: "BoE",
+    bank_name: "Bank of England",
+    country_or_region: "United Kingdom",
+    currency: "GBP",
+    rate_instrument: "Official Bank Rate",
+    current_rate: 3.75,
+    previous_rate: 3.75,
+    change_bps: 0,
+    trend: "hold",
+    inflation_yoy: 3.1,
+    real_rate: 0.65,
+    last_decision_date: "2026-09-17",
+    next_meeting_date: "2026-11-05",
+    official_source_url: "https://www.bankofengland.co.uk/monetary-policy/the-interest-rate-bank-rate",
+    historical_12m: [4, 3.75, 3.75, 3.75, 3.75, 3.75, 3.75]
+  },
+  {
+    id: "cb-boj",
+    bank_code: "BoJ",
+    bank_name: "Bank of Japan",
+    country_or_region: "Japan",
+    currency: "JPY",
+    rate_instrument: "Uncollateralized Overnight Call Rate",
+    current_rate: 1.25,
+    previous_rate: 1,
+    change_bps: 25,
+    trend: "up",
+    inflation_yoy: 2.6,
+    real_rate: -1.35,
+    last_decision_date: "2026-09-18",
+    next_meeting_date: "2026-10-30",
+    official_source_url: "https://www.boj.or.jp/en/mopo/index.htm",
+    historical_12m: [0.25, 0.5, 0.5, 0.75, 1, 1, 1.25]
+  },
+  {
+    id: "cb-sarb",
+    bank_code: "SARB",
+    bank_name: "South African Reserve Bank",
+    country_or_region: "South Africa",
+    currency: "ZAR",
+    rate_instrument: "Monetary Policy Repo Rate",
+    current_rate: 7.25,
+    previous_rate: 7,
+    change_bps: 25,
+    trend: "up",
+    inflation_yoy: 4.4,
+    real_rate: 2.85,
+    last_decision_date: "2026-09-25",
+    next_meeting_date: "2026-11-19",
+    official_source_url: "https://www.resbank.co.za/en/home/what-we-do/monetary-policy",
+    historical_12m: [8, 7.75, 7.5, 7.25, 7, 7, 7.25]
+  },
+  {
+    id: "cb-cbk",
+    bank_code: "CBK",
+    bank_name: "Central Bank of Kenya",
+    country_or_region: "Kenya",
+    currency: "KES",
+    rate_instrument: "Central Bank Rate (CBR)",
+    current_rate: 8.75,
+    previous_rate: 8.75,
+    change_bps: 0,
+    trend: "hold",
+    inflation_yoy: 4.2,
+    real_rate: 4.55,
+    last_decision_date: "2026-08-11",
+    next_meeting_date: "2026-10-13",
+    official_source_url: "https://www.centralbank.go.ke/rates/central-bank-rate/",
+    historical_12m: [12, 11.25, 10.5, 9.5, 8.75, 8.75, 8.75]
+  },
+  {
+    id: "cb-rbi",
+    bank_code: "RBI",
+    bank_name: "Reserve Bank of India",
+    country_or_region: "India",
+    currency: "INR",
+    rate_instrument: "Policy Repo Rate",
+    current_rate: 5.25,
+    previous_rate: 5.25,
+    change_bps: 0,
+    trend: "hold",
+    inflation_yoy: 3.7,
+    real_rate: 1.55,
+    last_decision_date: "2026-08-05",
+    next_meeting_date: "2026-10-07",
+    official_source_url: "https://www.rbi.org.in/",
+    historical_12m: [6.5, 6.25, 6, 5.75, 5.5, 5.25, 5.25]
+  }
+];
+var INITIAL_CLOUD_PRICING_INDEX = [
+  {
+    id: "cp-aws",
+    provider: "AWS (Lambda + RDS + CloudFront)",
+    tier_name: "On-Demand Enterprise",
+    category: "Serverless Compute",
+    serverless_per_1m_req: 0.2,
+    compute_gb_sec: 1667e-8,
+    db_storage_per_gb: 0.115,
+    egress_per_gb: 0.09,
+    free_egress_gb: 100,
+    gpu_h100_hourly: 3.92,
+    trend_30d: "hold",
+    notes: "Includes 1M free Lambda requests/mo; NAT Gateway & cross-AZ transfer billed separately.",
+    updated_at: "2026-09-28T00:00:00Z"
+  },
+  {
+    id: "cp-supabase",
+    provider: "Supabase (Pro / Scale)",
+    tier_name: "Pro Managed Postgres",
+    category: "Managed Postgres",
+    serverless_per_1m_req: 2,
+    compute_gb_sec: 15e-6,
+    db_storage_per_gb: 0.125,
+    egress_per_gb: 0.09,
+    free_egress_gb: 250,
+    gpu_h100_hourly: null,
+    trend_30d: "down",
+    notes: "$25/mo base includes 8GB disk, 250GB cached/un-cached egress, and 100k MAU Auth.",
+    updated_at: "2026-09-28T00:00:00Z"
+  },
+  {
+    id: "cp-vercel",
+    provider: "Vercel (Fluid Compute)",
+    tier_name: "Pro Team Plan",
+    category: "Serverless Compute",
+    serverless_per_1m_req: 0.6,
+    compute_gb_sec: 18e-6,
+    db_storage_per_gb: 0.15,
+    egress_per_gb: 0.15,
+    free_egress_gb: 1e3,
+    gpu_h100_hourly: null,
+    trend_30d: "down",
+    notes: "Fluid Compute reduces idle I/O wait charges by up to 65% for AI streaming workloads.",
+    updated_at: "2026-09-28T00:00:00Z"
+  },
+  {
+    id: "cp-cloudflare",
+    provider: "Cloudflare (Workers + R2 + D1)",
+    tier_name: "Workers Paid",
+    category: "Bandwidth & Egress",
+    serverless_per_1m_req: 0.3,
+    compute_gb_sec: 12e-6,
+    db_storage_per_gb: 0.015,
+    egress_per_gb: 0,
+    free_egress_gb: 999999,
+    gpu_h100_hourly: null,
+    trend_30d: "hold",
+    notes: "$0.00 egress fee on R2 object storage; billed strictly on CPU milliseconds, not wall-clock wait.",
+    updated_at: "2026-09-28T00:00:00Z"
+  },
+  {
+    id: "cp-gcp",
+    provider: "Google Cloud (Cloud Run + Cloud SQL)",
+    tier_name: "Pay-As-You-Go",
+    category: "AI GPU Compute",
+    serverless_per_1m_req: 0.4,
+    compute_gb_sec: 18e-6,
+    db_storage_per_gb: 0.17,
+    egress_per_gb: 0.12,
+    free_egress_gb: 100,
+    gpu_h100_hourly: 3.65,
+    trend_30d: "down",
+    notes: "Committed Use Discounts (CUD) lower A3 H100 Mega instance pricing by 42%.",
+    updated_at: "2026-09-28T00:00:00Z"
+  },
+  {
+    id: "cp-neon",
+    provider: "Neon Serverless Postgres",
+    tier_name: "Scale Autoscaling",
+    category: "Managed Postgres",
+    serverless_per_1m_req: 0.25,
+    compute_gb_sec: 16e-6,
+    db_storage_per_gb: 0.1,
+    egress_per_gb: 0.09,
+    free_egress_gb: 100,
+    gpu_h100_hourly: null,
+    trend_30d: "down",
+    notes: "Scale-to-zero branching architecture with instant copy-on-write database clones for CI/CD.",
+    updated_at: "2026-09-28T00:00:00Z"
+  }
+];
+var INITIAL_RATE_SNAPSHOT = {
+  id: "snap-2026-10-01",
+  source: "n8n_automated_monetary_cloud_pipeline",
+  recorded_at: "2026-10-01T06:00:00Z",
+  central_bank_rates: INITIAL_CENTRAL_BANK_RATES,
+  cloud_pricing_index: INITIAL_CLOUD_PRICING_INDEX
+};
+var INITIAL_JOBS = [];
+var INITIAL_EVENTS = [];
+
 // src/lib/store.ts
 var SEED_POSTS = [];
 var SAMPLE_POST_SLUGS = [
   "the-great-treasury-yield-re-alignment",
   "autonomous-agent-architectures-and-llm-compilers"
 ];
-var POSTS_CACHE_KEY = "startupcreme_posts_cache_v3";
+var SAMPLE_STARTUP_SLUGS = [
+  "paystack-treasury",
+  "kora-quant",
+  "vortex-inference",
+  "moniepoint-ledger",
+  "termii-omni",
+  "lazer-edtech"
+];
+var SAMPLE_JOB_TITLES = [
+  "Fractional CFO (Series A & B SaaS)",
+  "Staff Distributed Systems Engineer (Rust / Go)",
+  "Principal Cloud FinOps Architect",
+  "Senior Quantitative Financial Modeler",
+  "Fractional CTO & AI Infrastructure Advisor",
+  "Lead Full-Stack Engineer (React Router 7 + Supabase)"
+];
+var POSTS_CACHE_KEY = "startupcreme_posts_cache_v4";
 var TOPICS_CACHE_KEY = "startupcreme_topics_cache_v3";
 var SEED_TOPICS = [
   {
@@ -298,6 +586,10 @@ var StartupCremeStore = class {
     this.commentUserVotes = {};
     this.pollUserVotes = {};
     this.bookmarks = /* @__PURE__ */ new Set();
+    this.startups = [...INITIAL_STARTUPS];
+    this.rateSnapshot = { ...INITIAL_RATE_SNAPSHOT };
+    this.jobs = [...INITIAL_JOBS];
+    this.events = [...INITIAL_EVENTS];
     this.subscribers = [];
     this.hasAttemptedSeed = false;
     this.loadInitialData();
@@ -397,12 +689,6 @@ var StartupCremeStore = class {
           this.refreshCurrentUserRole().catch(() => {
           });
         });
-        setInterval(() => {
-          if (this.currentUser) {
-            this.refreshCurrentUserRole().catch(() => {
-            });
-          }
-        }, 15e3);
       }
     } catch (e) {
       console.warn("Supabase auth listener error:", e);
@@ -650,6 +936,14 @@ var StartupCremeStore = class {
       await supabaseExecute(
         (client) => client.from("posts").delete().in("slug", SAMPLE_POST_SLUGS)
       );
+      await supabaseExecute(
+        (client) => client.from("startups").delete().in("slug", SAMPLE_STARTUP_SLUGS)
+      ).catch(() => {
+      });
+      await supabaseExecute(
+        (client) => client.from("jobs").delete().in("title", SAMPLE_JOB_TITLES)
+      ).catch(() => {
+      });
       const { data: postsData } = await supabaseExecute(
         (client) => client.from("posts").select("*").order("created_at", { ascending: false })
       );
@@ -806,6 +1100,15 @@ var StartupCremeStore = class {
         });
       }
       this.postComments = groupedPostComments;
+      try {
+        const { data: eventsData } = await supabaseExecute(
+          (client) => client.from("events").select("*, linked_post:posts(*)").order("deadline_date", { ascending: true })
+        );
+        if (eventsData && Array.isArray(eventsData)) {
+          this.events = eventsData;
+        }
+      } catch {
+      }
       this.persistCache();
       this.notify();
     } catch (e) {
@@ -920,7 +1223,7 @@ var StartupCremeStore = class {
   getPosts(locale = "en-us", vertical, statusOnly = "published") {
     return this.posts.filter((p) => {
       const matchesLocale = p.locale.toLowerCase() === locale.toLowerCase() || p.locale === "en-us";
-      const matchesVertical = !vertical || p.vertical === vertical || p.dual_silo;
+      const matchesVertical = !vertical ? true : vertical === "founders-mindset" ? p.vertical === "founders-mindset" : p.vertical === vertical || Boolean(p.dual_silo) && (p.vertical === "finance" || p.vertical === "tech");
       const matchesStatus = statusOnly ? p.status === statusOnly : true;
       return matchesLocale && matchesVertical && matchesStatus;
     });
@@ -933,7 +1236,7 @@ var StartupCremeStore = class {
     const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
     let found = this.posts.find((p) => {
       const matchSlug = p.slug.toLowerCase() === decodedSlug || p.id.toLowerCase() === decodedSlug;
-      const matchVert = !vertical || p.vertical === vertical || p.dual_silo;
+      const matchVert = !vertical ? true : vertical === "founders-mindset" ? p.vertical === "founders-mindset" : p.vertical === vertical || Boolean(p.dual_silo) && (p.vertical === "finance" || p.vertical === "tech");
       return matchSlug && matchVert;
     });
     if (!found) {
@@ -1137,19 +1440,23 @@ var StartupCremeStore = class {
     const now = (/* @__PURE__ */ new Date()).toISOString();
     let savedPost;
     if (existingIndex >= 0) {
+      const mergedVertical = post.vertical || this.posts[existingIndex].vertical;
       savedPost = {
         ...this.posts[existingIndex],
         ...post,
+        vertical: mergedVertical,
+        dual_silo: mergedVertical === "founders-mindset" ? false : post.dual_silo !== void 0 ? Boolean(post.dual_silo) : this.posts[existingIndex].dual_silo,
         cover_image: normalizeImageUrl(post.cover_image || this.posts[existingIndex].cover_image),
         updated_at: now
       };
       this.posts[existingIndex] = savedPost;
     } else {
+      const targetVertical = post.vertical || "finance";
       savedPost = {
         id: post.id || `post-${Date.now()}`,
         slug: post.slug || "new-post-" + Date.now(),
         locale: post.locale || "en-us",
-        vertical: post.vertical || "finance",
+        vertical: targetVertical,
         title: post.title || "Untitled Article",
         excerpt: post.excerpt || "",
         content: post.content || "",
@@ -1160,7 +1467,7 @@ var StartupCremeStore = class {
         author_name: post.author_name || this.currentUser?.full_name || "Startup Cr\xE8me Editorial",
         author_role: post.author_role || "Senior Analyst",
         author_avatar: post.author_avatar || this.currentUser?.avatar_url,
-        dual_silo: Boolean(post.dual_silo),
+        dual_silo: targetVertical === "founders-mindset" ? false : Boolean(post.dual_silo),
         silo_badge: post.silo_badge || "",
         tags: post.tags || ["Finance", "Tech"],
         reading_time_minutes: post.reading_time_minutes || 5,
@@ -1789,6 +2096,497 @@ var StartupCremeStore = class {
       return { success: false, error: err?.message || "Database execution exception" };
     }
   }
+  // --------------------------------------------------------------------
+  // MODULE 2: Startup & FinTech Directory (startupcreme.startups)
+  // --------------------------------------------------------------------
+  async getRequestAuthHeaders() {
+    const headers = {
+      "Content-Type": "application/json"
+    };
+    if (this.currentUser) {
+      headers["x-user-id"] = this.currentUser.id;
+      headers["x-user-role"] = this.currentUser.role;
+    }
+    if (isSupabaseConfigured()) {
+      try {
+        const {
+          data: { session }
+        } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers["Authorization"] = `Bearer ${session.access_token}`;
+        }
+      } catch {
+      }
+    }
+    return headers;
+  }
+  getStartups(includePending = false) {
+    return this.startups.filter(
+      (s) => !SAMPLE_STARTUP_SLUGS.includes(s.slug) && (includePending || s.is_approved)
+    );
+  }
+  async fetchStartups(includePending = false) {
+    try {
+      const resp = await fetch(`/api/directory?includePending=${includePending ? "true" : "false"}`);
+      if (resp.ok) {
+        const body = await resp.json();
+        if (Array.isArray(body.startups)) {
+          this.startups = body.startups.filter(
+            (s) => !SAMPLE_STARTUP_SLUGS.includes(s.slug)
+          );
+          this.notify();
+          return this.getStartups(includePending);
+        }
+      }
+    } catch {
+    }
+    if (isSupabaseConfigured()) {
+      await supabaseExecute(
+        (client) => client.from("startups").delete().in("slug", SAMPLE_STARTUP_SLUGS)
+      ).catch(() => {
+      });
+      const { data, error } = await supabaseExecute((client) => {
+        let q = client.from("startups").select("*").order("created_at", { ascending: false });
+        if (!includePending) q = q.eq("is_approved", true);
+        return q;
+      });
+      if (!error && Array.isArray(data)) {
+        this.startups = data.filter((s) => !SAMPLE_STARTUP_SLUGS.includes(s.slug));
+        this.notify();
+      }
+    }
+    return this.getStartups(includePending);
+  }
+  async submitStartup(payload) {
+    if (!this.currentUser) {
+      return {
+        success: false,
+        error: "You must be signed in to submit a startup."
+      };
+    }
+    const isAdmin = this.currentUser.role === "admin";
+    const isApproved = isAdmin;
+    const cleanSlug = payload.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + "-" + Math.random().toString(36).substring(2, 6);
+    const validUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      this.currentUser.id
+    ) ? this.currentUser.id : null;
+    const optimisticStartup = {
+      id: `st-${Date.now()}`,
+      name: payload.name.trim(),
+      slug: cleanSlug,
+      tagline: payload.tagline.trim(),
+      description: payload.description.trim(),
+      website_url: payload.website_url.trim(),
+      logo_url: payload.logo_url?.trim() || null,
+      stage: payload.stage || "mvp",
+      vertical: payload.vertical.trim() || "FinTech",
+      tech_stack: payload.tech_stack,
+      submitted_by: validUuid,
+      is_approved: isApproved,
+      created_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      const resp = await fetch("/api/directory", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          ...optimisticStartup,
+          submitted_by: this.currentUser.id,
+          userRole: this.currentUser.role,
+          is_approved: isApproved
+        })
+      });
+      if (resp.ok) {
+        const body = await resp.json();
+        if (body.startup) {
+          this.startups = [body.startup, ...this.startups.filter((s) => s.id !== body.startup.id)];
+          this.notify();
+          return { success: true, startup: body.startup };
+        }
+      }
+    } catch {
+    }
+    if (isSupabaseConfigured()) {
+      const { data, error } = await supabaseExecute(
+        (client) => client.from("startups").insert({
+          name: optimisticStartup.name,
+          slug: optimisticStartup.slug,
+          tagline: optimisticStartup.tagline,
+          description: optimisticStartup.description,
+          website_url: optimisticStartup.website_url,
+          logo_url: optimisticStartup.logo_url,
+          stage: optimisticStartup.stage,
+          vertical: optimisticStartup.vertical,
+          tech_stack: optimisticStartup.tech_stack,
+          submitted_by: validUuid,
+          is_approved: isApproved
+        }).select("*").single()
+      );
+      if (!error && data) {
+        this.startups = [data, ...this.startups];
+        this.notify();
+        return { success: true, startup: data };
+      }
+    }
+    this.startups = [optimisticStartup, ...this.startups];
+    this.notify();
+    return { success: true, startup: optimisticStartup };
+  }
+  async approveStartup(id, isApproved = true) {
+    if (!this.currentUser || this.currentUser.role !== "admin") {
+      return { success: false, error: "Admin privileges required." };
+    }
+    this.startups = this.startups.map(
+      (s) => s.id === id ? { ...s, is_approved: isApproved } : s
+    );
+    this.notify();
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      await fetch(`/api/directory/${encodeURIComponent(id)}/approve`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          is_approved: isApproved,
+          userId: this.currentUser.id,
+          userRole: this.currentUser.role
+        })
+      });
+    } catch {
+    }
+    if (isSupabaseConfigured()) {
+      await supabaseExecute(
+        (client) => client.from("startups").update({ is_approved: isApproved }).eq("id", id)
+      );
+    }
+    return { success: true };
+  }
+  async deleteStartup(id) {
+    if (!this.currentUser || this.currentUser.role !== "admin") {
+      return { success: false, error: "Admin privileges required." };
+    }
+    this.startups = this.startups.filter((s) => s.id !== id && s.slug !== id);
+    this.notify();
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      await fetch(`/api/directory/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers
+      });
+    } catch {
+    }
+    if (isSupabaseConfigured()) {
+      await supabaseExecute(
+        (client) => client.from("startups").delete().eq("id", id)
+      );
+    }
+    return { success: true };
+  }
+  // --------------------------------------------------------------------
+  // MODULE 3: Macro & Cloud Rate Trackers (startupcreme.rate_snapshots)
+  // --------------------------------------------------------------------
+  getRateSnapshot() {
+    return this.rateSnapshot;
+  }
+  async fetchRateSnapshot() {
+    try {
+      const resp = await fetch("/api/markets/rates");
+      if (resp.ok) {
+        const snapshot = await resp.json();
+        if (snapshot && Array.isArray(snapshot.central_bank_rates)) {
+          this.rateSnapshot = snapshot;
+          this.notify();
+          return this.rateSnapshot;
+        }
+      }
+    } catch {
+    }
+    if (isSupabaseConfigured()) {
+      const { data, error } = await supabaseExecute(
+        (client) => client.from("rate_snapshots").select("*").order("recorded_at", { ascending: false }).limit(1).maybeSingle()
+      );
+      if (!error && data && Array.isArray(data.central_bank_rates) && data.central_bank_rates.length > 0) {
+        this.rateSnapshot = {
+          id: data.id,
+          source: data.source || "supabase_rate_snapshots",
+          recorded_at: data.recorded_at || data.created_at,
+          central_bank_rates: data.central_bank_rates,
+          cloud_pricing_index: data.cloud_pricing_index || this.rateSnapshot.cloud_pricing_index
+        };
+        this.notify();
+      }
+    }
+    return this.rateSnapshot;
+  }
+  async triggerRateWebhookSync() {
+    try {
+      const resp = await fetch("/api/webhooks/n8n/rates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "n8n_scheduled_webhook_sync",
+          central_bank_rates: this.rateSnapshot.central_bank_rates,
+          cloud_pricing_index: this.rateSnapshot.cloud_pricing_index
+        })
+      });
+      if (resp.ok) {
+        const body = await resp.json();
+        if (body.snapshot) {
+          this.rateSnapshot = body.snapshot;
+          this.notify();
+          return this.rateSnapshot;
+        }
+      }
+    } catch {
+    }
+    this.rateSnapshot = {
+      ...this.rateSnapshot,
+      recorded_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    this.notify();
+    return this.rateSnapshot;
+  }
+  // --------------------------------------------------------------------
+  // MODULE 4: Niche Remote Startup Job & Fractional Talent Board (startupcreme.jobs)
+  // --------------------------------------------------------------------
+  getJobs(includePending = false) {
+    return this.jobs.filter(
+      (j) => !SAMPLE_JOB_TITLES.includes(j.title) && (includePending || j.is_active)
+    );
+  }
+  async fetchJobs(includePending = false) {
+    try {
+      const resp = await fetch(`/api/careers?includePending=${includePending ? "true" : "false"}`);
+      if (resp.ok) {
+        const body = await resp.json();
+        if (Array.isArray(body.jobs)) {
+          this.jobs = body.jobs.filter(
+            (j) => !SAMPLE_JOB_TITLES.includes(j.title)
+          );
+          this.notify();
+          return this.getJobs(includePending);
+        }
+      }
+    } catch {
+    }
+    if (isSupabaseConfigured()) {
+      await supabaseExecute(
+        (client) => client.from("jobs").delete().in("title", SAMPLE_JOB_TITLES)
+      ).catch(() => {
+      });
+      const { data, error } = await supabaseExecute((client) => {
+        let q = client.from("jobs").select("*").order("created_at", { ascending: false });
+        if (!includePending) q = q.eq("is_active", true);
+        return q;
+      });
+      if (!error && Array.isArray(data)) {
+        this.jobs = data.filter((j) => !SAMPLE_JOB_TITLES.includes(j.title));
+        this.notify();
+      }
+    }
+    return this.getJobs(includePending);
+  }
+  async postJob(payload) {
+    if (!this.currentUser) {
+      return {
+        success: false,
+        error: "You must be signed in to post a job."
+      };
+    }
+    const isAdmin = this.currentUser.role === "admin";
+    const isActive = isAdmin;
+    const optimisticJob = {
+      id: `job-${Date.now()}`,
+      title: payload.title.trim(),
+      company_name: payload.company_name.trim(),
+      company_logo: payload.company_logo?.trim() || null,
+      location: payload.location.trim() || "Remote (Global)",
+      job_type: payload.job_type.trim() || "Full-time",
+      category: payload.category.trim() || "Engineering",
+      apply_url: payload.apply_url.trim(),
+      salary_range: payload.salary_range?.trim() || null,
+      is_active: isActive,
+      created_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      const resp = await fetch("/api/careers", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          ...optimisticJob,
+          userId: this.currentUser.id,
+          userRole: this.currentUser.role,
+          is_active: isActive
+        })
+      });
+      if (resp.ok) {
+        const body = await resp.json();
+        if (body.job) {
+          this.jobs = [body.job, ...this.jobs.filter((j) => j.id !== body.job.id)];
+          this.notify();
+          return { success: true, job: body.job };
+        }
+      }
+    } catch {
+    }
+    if (isSupabaseConfigured()) {
+      const { data, error } = await supabaseExecute(
+        (client) => client.from("jobs").insert({
+          title: optimisticJob.title,
+          company_name: optimisticJob.company_name,
+          company_logo: optimisticJob.company_logo,
+          location: optimisticJob.location,
+          job_type: optimisticJob.job_type,
+          category: optimisticJob.category,
+          apply_url: optimisticJob.apply_url,
+          salary_range: optimisticJob.salary_range,
+          is_active: isActive
+        }).select("*").single()
+      );
+      if (!error && data) {
+        this.jobs = [data, ...this.jobs];
+        this.notify();
+        return { success: true, job: data };
+      }
+    }
+    this.jobs = [optimisticJob, ...this.jobs];
+    this.notify();
+    return { success: true, job: optimisticJob };
+  }
+  async approveJob(id, isActive = true) {
+    if (!this.currentUser || this.currentUser.role !== "admin") {
+      return { success: false, error: "Admin privileges required." };
+    }
+    this.jobs = this.jobs.map(
+      (j) => j.id === id ? { ...j, is_active: isActive } : j
+    );
+    this.notify();
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      await fetch(`/api/careers/${encodeURIComponent(id)}/approve`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          is_active: isActive,
+          userId: this.currentUser.id,
+          userRole: this.currentUser.role
+        })
+      });
+    } catch {
+    }
+    if (isSupabaseConfigured()) {
+      await supabaseExecute(
+        (client) => client.from("jobs").update({ is_active: isActive }).eq("id", id)
+      );
+    }
+    return { success: true };
+  }
+  async deleteJob(id) {
+    if (!this.currentUser || this.currentUser.role !== "admin") {
+      return { success: false, error: "Admin privileges required." };
+    }
+    this.jobs = this.jobs.filter((j) => j.id !== id);
+    this.notify();
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      await fetch(`/api/careers/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers
+      });
+    } catch {
+    }
+    if (isSupabaseConfigured()) {
+      await supabaseExecute(
+        (client) => client.from("jobs").delete().eq("id", id)
+      );
+    }
+    return { success: true };
+  }
+  // --------------------------------------------------------------------
+  // MODULE 5: Grants, Accelerators & Events Opportunity Board (startupcreme.events)
+  // --------------------------------------------------------------------
+  getEvents() {
+    return this.events;
+  }
+  async fetchEvents(type, search) {
+    try {
+      const params = new URLSearchParams();
+      if (type && type !== "all") params.set("type", type);
+      if (search) params.set("search", search);
+      const resp = await fetch(`/api/events?${params.toString()}`);
+      if (resp.ok) {
+        const body = await resp.json();
+        if (Array.isArray(body.events)) {
+          this.events = body.events;
+          this.notify();
+          return this.events;
+        }
+      }
+    } catch {
+    }
+    if (isSupabaseConfigured()) {
+      const { data, error } = await supabaseExecute((client) => {
+        let q = client.from("events").select("*, linked_post:posts(*)").order("deadline_date", { ascending: true });
+        if (type && type !== "all") {
+          q = q.ilike("opportunity_type", `%${type}%`);
+        }
+        return q;
+      });
+      if (!error && Array.isArray(data)) {
+        this.events = data;
+        this.notify();
+      }
+    }
+    return this.events;
+  }
+  async deleteEvent(id) {
+    if (!this.currentUser || this.currentUser.role !== "admin") {
+      return { success: false, error: "Admin privileges required." };
+    }
+    this.events = this.events.filter((e) => e.id !== id);
+    this.notify();
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      await fetch(`/api/events/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers
+      });
+    } catch {
+    }
+    if (isSupabaseConfigured()) {
+      await supabaseExecute(
+        (client) => client.from("events").delete().eq("id", id)
+      );
+    }
+    return { success: true };
+  }
+  async clearAllEvents() {
+    if (!this.currentUser || this.currentUser.role !== "admin") {
+      return { success: false, error: "Admin privileges required." };
+    }
+    const previousEvents = [...this.events];
+    this.events = [];
+    this.notify();
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      for (const e of previousEvents) {
+        await fetch(`/api/events/${encodeURIComponent(e.id)}`, {
+          method: "DELETE",
+          headers
+        }).catch(() => {
+        });
+      }
+    } catch {
+    }
+    if (isSupabaseConfigured()) {
+      await supabaseExecute(
+        (client) => client.from("events").delete().neq("id", "00000000-0000-0000-0000-000000000000")
+      ).catch(() => {
+      });
+    }
+    return { success: true };
+  }
 };
 var store = new StartupCremeStore();
 
@@ -1809,13 +2607,19 @@ var GeminiResearchProvider = class {
     const ai = new GoogleGenAI({ apiKey });
     const systemInstructions = `
 You are the Lead Intelligence Researcher for StartupCr\xE8me (${STARTUPCREME_CONSTITUTION.tagline}).
-Your core mandate is rigorous, verified, high-conviction research on tech, venture capital, financial markets, and startups.
+Your core mandate is rigorous, verified, high-conviction research on deep technology, venture capital, financial markets, and founder mindset & leadership psychology.
 
 EDITORIAL CONSTITUTION ENFORCEMENT:
 1. Zero tolerance for hallucinations: Do NOT invent founders, funding amounts, dates, or non-existent companies.
 2. Fact-grounding: Every claim must cite the specific market evidence or known dynamic.
-3. Target Audience: Founders, VC investors, software engineers, and financial strategists.
+3. Target Audience: Founders, VC investors, software engineers, financial strategists, and executive leaders.
 4. Voice: Precise, analytical, institutional, sober, high-signal.
+
+When investigating the "founders-mindset" vertical, focus on:
+- Founder psychology under extreme uncertainty and stress
+- Executive resilience and high-stakes decision frameworks
+- Team culture design, mental models, and scaling leadership
+- Strategic long-term focus vs short-term noise
 
 You must return valid JSON matching this exact structure:
 {
@@ -1834,7 +2638,7 @@ You must return valid JSON matching this exact structure:
     { "date_or_timeframe": string, "significance": string }
   ],
   "potential_article_angles": [
-    { "title_proposal": string, "angle": string, "target_audience": string, "suggested_vertical": "finance" | "tech" }
+    { "title_proposal": string, "angle": string, "target_audience": string, "suggested_vertical": "finance" | "tech" | "founders-mindset" }
   ],
   "confidence": number (0.0 to 1.0),
   "recommended_next_action": "draft_article" | "further_investigation" | "archive_idea"
@@ -1843,9 +2647,9 @@ You must return valid JSON matching this exact structure:
     const prompt = `
 Conduct in-depth research on the following topic:
 Topic: "${input.topic}"
-Vertical Preference: ${input.vertical || "auto-detect based on context (finance vs tech)"}
+Vertical Preference: ${input.vertical || "auto-detect based on context (finance vs tech vs founders-mindset)"}
 Depth: ${input.depth || "standard"}
-Focus Areas: ${input.focus_areas?.length ? input.focus_areas.join(", ") : "core mechanics, capital implications, strategic landscape"}
+Focus Areas: ${input.focus_areas?.length ? input.focus_areas.join(", ") : "core mechanics, capital implications, strategic landscape, founder psychology"}
 Target Locale: ${input.target_locale || "en-us"}
 `;
     const response = await ai.models.generateContent({
@@ -1943,7 +2747,10 @@ var FallbackResearchProvider = class {
     return true;
   }
   async conductResearch(input) {
-    const vertical = input.vertical || (input.topic.toLowerCase().includes("finance") || input.topic.toLowerCase().includes("treasury") || input.topic.toLowerCase().includes("yield") ? "finance" : "tech");
+    const q = input.topic.toLowerCase();
+    const isFM = q.includes("mindset") || q.includes("founder") || q.includes("psychology") || q.includes("resilience") || q.includes("leadership");
+    const isFin = q.includes("finance") || q.includes("treasury") || q.includes("yield") || q.includes("capital") || q.includes("ipo");
+    const vertical = input.vertical || (isFM ? "founders-mindset" : isFin ? "finance" : "tech");
     return {
       topic: input.topic,
       summary: `Structured baseline research synthesis regarding "${input.topic}". Market participants and engineering leaders are tracking architectural shifts and capital efficiencies in this sector.`,
@@ -3351,7 +4158,7 @@ var memoryStore = MemoryStore.getInstance();
 import { z as z2 } from "zod";
 var SearchContentParamsSchema = z2.object({
   query: z2.string().min(2, "Query must be at least 2 characters").max(100),
-  vertical: z2.enum(["finance", "tech", "all"]).optional().default("all"),
+  vertical: z2.enum(["finance", "tech", "founders-mindset", "all"]).optional().default("all"),
   limit: z2.number().int().min(1).max(20).optional().default(5)
 });
 var SearchContentTool = class {
@@ -3375,7 +4182,7 @@ var SearchContentTool = class {
       const q = params.query.toLowerCase().trim();
       const allPosts = store.getPosts();
       const filtered = allPosts.filter((p) => {
-        const matchesVertical = params.vertical === "all" || p.vertical === params.vertical || p.dual_silo;
+        const matchesVertical = params.vertical === "all" || (params.vertical === "founders-mindset" ? p.vertical === "founders-mindset" : p.vertical === params.vertical || Boolean(p.dual_silo) && (p.vertical === "finance" || p.vertical === "tech"));
         const matchesQuery = p.title.toLowerCase().includes(q) || p.excerpt.toLowerCase().includes(q) || p.tags.some((t) => t.toLowerCase().includes(q));
         return matchesVertical && matchesQuery;
       }).slice(0, params.limit);
@@ -3600,6 +4407,7 @@ var ToolRegistry = class {
 
 // src/ai/server/automationAuth.ts
 import crypto4 from "crypto";
+import { createClient as createClient3 } from "@supabase/supabase-js";
 function secureCompare(a, b) {
   if (typeof a !== "string" || typeof b !== "string") return false;
   const bufA = Buffer.from(a);
@@ -3626,38 +4434,57 @@ function extractCorrelation(req) {
     source: bodyCorrelation?.source || (workflowId ? "n8n_orchestration" : "api_client")
   };
 }
-function requireAutomationAuth(req, res, next) {
+async function requireAutomationAuth(req, res, next) {
   const correlation = extractCorrelation(req);
   req.correlation = correlation;
   res.setHeader("X-Request-Id", correlation.requestId || "");
   const authHeader = req.headers.authorization;
   const customSecretHeader = req.headers["x-automation-secret"] || req.headers["x-startupcreme-automation-secret"];
-  const adminRoleHeader = req.headers["x-admin-role"];
   let providedToken = "";
   if (authHeader && authHeader.startsWith("Bearer ")) {
     providedToken = authHeader.slice(7).trim();
   } else if (customSecretHeader) {
     providedToken = customSecretHeader.trim();
   }
-  const configuredSecret = process.env.STARTUPCREME_AUTOMATION_SECRET;
-  if (configuredSecret && configuredSecret !== "your_m2m_automation_secret_key") {
-    if (providedToken && secureCompare(providedToken, configuredSecret)) {
-      req.callerIdentity = "m2m_automation";
-      req.isAutomationClient = true;
-      return next();
-    }
+  const rawConfiguredSecret = process.env.STARTUPCREME_AUTOMATION_SECRET?.trim();
+  const configuredSecret = rawConfiguredSecret && rawConfiguredSecret !== "your_m2m_automation_secret_key" ? rawConfiguredSecret : "";
+  if (configuredSecret && providedToken && secureCompare(providedToken, configuredSecret)) {
+    req.callerIdentity = "m2m_automation";
+    req.isAutomationClient = true;
+    return next();
   }
-  if (adminRoleHeader === "admin" || req.user?.role === "admin") {
+  if (req.user?.role === "admin") {
     req.callerIdentity = "admin_ui";
     req.isAutomationClient = false;
     return next();
   }
-  if (!configuredSecret || configuredSecret === "your_m2m_automation_secret_key") {
-    if (process.env.NODE_ENV !== "production") {
-      res.setHeader("X-StartupCreme-Auth-Warning", "STARTUPCREME_AUTOMATION_SECRET not configured; dev permissive mode");
-      req.callerIdentity = "dev_local";
-      req.isAutomationClient = true;
-      return next();
+  if (providedToken) {
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || "";
+    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+    if (supabaseUrl && serviceRoleKey && !supabaseUrl.includes("placeholder")) {
+      try {
+        const authClient = createClient3(supabaseUrl, anonKey || serviceRoleKey, {
+          auth: { persistSession: false, autoRefreshToken: false }
+        });
+        const {
+          data: { user },
+          error: authError
+        } = await authClient.auth.getUser(providedToken);
+        if (!authError && user && user.id) {
+          const adminClient = createClient3(supabaseUrl, serviceRoleKey, {
+            db: { schema: "startupcreme" },
+            auth: { persistSession: false, autoRefreshToken: false }
+          });
+          const { data: dbUser, error: dbError } = await adminClient.from("users").select("role").eq("id", user.id).maybeSingle();
+          if (!dbError && dbUser?.role && String(dbUser.role).trim().toLowerCase() === "admin") {
+            req.callerIdentity = "admin_session";
+            req.isAutomationClient = false;
+            return next();
+          }
+        }
+      } catch {
+      }
     }
   }
   res.status(401).json({
@@ -3854,7 +4681,7 @@ var TaskRegistry = class {
       defaultPolicyLevel: "yellow",
       schema: z4.object({
         content: z4.string().min(10),
-        vertical: z4.enum(["finance", "tech"]).optional(),
+        vertical: z4.enum(["finance", "tech", "founders-mindset"]).optional(),
         review_focus: z4.string().optional()
       }),
       timeoutMs: 45e3
@@ -4259,8 +5086,814 @@ aiRouter.post("/research", taskLimiter, async (req, res) => {
   }
 });
 
+// src/server/expansionRouter.ts
+import { Router as Router2 } from "express";
+import crypto5 from "crypto";
+import { createClient as createClient4 } from "@supabase/supabase-js";
+var expansionRouter = Router2();
+var runtimeStartups = [...INITIAL_STARTUPS];
+var runtimeJobs = [...INITIAL_JOBS];
+var runtimeRateSnapshot = { ...INITIAL_RATE_SNAPSHOT };
+var runtimeEvents = [...INITIAL_EVENTS];
+var hasPurgedLegacyMockRows = false;
+var LEGACY_MOCK_STARTUP_SLUGS = [
+  "paystack-treasury",
+  "kora-quant",
+  "vortex-inference",
+  "moniepoint-ledger",
+  "termii-omni",
+  "lazer-edtech"
+];
+var LEGACY_MOCK_JOB_TITLES = [
+  "Fractional CFO (Series A & B SaaS)",
+  "Staff Distributed Systems Engineer (Rust / Go)",
+  "Principal Cloud FinOps Architect",
+  "Senior Quantitative Financial Modeler",
+  "Fractional CTO & AI Infrastructure Advisor",
+  "Lead Full-Stack Engineer (React Router 7 + Supabase)"
+];
+async function purgeLegacyMockRowsIfNeeded(client) {
+  if (hasPurgedLegacyMockRows || !client) return;
+  hasPurgedLegacyMockRows = true;
+  try {
+    await client.from("startups").delete().in("slug", LEGACY_MOCK_STARTUP_SLUGS);
+  } catch {
+  }
+  try {
+    await client.from("jobs").delete().in("title", LEGACY_MOCK_JOB_TITLES);
+  } catch {
+  }
+}
+function getSupabaseAdminClient() {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+  if (!supabaseUrl || !supabaseKey) return null;
+  return createClient4(supabaseUrl, supabaseKey, {
+    db: { schema: "startupcreme" },
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+}
+async function resolveRequestUser(req) {
+  if (req.user?.id) {
+    const serverUser = req.user;
+    const trustedRole = serverUser.role === "admin" ? "admin" : "user";
+    return {
+      id: String(serverUser.id),
+      role: trustedRole,
+      email: serverUser.email ? String(serverUser.email) : void 0
+    };
+  }
+  const authHeader = req.headers.authorization;
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || "";
+  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+  if (authHeader && authHeader.startsWith("Bearer ") && supabaseUrl && (anonKey || serviceRoleKey)) {
+    const token = authHeader.substring(7).trim();
+    if (token) {
+      try {
+        const authClient = createClient4(supabaseUrl, anonKey || serviceRoleKey, {
+          auth: { persistSession: false, autoRefreshToken: false }
+        });
+        const {
+          data: { user },
+          error
+        } = await authClient.auth.getUser(token);
+        if (!error && user && user.id) {
+          let role = "user";
+          const adminClient = getSupabaseAdminClient();
+          if (adminClient && serviceRoleKey) {
+            try {
+              const { data: dbUser, error: dbError } = await adminClient.from("users").select("role").eq("id", user.id).maybeSingle();
+              if (!dbError && dbUser?.role && String(dbUser.role).trim().toLowerCase() === "admin") {
+                role = "admin";
+              }
+            } catch {
+              role = "user";
+            }
+          }
+          return { id: user.id, role, email: user.email };
+        }
+      } catch {
+      }
+    }
+  }
+  const fallbackUserId = req.body?.submitted_by || req.body?.userId || req.headers["x-user-id"];
+  if (fallbackUserId && typeof fallbackUserId === "string" && fallbackUserId.trim().length > 0) {
+    const cleanId = fallbackUserId.trim();
+    return { id: cleanId, role: "user" };
+  }
+  return null;
+}
+async function requireRouteAdminAuth(req, res) {
+  const reqUser = await resolveRequestUser(req);
+  if (!reqUser || reqUser.role !== "admin") {
+    res.status(403).json({
+      error: "Forbidden: Admin privileges required for this action.",
+      code: "ADMIN_PRIVILEGES_REQUIRED"
+    });
+    return null;
+  }
+  return reqUser;
+}
+expansionRouter.get(["/directory", "/startups"], async (req, res) => {
+  const stageFilter = req.query.stage || "";
+  const verticalFilter = req.query.vertical || "";
+  const includePending = req.query.includePending === "true";
+  const client = getSupabaseAdminClient();
+  if (client) {
+    await purgeLegacyMockRowsIfNeeded(client);
+    try {
+      let query = client.from("startups").select("*").order("created_at", { ascending: false });
+      if (!includePending) {
+        query = query.eq("is_approved", true);
+      }
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        runtimeStartups = data.filter(
+          (s) => !LEGACY_MOCK_STARTUP_SLUGS.includes(s.slug)
+        );
+      }
+    } catch {
+    }
+  }
+  let results = runtimeStartups.filter(
+    (s) => !LEGACY_MOCK_STARTUP_SLUGS.includes(s.slug) && (includePending || s.is_approved)
+  );
+  if (stageFilter && stageFilter !== "all") {
+    results = results.filter((s) => s.stage === stageFilter);
+  }
+  if (verticalFilter && verticalFilter !== "all") {
+    const normFilter = verticalFilter.toLowerCase().replace(/[^a-z0-9]/g, "");
+    results = results.filter(
+      (s) => s.vertical.toLowerCase().replace(/[^a-z0-9]/g, "") === normFilter
+    );
+  }
+  return res.json({
+    startups: results,
+    total: results.length
+  });
+});
+expansionRouter.post(["/directory", "/startups"], async (req, res) => {
+  const reqUser = await resolveRequestUser(req);
+  if (!reqUser) {
+    return res.status(401).json({
+      error: "Authentication required. Only signed-in users can submit a startup."
+    });
+  }
+  const {
+    name,
+    tagline,
+    description,
+    website_url,
+    logo_url,
+    stage = "mvp",
+    vertical = "FinTech",
+    tech_stack = []
+  } = req.body || {};
+  if (!name || !tagline || !description || !website_url) {
+    return res.status(400).json({
+      error: "Missing required fields: name, tagline, description, and website_url are required."
+    });
+  }
+  const cleanSlug = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + "-" + Math.random().toString(36).substring(2, 6);
+  const isApproved = reqUser.role === "admin";
+  const validUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reqUser.id) ? reqUser.id : null;
+  const newStartup = {
+    id: `st-${Date.now()}`,
+    name: String(name).trim(),
+    slug: cleanSlug,
+    tagline: String(tagline).trim(),
+    description: String(description).trim(),
+    website_url: String(website_url).trim(),
+    logo_url: logo_url ? String(logo_url).trim() : null,
+    stage: ["idea", "mvp", "seed", "series_a", "bootstrapped"].includes(stage) ? stage : "mvp",
+    vertical: String(vertical).trim() || "FinTech",
+    tech_stack: Array.isArray(tech_stack) ? tech_stack.map((t) => String(t).trim()).filter(Boolean) : String(tech_stack).split(",").map((t) => t.trim()).filter(Boolean),
+    submitted_by: validUuid,
+    is_approved: isApproved,
+    created_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      const { data, error } = await client.from("startups").insert({
+        name: newStartup.name,
+        slug: newStartup.slug,
+        tagline: newStartup.tagline,
+        description: newStartup.description,
+        website_url: newStartup.website_url,
+        logo_url: newStartup.logo_url,
+        stage: newStartup.stage,
+        vertical: newStartup.vertical,
+        tech_stack: newStartup.tech_stack,
+        submitted_by: newStartup.submitted_by,
+        is_approved: isApproved
+      }).select("*").single();
+      if (!error && data) {
+        runtimeStartups = [data, ...runtimeStartups];
+        return res.status(201).json({ success: true, startup: data, persisted: "supabase" });
+      }
+    } catch {
+    }
+  }
+  runtimeStartups = [newStartup, ...runtimeStartups];
+  return res.status(201).json({ success: true, startup: newStartup, persisted: "memory" });
+});
+expansionRouter.patch(["/directory/:id/approve", "/startups/:id/approve"], async (req, res) => {
+  const adminUser = await requireRouteAdminAuth(req, res);
+  if (!adminUser) return;
+  const { id } = req.params;
+  const { is_approved = true } = req.body || {};
+  runtimeStartups = runtimeStartups.map(
+    (s) => s.id === id || s.slug === id ? { ...s, is_approved: Boolean(is_approved) } : s
+  );
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      const { data, error } = await client.from("startups").update({ is_approved: Boolean(is_approved) }).eq("id", id).select("*").maybeSingle();
+      if (!error && data) {
+        runtimeStartups = runtimeStartups.map((s) => s.id === id ? data : s);
+        return res.json({ success: true, startup: data });
+      }
+    } catch {
+    }
+  }
+  const updated = runtimeStartups.find((s) => s.id === id || s.slug === id);
+  return res.json({ success: true, startup: updated });
+});
+expansionRouter.delete(["/directory/:id", "/startups/:id"], async (req, res) => {
+  const adminUser = await requireRouteAdminAuth(req, res);
+  if (!adminUser) return;
+  const { id } = req.params;
+  runtimeStartups = runtimeStartups.filter((s) => s.id !== id && s.slug !== id);
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      await client.from("startups").delete().eq("id", id);
+    } catch {
+    }
+  }
+  return res.json({ success: true, deletedId: id });
+});
+function isMarketsFeatureEnabled() {
+  const raw = String(process.env.ENABLE_MARKETS ?? process.env.VITE_ENABLE_MARKETS ?? "true").trim().toLowerCase().replace(/^["']|["']$/g, "");
+  return !(raw === "false" || raw === "0" || raw === "no" || raw === "off");
+}
+expansionRouter.get(["/markets/rates", "/rates", "/markets"], async (req, res) => {
+  if (!isMarketsFeatureEnabled()) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      const { data, error } = await client.from("rate_snapshots").select("*").order("recorded_at", { ascending: false }).limit(1).maybeSingle();
+      if (!error && data) {
+        runtimeRateSnapshot = {
+          id: data.id,
+          source: data.source || "supabase_cached_snapshot",
+          recorded_at: data.recorded_at || data.created_at,
+          central_bank_rates: Array.isArray(data.central_bank_rates) && data.central_bank_rates.length > 0 ? data.central_bank_rates : INITIAL_CENTRAL_BANK_RATES,
+          cloud_pricing_index: Array.isArray(data.cloud_pricing_index) && data.cloud_pricing_index.length > 0 ? data.cloud_pricing_index : INITIAL_CLOUD_PRICING_INDEX
+        };
+      }
+    } catch {
+    }
+  }
+  return res.json(runtimeRateSnapshot);
+});
+expansionRouter.post(
+  ["/webhooks/n8n/rates", "/markets/rates/webhook", "/markets/rates/sync"],
+  async (req, res) => {
+    if (!isMarketsFeatureEnabled()) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    const {
+      source = "n8n_webhook_job",
+      central_bank_rates,
+      cloud_pricing_index,
+      metadata = {}
+    } = req.body || {};
+    const updatedCentralBanks = Array.isArray(central_bank_rates) && central_bank_rates.length > 0 ? central_bank_rates : runtimeRateSnapshot.central_bank_rates;
+    const updatedCloudPricing = Array.isArray(cloud_pricing_index) && cloud_pricing_index.length > 0 ? cloud_pricing_index : runtimeRateSnapshot.cloud_pricing_index;
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const nextSnapshot = {
+      id: `snap-${Date.now()}`,
+      source: String(source),
+      recorded_at: nowIso,
+      central_bank_rates: updatedCentralBanks,
+      cloud_pricing_index: updatedCloudPricing
+    };
+    runtimeRateSnapshot = nextSnapshot;
+    const client = getSupabaseAdminClient();
+    if (client) {
+      try {
+        const { data, error } = await client.from("rate_snapshots").insert({
+          snapshot_type: "combined",
+          source: nextSnapshot.source,
+          central_bank_rates: nextSnapshot.central_bank_rates,
+          cloud_pricing_index: nextSnapshot.cloud_pricing_index,
+          metadata,
+          recorded_at: nowIso
+        }).select("*").single();
+        if (!error && data) {
+          runtimeRateSnapshot.id = data.id;
+          return res.status(201).json({
+            success: true,
+            persisted: "supabase",
+            snapshot: runtimeRateSnapshot
+          });
+        }
+      } catch {
+      }
+    }
+    return res.status(200).json({
+      success: true,
+      persisted: "memory",
+      snapshot: runtimeRateSnapshot
+    });
+  }
+);
+expansionRouter.get(["/careers", "/jobs"], async (req, res) => {
+  const categoryFilter = req.query.category || "";
+  const jobTypeFilter = req.query.job_type || "";
+  const includePending = req.query.includePending === "true";
+  const client = getSupabaseAdminClient();
+  if (client) {
+    await purgeLegacyMockRowsIfNeeded(client);
+    try {
+      let query = client.from("jobs").select("*").order("created_at", { ascending: false });
+      if (!includePending) {
+        query = query.eq("is_active", true);
+      }
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        runtimeJobs = data.filter(
+          (j) => !LEGACY_MOCK_JOB_TITLES.includes(j.title)
+        );
+      }
+    } catch {
+    }
+  }
+  let results = runtimeJobs.filter(
+    (j) => !LEGACY_MOCK_JOB_TITLES.includes(j.title) && (includePending || j.is_active)
+  );
+  if (categoryFilter && categoryFilter !== "all") {
+    results = results.filter((j) => j.category.toLowerCase() === categoryFilter.toLowerCase());
+  }
+  if (jobTypeFilter && jobTypeFilter !== "all") {
+    results = results.filter((j) => j.job_type.toLowerCase() === jobTypeFilter.toLowerCase());
+  }
+  return res.json({
+    jobs: results,
+    total: results.length
+  });
+});
+expansionRouter.post(["/careers", "/jobs"], async (req, res) => {
+  const reqUser = await resolveRequestUser(req);
+  if (!reqUser) {
+    return res.status(401).json({
+      error: "Authentication required. Only signed-in users can post a job."
+    });
+  }
+  const {
+    title,
+    company_name,
+    company_logo,
+    location = "Remote (Global)",
+    job_type = "Full-time",
+    category = "Engineering",
+    apply_url,
+    salary_range
+  } = req.body || {};
+  if (!title || !company_name || !apply_url) {
+    return res.status(400).json({
+      error: "Missing required fields: title, company_name, and apply_url are required."
+    });
+  }
+  const isActive = reqUser.role === "admin";
+  const newJob = {
+    id: `job-${Date.now()}`,
+    title: String(title).trim(),
+    company_name: String(company_name).trim(),
+    company_logo: company_logo ? String(company_logo).trim() : null,
+    location: String(location).trim() || "Remote (Global)",
+    job_type: String(job_type).trim() || "Full-time",
+    category: String(category).trim() || "Engineering",
+    apply_url: String(apply_url).trim(),
+    salary_range: salary_range ? String(salary_range).trim() : null,
+    is_active: isActive,
+    created_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      const { data, error } = await client.from("jobs").insert({
+        title: newJob.title,
+        company_name: newJob.company_name,
+        company_logo: newJob.company_logo,
+        location: newJob.location,
+        job_type: newJob.job_type,
+        category: newJob.category,
+        apply_url: newJob.apply_url,
+        salary_range: newJob.salary_range,
+        is_active: isActive
+      }).select("*").single();
+      if (!error && data) {
+        runtimeJobs = [data, ...runtimeJobs];
+        return res.status(201).json({ success: true, job: data, persisted: "supabase" });
+      }
+    } catch {
+    }
+  }
+  runtimeJobs = [newJob, ...runtimeJobs];
+  return res.status(201).json({ success: true, job: newJob, persisted: "memory" });
+});
+expansionRouter.patch(["/careers/:id/approve", "/jobs/:id/approve"], async (req, res) => {
+  const adminUser = await requireRouteAdminAuth(req, res);
+  if (!adminUser) return;
+  const { id } = req.params;
+  const { is_active = true } = req.body || {};
+  runtimeJobs = runtimeJobs.map(
+    (j) => j.id === id ? { ...j, is_active: Boolean(is_active) } : j
+  );
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      const { data, error } = await client.from("jobs").update({ is_active: Boolean(is_active) }).eq("id", id).select("*").maybeSingle();
+      if (!error && data) {
+        runtimeJobs = runtimeJobs.map((j) => j.id === id ? data : j);
+        return res.json({ success: true, job: data });
+      }
+    } catch {
+    }
+  }
+  const updated = runtimeJobs.find((j) => j.id === id);
+  return res.json({ success: true, job: updated });
+});
+expansionRouter.delete(["/careers/:id", "/jobs/:id"], async (req, res) => {
+  const adminUser = await requireRouteAdminAuth(req, res);
+  if (!adminUser) return;
+  const { id } = req.params;
+  runtimeJobs = runtimeJobs.filter((j) => j.id !== id);
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      await client.from("jobs").delete().eq("id", id);
+    } catch {
+    }
+  }
+  return res.json({ success: true, deletedId: id });
+});
+function timingSafeCheck(provided, secret) {
+  if (!provided || !secret) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(secret);
+  if (a.length !== b.length) return false;
+  return crypto5.timingSafeEqual(a, b);
+}
+function isAuthorizedWebhookToken(req) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || typeof authHeader !== "string" || !authHeader.startsWith("Bearer ")) {
+    return false;
+  }
+  const token = authHeader.slice(7).trim();
+  if (!token) return false;
+  const validSecrets = [
+    process.env.N8N_WEBHOOK_SECRET,
+    process.env.EVENT_WEBHOOK_SECRET,
+    process.env.N8N_BEARER_TOKEN,
+    process.env.EVENTS_API_BEARER_TOKEN,
+    process.env.STARTUPCREME_AUTOMATION_SECRET
+  ].map((s) => s?.trim()).filter((s) => typeof s === "string" && s.length > 0 && s !== "your_m2m_automation_secret_key");
+  if (validSecrets.length === 0) {
+    return false;
+  }
+  return validSecrets.some((secret) => timingSafeCheck(token, secret));
+}
+expansionRouter.post(
+  ["/events", "/events/webhook", "/events/ingest", "/n8n/events", "/webhooks/events", "/webhooks/n8n/events"],
+  async (req, res) => {
+    if (!isAuthorizedWebhookToken(req)) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized: Missing or invalid Bearer token. Please provide a valid Authorization: Bearer <token> header matching N8N_WEBHOOK_SECRET or EVENT_WEBHOOK_SECRET."
+      });
+    }
+    const {
+      event_title,
+      application_url,
+      slug,
+      vertical,
+      locale,
+      title,
+      content,
+      excerpt,
+      meta_description,
+      description,
+      opportunity_type = "grant",
+      funding_amount,
+      location = "Global (Remote)",
+      deadline_date,
+      author_name,
+      author_role,
+      author_avatar,
+      cover_image,
+      canonical_url,
+      status = "published",
+      tags = [],
+      reading_time_minutes,
+      word_count
+    } = req.body || {};
+    const requiredFields = [
+      "event_title",
+      "application_url",
+      "slug",
+      "vertical",
+      "locale",
+      "title",
+      "content"
+    ];
+    const missingFields = requiredFields.filter((field) => {
+      const val = req.body?.[field];
+      return val === void 0 || val === null || typeof val === "string" && val.trim() === "" || typeof val === "object" && Object.keys(val).length === 0;
+    });
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Payload validation failed: Missing required fields: ${missingFields.join(", ")}`,
+        missing_fields: missingFields
+      });
+    }
+    try {
+      const normLocale = String(locale).trim().toLowerCase();
+      const normVertical = String(vertical).trim().toLowerCase();
+      const normSlug = String(slug).trim().toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+      const cleanAppUrl = String(application_url).trim();
+      const cleanEventTitle = String(event_title).trim();
+      const cleanPostTitle = String(title).trim();
+      let jsonbContent;
+      if (typeof content === "string") {
+        try {
+          jsonbContent = JSON.parse(content);
+        } catch {
+          jsonbContent = {
+            type: "doc",
+            content: [
+              {
+                type: "paragraph",
+                content: [{ type: "text", text: content }]
+              }
+            ]
+          };
+        }
+      } else if (content && typeof content === "object") {
+        jsonbContent = content;
+      } else {
+        jsonbContent = {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: cleanPostTitle }]
+            }
+          ]
+        };
+      }
+      const postRow = {
+        locale: normLocale,
+        vertical: normVertical,
+        slug: normSlug,
+        title: cleanPostTitle,
+        excerpt: excerpt ? String(excerpt).trim() : String(description || cleanPostTitle).slice(0, 240),
+        content: jsonbContent,
+        status: status || "published",
+        meta_description: meta_description ? String(meta_description).trim() : String(excerpt || description || cleanPostTitle).slice(0, 160),
+        canonical_url: canonical_url ? String(canonical_url).trim() : null,
+        cover_image: cover_image ? String(cover_image).trim() : null,
+        author_name: author_name ? String(author_name).trim() : "Startup Cr\xE8me Editorial",
+        author_role: author_role ? String(author_role).trim() : "Principal Editor",
+        author_avatar: author_avatar ? String(author_avatar).trim() : null,
+        dual_silo: normVertical === "founders-mindset" ? false : Boolean(req.body.dual_silo || false),
+        silo_badge: req.body.silo_badge || null,
+        tags: Array.isArray(tags) ? tags : [],
+        reading_time_minutes: Number(reading_time_minutes) || 5,
+        word_count: Number(word_count) || 800,
+        updated_at: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      const client = getSupabaseAdminClient();
+      let linkedPostId = null;
+      let eventId = null;
+      if (client) {
+        const postsTable = client.schema ? client.schema("startupcreme").from("posts") : client.from("posts");
+        const { data: upsertedPost, error: postUpsertError } = await postsTable.upsert(postRow, { onConflict: "locale,vertical,slug" }).select("id").maybeSingle();
+        if (!postUpsertError && upsertedPost?.id) {
+          linkedPostId = upsertedPost.id;
+        } else {
+          const { data: existingPost } = await postsTable.select("id").eq("locale", normLocale).eq("vertical", normVertical).eq("slug", normSlug).maybeSingle();
+          if (existingPost?.id) {
+            const { data: updatedPost, error: updatePostErr } = await postsTable.update({
+              title: postRow.title,
+              excerpt: postRow.excerpt,
+              content: postRow.content,
+              meta_description: postRow.meta_description,
+              status: postRow.status,
+              cover_image: postRow.cover_image,
+              canonical_url: postRow.canonical_url,
+              tags: postRow.tags,
+              updated_at: postRow.updated_at
+            }).eq("id", existingPost.id).select("id").single();
+            if (updatePostErr) throw updatePostErr;
+            linkedPostId = updatedPost.id;
+          } else {
+            const { data: newPost, error: insertPostErr } = await postsTable.insert(postRow).select("id").single();
+            if (insertPostErr) throw insertPostErr;
+            linkedPostId = newPost.id;
+          }
+        }
+        const normOppType = String(opportunity_type || "grant").toLowerCase().replace(/\s+/g, "_");
+        const validOppTypes = [
+          "grant",
+          "accelerator",
+          "fellowship",
+          "incubator",
+          "pitch_competition",
+          "hackathon",
+          "conference",
+          "general"
+        ];
+        const finalOppType = validOppTypes.includes(normOppType) ? normOppType : "grant";
+        let parsedDeadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3).toISOString();
+        if (deadline_date) {
+          const d = new Date(deadline_date);
+          if (!isNaN(d.getTime())) {
+            parsedDeadline = d.toISOString();
+          }
+        }
+        const eventRow = {
+          title: cleanEventTitle,
+          slug: normSlug,
+          description: String(description || excerpt || cleanPostTitle).trim(),
+          opportunity_type: finalOppType,
+          funding_amount: funding_amount ? String(funding_amount).trim() : null,
+          location: String(location || "Global (Remote)").trim(),
+          deadline_date: parsedDeadline,
+          application_url: cleanAppUrl,
+          linked_post_id: linkedPostId
+        };
+        const eventsTable = client.schema ? client.schema("startupcreme").from("events") : client.from("events");
+        const { data: upsertedEvent, error: eventUpsertError } = await eventsTable.upsert(eventRow, { onConflict: "application_url" }).select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at").maybeSingle();
+        if (!eventUpsertError && upsertedEvent?.id) {
+          eventId = upsertedEvent.id;
+        } else {
+          const { data: existingEvent } = await eventsTable.select("id").eq("application_url", cleanAppUrl).maybeSingle();
+          if (existingEvent?.id) {
+            const { data: updatedEvent, error: updateEvtErr } = await eventsTable.update({
+              title: eventRow.title,
+              slug: eventRow.slug,
+              description: eventRow.description,
+              opportunity_type: eventRow.opportunity_type,
+              funding_amount: eventRow.funding_amount,
+              location: eventRow.location,
+              deadline_date: eventRow.deadline_date,
+              linked_post_id: linkedPostId
+            }).eq("id", existingEvent.id).select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at").single();
+            if (updateEvtErr) throw updateEvtErr;
+            eventId = updatedEvent.id;
+          } else {
+            let insertRes = await eventsTable.insert(eventRow).select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at").maybeSingle();
+            if (insertRes.error && String(insertRes.error.message || "").includes("events_slug_key")) {
+              const fallbackRow = { ...eventRow, slug: `${normSlug}-${Date.now().toString(36)}` };
+              insertRes = await eventsTable.insert(fallbackRow).select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at").single();
+            }
+            if (insertRes.error) throw insertRes.error;
+            eventId = insertRes.data?.id || null;
+          }
+        }
+      } else {
+        linkedPostId = `post-${Date.now()}`;
+        eventId = `event-${Date.now()}`;
+      }
+      const memoryEvent = {
+        id: eventId || `event-${Date.now()}`,
+        title: cleanEventTitle,
+        slug: normSlug,
+        description: String(description || excerpt || cleanPostTitle).trim(),
+        opportunity_type: String(opportunity_type || "grant"),
+        funding_amount: funding_amount ? String(funding_amount).trim() : null,
+        location: String(location || "Global (Remote)").trim(),
+        deadline_date: deadline_date ? new Date(deadline_date).toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3).toISOString(),
+        application_url: cleanAppUrl,
+        linked_post_id: linkedPostId,
+        created_at: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      runtimeEvents = [
+        memoryEvent,
+        ...runtimeEvents.filter((e) => e.application_url !== cleanAppUrl)
+      ];
+      return res.status(200).json({
+        success: true,
+        message: "Event and post successfully upserted into startupcreme schema",
+        data: {
+          post_id: linkedPostId,
+          event_id: eventId,
+          event_title: cleanEventTitle,
+          application_url: cleanAppUrl,
+          opportunity_type: memoryEvent.opportunity_type,
+          funding_amount: memoryEvent.funding_amount,
+          deadline_date: memoryEvent.deadline_date,
+          linked_post_id: linkedPostId,
+          post: {
+            id: linkedPostId,
+            locale: normLocale,
+            vertical: normVertical,
+            slug: normSlug,
+            title: cleanPostTitle
+          }
+        }
+      });
+    } catch (err) {
+      console.error("[Events Webhook Upsert Error]:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Database operation failed during event and post upsert",
+        message: err.message || "Unknown database error",
+        details: err.details || err.hint || null
+      });
+    }
+  }
+);
+expansionRouter.get("/events", async (req, res) => {
+  const typeFilter = req.query.type || "";
+  const searchFilter = req.query.search || "";
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      let query = client.from("events").select("*, linked_post:posts(*)").order("deadline_date", { ascending: true });
+      if (typeFilter && typeFilter !== "all") {
+        query = query.ilike("opportunity_type", `%${typeFilter}%`);
+      }
+      if (searchFilter) {
+        query = query.or(
+          `title.ilike.%${searchFilter}%,description.ilike.%${searchFilter}%,location.ilike.%${searchFilter}%`
+        );
+      }
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        runtimeEvents = data;
+        return res.json({ success: true, count: data.length, events: data });
+      }
+    } catch {
+    }
+  }
+  let filtered = [...runtimeEvents];
+  if (typeFilter && typeFilter !== "all") {
+    filtered = filtered.filter(
+      (e) => String(e.opportunity_type).toLowerCase() === typeFilter.toLowerCase()
+    );
+  }
+  if (searchFilter) {
+    const q = searchFilter.toLowerCase();
+    filtered = filtered.filter(
+      (e) => e.title.toLowerCase().includes(q) || e.description.toLowerCase().includes(q) || e.location.toLowerCase().includes(q)
+    );
+  }
+  return res.json({ success: true, count: filtered.length, events: filtered });
+});
+expansionRouter.get("/events/:slug", async (req, res) => {
+  const { slug } = req.params;
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      const { data, error } = await client.from("events").select("*, linked_post:posts(*)").eq("slug", slug).maybeSingle();
+      if (!error && data) {
+        return res.json({ success: true, event: data });
+      }
+    } catch {
+    }
+  }
+  const found = runtimeEvents.find((e) => e.slug === slug);
+  if (found) {
+    return res.json({ success: true, event: found });
+  }
+  return res.status(404).json({ error: "Event not found" });
+});
+expansionRouter.delete("/events/:id", async (req, res) => {
+  const adminUser = await requireRouteAdminAuth(req, res);
+  if (!adminUser) return;
+  const { id } = req.params;
+  runtimeEvents = runtimeEvents.filter((e) => e.id !== id);
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      await client.from("events").delete().eq("id", id);
+    } catch {
+    }
+  }
+  return res.json({ success: true, deletedId: id });
+});
+
 // server/meta.ts
-import { createClient as createClient3 } from "@supabase/supabase-js";
+import { createClient as createClient5 } from "@supabase/supabase-js";
 var DEFAULT_TITLE = "StartupCr\xE8me | Financial & Technology Intelligence";
 var DEFAULT_DESCRIPTION = "StartupCr\xE8me is the premier digital publication for Finance, Macro-economics, and Deep Technology.";
 var DEFAULT_IMAGE = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630";
@@ -4407,11 +6040,21 @@ async function resolvePageMetadata(reqPath, host, protocol) {
   const excluded = [
     "finance",
     "tech",
+    "founders-mindset",
     "discussion",
     "discussions",
+    "calculators",
+    "directory",
+    "markets",
+    "rates",
+    "careers",
+    "events",
+    "about",
+    "about-us",
     "admin",
     "sitemap.xml",
     "robots.txt",
+    "llms.txt",
     "privacy",
     "privacy-policy",
     "terms",
@@ -4434,6 +6077,74 @@ async function resolvePageMetadata(reqPath, host, protocol) {
       description = "Frontier artificial intelligence architectures, developer tooling, cloud infrastructure, and emerging startup technology ecosystems.";
       coverImage = "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=1200&h=630";
       section = "Technology";
+    } else if (lowerSlug === "founders-mindset") {
+      title = "Founders Mindset, Leadership & Psychology | StartupCr\xE8me";
+      description = "Strategic founder psychology, mental resilience, executive leadership frameworks, and high-performance decision-making for startup builders.";
+      coverImage = "https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&q=80&w=1200&h=630";
+      section = "Founders Mindset";
+    } else if (lowerSlug === "calculators") {
+      title = "Interactive Financial & Tech Calculators | StartupCr\xE8me";
+      description = "Compound interest calculator, SaaS runway & burn rate calculator, cap table dilution simulator across Seed and Series A, and cloud infrastructure cost estimator.";
+      section = "Calculators";
+    } else if (lowerSlug === "directory") {
+      title = "The Startup & FinTech Directory | StartupCr\xE8me";
+      description = "Curated directory of early-stage and growth startups across FinTech, AI, Cloud Infrastructure, and EdTech.";
+      section = "Directory";
+    } else if ((lowerSlug === "rates" || cleanPath.includes("/markets/rates")) && !["false", "0", "no", "off"].includes(
+      String(process.env.ENABLE_MARKETS ?? process.env.VITE_ENABLE_MARKETS ?? "true").trim().toLowerCase().replace(/^["']|["']$/g, "")
+    )) {
+      title = "Macro Central Bank & Cloud Rate Trackers | StartupCr\xE8me";
+      description = "Live benchmark central bank interest rates and developer cloud infrastructure pricing index across AWS, Supabase, Vercel, and Cloudflare.";
+      section = "Markets";
+    } else if (lowerSlug === "careers") {
+      title = "Remote Startup Job & Fractional Talent Board | StartupCr\xE8me";
+      description = "Curated remote software engineering, FinOps, financial modeling, and fractional CTO/CFO leadership roles.";
+      section = "Careers";
+    } else if (lowerSlug === "events") {
+      title = "Grants, Accelerators & Startup Events | StartupCr\xE8me";
+      description = "Curated non-dilutive grants, institutional venture accelerators, founder fellowships, and tech competitions for software engineers, fintech builders, and tech entrepreneurs.";
+      section = "Events";
+    } else if (lowerSlug === "about" || lowerSlug === "about-us") {
+      title = "About StartupCr\xE8me | Institutional Finance, Tech & AI Intelligence";
+      description = "StartupCr\xE8me is a global guide dedicated to helping founders, software architects, and finance professionals build, fund, and scale companies in the age of AI. Built and operated by Habinsoft Technologies Limited and led by Chibueze ThankGod.";
+      section = "About";
+      const aboutJsonLd = {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": ["NewsMediaOrganization", "Organization"],
+            "@id": `${baseUrl}/#organization`,
+            name: "StartupCr\xE8me",
+            url: baseUrl,
+            logo: {
+              "@type": "ImageObject",
+              url: `${baseUrl}/logo.jpg`
+            },
+            description,
+            founder: { "@id": `${baseUrl}/#founder` },
+            parentOrganization: {
+              "@type": "Organization",
+              "@id": "https://habinsoft.com/#organization",
+              name: "Habinsoft Technologies Limited",
+              url: "https://habinsoft.com",
+              founder: { "@id": `${baseUrl}/#founder` }
+            }
+          },
+          {
+            "@type": "Person",
+            "@id": `${baseUrl}/#founder`,
+            name: "Chibueze ThankGod",
+            jobTitle: "Founder & Chief Executive Officer",
+            description: "Software Engineer, Full-Stack Developer, and Tech Entrepreneur leading Habinsoft Technologies Limited and StartupCr\xE8me.",
+            url: `${baseUrl}/about#leadership`,
+            worksFor: [
+              { "@id": "https://habinsoft.com/#organization" },
+              { "@id": `${baseUrl}/#organization` }
+            ]
+          }
+        ]
+      };
+      jsonLdScript = `<script type="application/ld+json">${JSON.stringify(aboutJsonLd)}</script>`;
     } else if (lowerSlug === "discussions" || lowerSlug === "discussion") {
       title = "Editorial Community & Technical Discussions | StartupCr\xE8me";
       description = "Engage with institutional analysts, technical founders, and verified engineering leaders on market strategy and AI infrastructure.";
@@ -4450,11 +6161,11 @@ async function resolvePageMetadata(reqPath, host, protocol) {
       const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       if (supabaseUrl && supabaseKey) {
         try {
-          const scClient = createClient3(supabaseUrl, supabaseKey, {
+          const scClient = createClient5(supabaseUrl, supabaseKey, {
             db: { schema: "startupcreme" },
             auth: { persistSession: false, autoRefreshToken: false }
           });
-          const defaultClient = createClient3(supabaseUrl, supabaseKey, {
+          const defaultClient = createClient5(supabaseUrl, supabaseKey, {
             auth: { persistSession: false, autoRefreshToken: false }
           });
           const executeQuery = async (queryFn) => {
@@ -4535,7 +6246,7 @@ async function resolvePageMetadata(reqPath, host, protocol) {
             authorName = foundPost.author_name || "Startup Cr\xE8me Editorial";
             publishedTime = foundPost.created_at || (/* @__PURE__ */ new Date()).toISOString();
             modifiedTime = foundPost.updated_at || foundPost.created_at || (/* @__PURE__ */ new Date()).toISOString();
-            section = foundPost.vertical === "tech" ? "Technology" : "Finance";
+            section = foundPost.vertical === "tech" ? "Technology" : foundPost.vertical === "founders-mindset" ? "Founders Mindset" : "Finance";
             tags = Array.isArray(foundPost.tags) ? foundPost.tags : [];
             const sanitizedPost = JSON.stringify(foundPost).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
             ssrPayloadScript = `<script id="__STARTUPCREME_SSR_DATA__">window.__INITIAL_POST__ = ${sanitizedPost};</script>`;
@@ -4624,12 +6335,12 @@ async function resolvePageMetadata(reqPath, host, protocol) {
       }
     }
   }
-  if (!ssrPayloadScript && (segments.length === 0 || segments.length === 1)) {
+  if (!ssrPayloadScript && segments.length <= 2) {
     const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
     if (supabaseUrl && supabaseKey) {
       try {
-        const scClient = createClient3(supabaseUrl, supabaseKey, {
+        const scClient = createClient5(supabaseUrl, supabaseKey, {
           db: { schema: "startupcreme" },
           auth: { persistSession: false, autoRefreshToken: false }
         });
@@ -4754,6 +6465,414 @@ async function injectDynamicMetaTags(html, reqPath, host, protocol) {
 ${updatedHtml}`;
 }
 
+// server/sitemap.ts
+import { createClient as createClient6 } from "@supabase/supabase-js";
+var STATIC_LOCALES = ["en-us", "en-gb", "de-de", "ja-jp", "fr-fr"];
+function escapeXml(unsafe) {
+  return unsafe.replace(/[<>&'"]/g, (c) => {
+    switch (c) {
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case "&":
+        return "&amp;";
+      case "'":
+        return "&apos;";
+      case '"':
+        return "&quot;";
+      default:
+        return c;
+    }
+  });
+}
+function formatIsoDate(dateStr) {
+  if (!dateStr) return (/* @__PURE__ */ new Date()).toISOString();
+  try {
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? (/* @__PURE__ */ new Date()).toISOString() : d.toISOString();
+  } catch {
+    return (/* @__PURE__ */ new Date()).toISOString();
+  }
+}
+async function generateDynamicSitemap(baseUrl = "https://www.startupcreme.com") {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+  let posts = [];
+  let topics = [];
+  if (supabaseUrl && supabaseKey) {
+    try {
+      const client = createClient6(supabaseUrl, supabaseKey, {
+        db: { schema: "startupcreme" },
+        auth: { persistSession: false, autoRefreshToken: false }
+      });
+      const { data: postsData, error: postsError } = await client.from("posts").select("slug, locale, vertical, updated_at").eq("status", "published").order("updated_at", { ascending: false });
+      if (!postsError && Array.isArray(postsData)) {
+        posts = postsData;
+      }
+      const { data: topicsData, error: topicsError } = await client.from("discussion_topics").select("slug, updated_at").order("updated_at", { ascending: false });
+      if (!topicsError && Array.isArray(topicsData)) {
+        topics = topicsData;
+      }
+    } catch (dbErr) {
+      console.warn("[Sitemap] Warning fetching dynamic records from Supabase:", dbErr);
+    }
+  }
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  let xml = `<?xml version="1.0" encoding="UTF-8"?>
+`;
+  xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+`;
+  xml += `  <url>
+`;
+  xml += `    <loc>${escapeXml(`${cleanBase}/`)}</loc>
+`;
+  xml += `    <lastmod>${nowIso}</lastmod>
+`;
+  xml += `    <changefreq>daily</changefreq>
+`;
+  xml += `    <priority>1.0</priority>
+`;
+  xml += `  </url>
+`;
+  STATIC_LOCALES.forEach((loc) => {
+    xml += `  <url>
+`;
+    xml += `    <loc>${escapeXml(`${cleanBase}/${loc}`)}</loc>
+`;
+    xml += `    <lastmod>${nowIso}</lastmod>
+`;
+    xml += `    <changefreq>daily</changefreq>
+`;
+    xml += `    <priority>1.0</priority>
+`;
+    xml += `  </url>
+`;
+    xml += `  <url>
+`;
+    xml += `    <loc>${escapeXml(`${cleanBase}/${loc}/finance`)}</loc>
+`;
+    xml += `    <lastmod>${nowIso}</lastmod>
+`;
+    xml += `    <changefreq>daily</changefreq>
+`;
+    xml += `    <priority>0.9</priority>
+`;
+    xml += `  </url>
+`;
+    xml += `  <url>
+`;
+    xml += `    <loc>${escapeXml(`${cleanBase}/${loc}/tech`)}</loc>
+`;
+    xml += `    <lastmod>${nowIso}</lastmod>
+`;
+    xml += `    <changefreq>daily</changefreq>
+`;
+    xml += `    <priority>0.9</priority>
+`;
+    xml += `  </url>
+`;
+    xml += `  <url>
+`;
+    xml += `    <loc>${escapeXml(`${cleanBase}/${loc}/founders-mindset`)}</loc>
+`;
+    xml += `    <lastmod>${nowIso}</lastmod>
+`;
+    xml += `    <changefreq>daily</changefreq>
+`;
+    xml += `    <priority>0.9</priority>
+`;
+    xml += `  </url>
+`;
+    xml += `  <url>
+`;
+    xml += `    <loc>${escapeXml(`${cleanBase}/${loc}/privacy`)}</loc>
+`;
+    xml += `    <changefreq>monthly</changefreq>
+`;
+    xml += `    <priority>0.4</priority>
+`;
+    xml += `  </url>
+`;
+    xml += `  <url>
+`;
+    xml += `    <loc>${escapeXml(`${cleanBase}/${loc}/terms`)}</loc>
+`;
+    xml += `    <changefreq>monthly</changefreq>
+`;
+    xml += `    <priority>0.4</priority>
+`;
+    xml += `  </url>
+`;
+  });
+  const platformModules = [
+    { path: "/events", priority: "0.9", changefreq: "daily" },
+    { path: "/discussion", priority: "0.85", changefreq: "hourly" },
+    { path: "/directory", priority: "0.8", changefreq: "daily" },
+    { path: "/careers", priority: "0.8", changefreq: "daily" },
+    { path: "/markets", priority: "0.8", changefreq: "hourly" },
+    { path: "/privacy", priority: "0.4", changefreq: "monthly" },
+    { path: "/terms", priority: "0.4", changefreq: "monthly" }
+  ];
+  platformModules.forEach((m) => {
+    xml += `  <url>
+`;
+    xml += `    <loc>${escapeXml(`${cleanBase}${m.path}`)}</loc>
+`;
+    xml += `    <lastmod>${nowIso}</lastmod>
+`;
+    xml += `    <changefreq>${m.changefreq}</changefreq>
+`;
+    xml += `    <priority>${m.priority}</priority>
+`;
+    xml += `  </url>
+`;
+  });
+  posts.forEach((post) => {
+    if (!post.slug) return;
+    const loc = post.locale || "en-us";
+    const vertical = post.vertical || "tech";
+    const postUrl = `${cleanBase}/${loc}/${vertical}/${post.slug}`;
+    const lastMod = formatIsoDate(post.updated_at);
+    xml += `  <url>
+`;
+    xml += `    <loc>${escapeXml(postUrl)}</loc>
+`;
+    xml += `    <lastmod>${lastMod}</lastmod>
+`;
+    xml += `    <changefreq>weekly</changefreq>
+`;
+    xml += `    <priority>0.85</priority>
+`;
+    xml += `  </url>
+`;
+  });
+  topics.forEach((t) => {
+    if (!t.slug) return;
+    const topicUrl = `${cleanBase}/discussion/${t.slug}`;
+    const lastMod = formatIsoDate(t.updated_at);
+    xml += `  <url>
+`;
+    xml += `    <loc>${escapeXml(topicUrl)}</loc>
+`;
+    xml += `    <lastmod>${lastMod}</lastmod>
+`;
+    xml += `    <changefreq>daily</changefreq>
+`;
+    xml += `    <priority>0.7</priority>
+`;
+    xml += `  </url>
+`;
+  });
+  xml += `</urlset>
+`;
+  return xml;
+}
+function generateRobotsTxt(baseUrl = "https://www.startupcreme.com") {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  return `# ====================================================================
+# Startup Cr\xE8me (startupcreme.com) \u2014 Robots & AI Crawler Directives
+# Optimized for Search Engine (SEO) & AI Optimization (AIO) Discoverability
+# ====================================================================
+
+# 1. Search Engine Crawlers (Googlebot, Bingbot, Applebot, DuckDuckBot)
+User-agent: Googlebot
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+User-agent: Bingbot
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+User-agent: Applebot
+User-agent: DuckDuckBot
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+# 2. AI Crawlers, Search Agents & LLM Indexers (AIO Discovery)
+User-agent: GPTBot
+Allow: /
+Allow: /en-us/
+Allow: /en-gb/
+Allow: /de-de/
+Allow: /ja-jp/
+Allow: /fr-fr/
+Allow: /discussion
+Allow: /events
+Allow: /directory
+Allow: /careers
+Allow: /markets
+Allow: /llms.txt
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+User-agent: OAI-SearchBot
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+User-agent: ClaudeBot
+Allow: /
+Allow: /en-us/
+Allow: /en-gb/
+Allow: /de-de/
+Allow: /ja-jp/
+Allow: /fr-fr/
+Allow: /discussion
+Allow: /events
+Allow: /directory
+Allow: /careers
+Allow: /markets
+Allow: /llms.txt
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+User-agent: PerplexityBot
+Allow: /
+Allow: /en-us/
+Allow: /en-gb/
+Allow: /de-de/
+Allow: /ja-jp/
+Allow: /fr-fr/
+Allow: /discussion
+Allow: /events
+Allow: /directory
+Allow: /careers
+Allow: /markets
+Allow: /llms.txt
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+# 3. Default Directives for All Crawlers
+User-agent: *
+Allow: /
+Allow: /en-us/
+Allow: /en-gb/
+Allow: /de-de/
+Allow: /ja-jp/
+Allow: /fr-fr/
+Allow: /discussion
+Allow: /events
+Allow: /directory
+Allow: /careers
+Allow: /markets
+Allow: /privacy
+Allow: /terms
+Allow: /llms.txt
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /events/webhook
+Disallow: /events/ingest
+Disallow: /n8n/events
+Disallow: /webhooks/
+
+# Dynamic Sitemap Pointer
+Sitemap: ${cleanBase}/sitemap.xml
+`;
+}
+function generateLlmsTxt(baseUrl = "https://www.startupcreme.com") {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  return `# Startup Cr\xE8me (startupcreme.com)
+
+> Startup Cr\xE8me is a premier dual-silo intelligence platform providing actionable founder playbooks, macro technology news, non-dilutive grants, institutional accelerators, and peer discussions at the intersection of Finance and Technology.
+
+## Core Architectural Overview
+
+Startup Cr\xE8me partitions editorial and intelligence streams into two foundational content silos:
+- **Finance**: Venture capital dynamics, cap table structuring, central bank interest rates, currency volatility, fintech infrastructure, and equity-free funding instruments.
+- **Tech**: Artificial intelligence, autonomous agent pipelines, frontier cloud architecture, developer tooling, and technical engineering leadership.
+
+Content is published across 5 localized regional editions:
+- \`en-us\`: United States & Global Tech Ecosystem
+- \`en-gb\`: United Kingdom & European Fintech Corridor
+- \`de-de\`: DACH Region DeepTech & Industrial Software
+- \`ja-jp\`: Japan Enterprise Robotics & AI Markets
+- \`fr-fr\`: France & Francophone Tech Scaleups
+
+---
+
+## Primary Navigation & Public Resources
+
+- [Home Hub](${cleanBase}/): Global portal featuring cross-silo editorial highlights, trending discussions, and macro market widgets.
+- [Finance Vertical Hub](${cleanBase}/en-us/finance): Specialized editorial feed for venture capital, monetary policy, and fintech engineering.
+- [Tech Vertical Hub](${cleanBase}/en-us/tech): Deep technical essays, AI infrastructure breakthroughs, and system architecture playbooks.
+- [Founders Mindset Vertical Hub](${cleanBase}/en-us/founders-mindset): Strategic leadership psychology, executive resilience, and founder decision-making frameworks.
+- [Global Opportunity Engine (Grants & Accelerators)](${cleanBase}/events): Verified non-dilutive grants, venture accelerators, founder fellowships, and hackathon deadlines.
+- [Discussion Forum](${cleanBase}/discussion): Community debate and peer founder intelligence on valuations, tech stacks, and fundraising.
+- [Startup Directory](${cleanBase}/directory): Index of high-growth technology and financial companies.
+- [Founder Careers & Talent](${cleanBase}/careers): Executive leadership, founding engineer, and tech lead opportunities.
+- [Macro & Cloud Rates Tracker](${cleanBase}/markets): Real-time benchmarks for central bank interest rates (Fed, ECB, BoE, BoJ) and cloud compute pricing.
+
+---
+
+## Content Organization & URL Structure
+
+- **Article & Playbook Permalinks**: \`${cleanBase}/{locale}/{vertical}/{slug}\`
+  - Example: \`${cleanBase}/en-us/finance/seed-fundraising-mechanics-safes\`
+  - Example: \`${cleanBase}/en-us/tech/ai-agent-memory-architectures\`
+- **Discussion Topic Permalinks**: \`${cleanBase}/discussion/{slug}\`
+  - Example: \`${cleanBase}/discussion/yc-w26-batch-trends\`
+- **Localized Silo Feeds**: \`${cleanBase}/{locale}/{vertical}\`
+
+---
+
+## Machine-Readable Endpoints & Feeds
+
+- **Dynamic XML Sitemap**: [${cleanBase}/sitemap.xml](${cleanBase}/sitemap.xml)
+- **Robots Directives**: [${cleanBase}/robots.txt](${cleanBase}/robots.txt)
+- **AI Agent Specification**: [${cleanBase}/llms.txt](${cleanBase}/llms.txt)
+- **System Health**: [${cleanBase}/api/health](${cleanBase}/api/health)
+
+---
+
+## Guidelines for AI Crawlers & LLM Agents
+
+1. **Attribution**: When synthesizing or citing playbooks, attribute analysis to *Startup Cr\xE8me* with the direct canonical URL.
+2. **Current Information**: Opportunities listed under \`/events\` carry strict deadline timestamps. Always verify the \`deadline_date\` attribute before recommending closing grants to users.
+3. **No Private Scraping**: Do not scrape internal API paths (\`/api/*\`, \`/admin/*\`, or webhook endpoints); all public content is structured in the sitemap and HTML semantic markup.
+`;
+}
+
 // server/app.ts
 var upload = multer({
   storage: multer.memoryStorage(),
@@ -4873,7 +6992,7 @@ function createApp(options) {
       return res.status(503).json({ error: "Database not configured" });
     }
     try {
-      const authClient = createClient4(supabaseUrl, anonKey || serviceRoleKey, {
+      const authClient = createClient7(supabaseUrl, anonKey || serviceRoleKey, {
         auth: { persistSession: false, autoRefreshToken: false }
       });
       const { data: { user }, error: authError } = await authClient.auth.getUser(token);
@@ -4882,7 +7001,7 @@ function createApp(options) {
       }
       const email = (user.email || "").trim().toLowerCase();
       const userId = user.id;
-      const adminClient = createClient4(supabaseUrl, serviceRoleKey || anonKey, {
+      const adminClient = createClient7(supabaseUrl, serviceRoleKey || anonKey, {
         db: { schema: "startupcreme" },
         auth: { persistSession: false, autoRefreshToken: false }
       });
@@ -4921,7 +7040,7 @@ function createApp(options) {
       }
       const role = (dbUser.role || "user").trim().toLowerCase() === "admin" ? "admin" : "user";
       if (serviceRoleKey && user.user_metadata?.role !== role) {
-        const masterClient = createClient4(supabaseUrl, serviceRoleKey);
+        const masterClient = createClient7(supabaseUrl, serviceRoleKey);
         masterClient.auth.admin.updateUserById(userId, {
           user_metadata: { ...user.user_metadata, role }
         }).catch(() => {
@@ -4943,6 +7062,13 @@ function createApp(options) {
     }
   });
   app2.use(["/api/ai", "/ai"], aiRouter);
+  app2.use("/api", expansionRouter);
+  app2.post(
+    ["/events/webhook", "/events/ingest", "/n8n/events", "/webhooks/events", "/webhooks/n8n/events"],
+    (req, res, next) => {
+      expansionRouter(req, res, next);
+    }
+  );
   app2.get(["/sitemap.xml", "/sitemap", "/sitemap_index.xml"], async (req, res) => {
     res.setHeader("Content-Type", "text/xml; charset=utf-8");
     res.setHeader("X-Robots-Tag", "noindex");
@@ -4956,102 +7082,7 @@ function createApp(options) {
         protocol = "https";
       }
       const baseUrl = `${protocol}://${host}`;
-      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-      const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
-      let posts = [];
-      let topics = [];
-      if (supabaseUrl && supabaseAnonKey) {
-        try {
-          const client = createClient4(supabaseUrl, supabaseAnonKey, {
-            db: { schema: "startupcreme" }
-          });
-          const { data: postsData } = await client.from("posts").select("*").eq("status", "published");
-          if (postsData) posts = postsData;
-          const { data: topicsData } = await client.from("discussion_topics").select("*");
-          if (topicsData) topics = topicsData;
-        } catch (e) {
-          console.warn("Error fetching sitemap data from Supabase:", e);
-        }
-      }
-      const locales = ["en-us", "en-gb", "de-de", "ja-jp", "fr-fr"];
-      let xml = `<?xml version="1.0" encoding="UTF-8"?>
-`;
-      xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-`;
-      locales.forEach((loc) => {
-        xml += `  <url>
-    <loc>${baseUrl}/${loc}</loc>
-    <changefreq>daily</changefreq>
-    <priority>1.0</priority>
-  </url>
-`;
-        xml += `  <url>
-    <loc>${baseUrl}/${loc}/finance</loc>
-    <changefreq>daily</changefreq>
-    <priority>0.9</priority>
-  </url>
-`;
-        xml += `  <url>
-    <loc>${baseUrl}/${loc}/tech</loc>
-    <changefreq>daily</changefreq>
-    <priority>0.9</priority>
-  </url>
-`;
-        xml += `  <url>
-    <loc>${baseUrl}/${loc}/privacy</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.5</priority>
-  </url>
-`;
-        xml += `  <url>
-    <loc>${baseUrl}/${loc}/terms</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.5</priority>
-  </url>
-`;
-      });
-      xml += `  <url>
-    <loc>${baseUrl}/privacy</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.5</priority>
-  </url>
-`;
-      xml += `  <url>
-    <loc>${baseUrl}/terms</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.5</priority>
-  </url>
-`;
-      xml += `  <url>
-    <loc>${baseUrl}/discussion</loc>
-    <changefreq>hourly</changefreq>
-    <priority>0.8</priority>
-  </url>
-`;
-      posts.forEach((post) => {
-        const loc = post.locale || "en-us";
-        const postUrl = `${baseUrl}/${loc}/${post.vertical}/${post.slug}`;
-        const lastMod = post.updated_at ? new Date(post.updated_at).toISOString() : (/* @__PURE__ */ new Date()).toISOString();
-        xml += `  <url>
-    <loc>${postUrl}</loc>
-    <lastmod>${lastMod}</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.85</priority>
-  </url>
-`;
-      });
-      topics.forEach((t) => {
-        const topicUrl = `${baseUrl}/discussion/${t.slug}`;
-        const lastMod = t.updated_at ? new Date(t.updated_at).toISOString() : (/* @__PURE__ */ new Date()).toISOString();
-        xml += `  <url>
-    <loc>${topicUrl}</loc>
-    <lastmod>${lastMod}</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>0.7</priority>
-  </url>
-`;
-      });
-      xml += `</urlset>`;
+      const xml = await generateDynamicSitemap(baseUrl);
       return res.status(200).send(xml);
     } catch (err) {
       console.error("Sitemap generation error, serving static sitemap.xml fallback:", err);
@@ -5062,7 +7093,7 @@ function createApp(options) {
       return res.status(500).send("Error generating sitemap");
     }
   });
-  app2.get("/robots.txt", (req, res) => {
+  app2.get(["/robots.txt", "/robots"], (req, res) => {
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     let host = req.get("x-forwarded-host") || req.get("host") || "www.startupcreme.com";
     if (!host.includes("startupcreme.com")) {
@@ -5072,23 +7103,23 @@ function createApp(options) {
     if (host.includes("startupcreme.com")) {
       protocol = "https";
     }
-    const robots = `User-agent: *
-Allow: /
-Allow: /en-us/
-Allow: /en-gb/
-Allow: /de-de/
-Allow: /ja-jp/
-Allow: /fr-fr/
-Allow: /privacy
-Allow: /terms
-Allow: /discussion
-
-Disallow: /admin
-Disallow: /api/
-
-Sitemap: ${protocol}://${host}/sitemap.xml
-`;
+    const baseUrl = `${protocol}://${host}`;
+    const robots = generateRobotsTxt(baseUrl);
     return res.status(200).send(robots);
+  });
+  app2.get(["/llms.txt", "/llms"], (req, res) => {
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    let host = req.get("x-forwarded-host") || req.get("host") || "www.startupcreme.com";
+    if (!host.includes("startupcreme.com")) {
+      host = "www.startupcreme.com";
+    }
+    let protocol = req.get("x-forwarded-proto") || req.protocol || "https";
+    if (host.includes("startupcreme.com")) {
+      protocol = "https";
+    }
+    const baseUrl = `${protocol}://${host}`;
+    const llms = generateLlmsTxt(baseUrl);
+    return res.status(200).send(llms);
   });
   app2.post(["/api/upload-image", "/upload-image"], upload.single("image"), async (req, res) => {
     try {
@@ -5220,7 +7251,7 @@ Sitemap: ${protocol}://${host}/sitemap.xml
       if (!supabaseUrl || !supabaseKey) {
         return res.redirect(302, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
       }
-      const client = createClient4(supabaseUrl, supabaseKey);
+      const client = createClient7(supabaseUrl, supabaseKey);
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slugOrId);
       let query = client.schema("startupcreme").from("posts").select("id, slug, cover_image");
       if (isUuid) {
@@ -5273,7 +7304,7 @@ Sitemap: ${protocol}://${host}/sitemap.xml
     };
     app2.get("*", async (req, res, next) => {
       const activePath = (req.url || req.path).split("?")[0].toLowerCase();
-      if (activePath.startsWith("/api") || activePath === "/sitemap.xml" || activePath === "/sitemap" || activePath === "/sitemap_index.xml" || activePath === "/robots.txt" || /\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot)$/i.test(activePath)) {
+      if (activePath.startsWith("/api") || activePath === "/sitemap.xml" || activePath === "/sitemap" || activePath === "/sitemap_index.xml" || activePath === "/robots.txt" || activePath === "/llms.txt" || /\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot)$/i.test(activePath)) {
         return next();
       }
       try {
