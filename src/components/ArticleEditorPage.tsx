@@ -54,6 +54,7 @@ import {
 import { Post, ContentVertical, PublicationStatus, UserProfile } from '../types';
 import { normalizeImageUrl } from '../lib/router';
 import { compressImage, formatBytes } from '../lib/imageCompression';
+import { supabase } from '../lib/supabase';
 
 interface ArticleEditorPageProps {
   post: Partial<Post> | null;
@@ -83,6 +84,10 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
   const [authorName, setAuthorName] = useState(post?.author_name || currentUser?.full_name || 'Startup Crème Editorial');
   const [authorRole, setAuthorRole] = useState(post?.author_role || 'Senior Analyst');
   const [metaDescription, setMetaDescription] = useState(post?.meta_description || '');
+  const [sourceUrl, setSourceUrl] = useState(post?.source_url || '');
+  const [sourceName, setSourceName] = useState(post?.source_name || '');
+  const [aiGenerated, setAiGenerated] = useState(Boolean(post?.ai_generated));
+  const [hideAiDisclosure, setHideAiDisclosure] = useState(Boolean(post?.hide_ai_disclosure));
 
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -199,9 +204,14 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
     let finalCoverImage = normalizeImageUrl(coverImage.trim());
     if (finalCoverImage.startsWith('data:image/')) {
       try {
+        const { data: sessData } = await supabase.auth.getSession();
+        const authToken = sessData?.session?.access_token;
         const uploadRes = await fetch('/api/upload-image', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+          },
           body: JSON.stringify({
             dataUrl: finalCoverImage,
             filename: slug.trim() || 'cover-image',
@@ -239,6 +249,10 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
       author_role: authorRole,
       author_avatar: currentUser?.avatar_url || post?.author_avatar,
       meta_description: metaDescription.trim() || excerpt.trim(),
+      source_url: sourceUrl.trim() || null,
+      source_name: sourceName.trim() || null,
+      ai_generated: aiGenerated,
+      hide_ai_disclosure: hideAiDisclosure,
       reading_time_minutes: readingTime,
       word_count: wordCount,
     };
@@ -290,11 +304,17 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
     }
 
     try {
+      const { data: sessData } = await supabase.auth.getSession();
+      const authToken = sessData?.session?.access_token;
+
       const formData = new FormData();
       formData.append('image', fileToUpload);
 
       const response = await fetch('/api/upload-image', {
         method: 'POST',
+        headers: {
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+        },
         body: formData,
       });
 
@@ -462,6 +482,29 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
               }`}>
                 {status}
               </span>
+              {aiGenerated && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-900 border border-violet-300">
+                  <Sparkles className="w-2.5 h-2.5 text-violet-600" />
+                  <span>AI-assisted</span>
+                </span>
+              )}
+              {(sourceName || sourceUrl) && (
+                <span className="hidden md:inline-flex items-center gap-1 text-[11px] text-slate-500 font-mono">
+                  <span className="text-slate-400">Src:</span>
+                  {sourceUrl ? (
+                    <a
+                      href={sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-cyan-700 hover:underline max-w-[120px] truncate"
+                    >
+                      {sourceName || sourceUrl}
+                    </a>
+                  ) : (
+                    <span>{sourceName}</span>
+                  )}
+                </span>
+              )}
             </div>
           </div>
 
@@ -1162,9 +1205,14 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
                         setUploadingCover(true);
                         setUploadCoverError(null);
                         try {
+                          const { data: sessData } = await supabase.auth.getSession();
+                          const authToken = sessData?.session?.access_token;
                           const res = await fetch('/api/upload-image', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: {
+                              'Content-Type': 'application/json',
+                              ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+                            },
                             body: JSON.stringify({
                               dataUrl: coverImage,
                               filename: slug.trim() || 'article-cover',
@@ -1235,6 +1283,73 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs text-slate-800 focus:bg-white outline-none"
                 />
               </div>
+            </div>
+          </div>
+
+          {/* Provenance & AI Generation Settings */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+            <h3 className="font-serif text-lg font-bold text-slate-900 border-b border-slate-100 pb-3 flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-violet-600" />
+                <span>Source Provenance & AI</span>
+              </span>
+              {aiGenerated && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-900 border border-violet-300">
+                  <Sparkles className="w-2.5 h-2.5 text-violet-600" />
+                  <span>AI-assisted</span>
+                </span>
+              )}
+            </h3>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Source Name</label>
+              <input
+                type="text"
+                value={sourceName}
+                onChange={(e) => setSourceName(e.target.value)}
+                placeholder="e.g., TechCrunch, Bloomberg, Horizon Europe"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 focus:bg-white outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Source URL (HTTPS)</label>
+              <input
+                type="url"
+                value={sourceUrl}
+                onChange={(e) => setSourceUrl(e.target.value)}
+                placeholder="https://example.com/original-article"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 font-mono focus:bg-white outline-none"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">Optional source attribution link. Canonical URL will not be overwritten.</p>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 space-y-3">
+              <label className="flex items-center gap-2.5 text-xs font-bold text-violet-900 cursor-pointer p-2.5 rounded-xl bg-violet-50/70 hover:bg-violet-50 border border-violet-200/80 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={aiGenerated}
+                  onChange={(e) => setAiGenerated(e.target.checked)}
+                  className="rounded bg-white border-violet-300 text-violet-600 focus:ring-0 w-4 h-4"
+                />
+                <Sparkles className="w-4 h-4 text-violet-600 shrink-0" />
+                <span>AI-assisted draft / synthesized content</span>
+              </label>
+
+              {aiGenerated && (
+                <label className="flex items-start gap-2.5 text-xs text-slate-700 cursor-pointer p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={hideAiDisclosure}
+                    onChange={(e) => setHideAiDisclosure(e.target.checked)}
+                    className="rounded bg-white border-slate-300 text-slate-600 focus:ring-0 w-4 h-4 mt-0.5"
+                  />
+                  <div>
+                    <span className="font-semibold text-slate-800 block">Hide public AI disclosure line</span>
+                    <span className="text-[10px] text-slate-500">Admin toggle to suppress the "AI-assisted, editor reviewed" line on the published article.</span>
+                  </div>
+                </label>
+              )}
             </div>
           </div>
         </div>

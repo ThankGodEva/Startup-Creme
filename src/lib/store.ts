@@ -737,13 +737,19 @@ class StartupCremeStore {
       }
       this.postComments = groupedPostComments;
 
-      // Fetch Events strictly from startupcreme schema
+      // Fetch Events strictly from startupcreme schema (only published for public)
       try {
-        const { data: eventsData } = await supabaseExecute((client) =>
-          client.from('events').select('*, linked_post:posts(*)').order('deadline_date', { ascending: true })
-        );
+        const isAdmin = this.currentUser?.role === 'admin';
+        const { data: eventsData } = await supabaseExecute((client) => {
+          let q = client.from('events');
+          if (isAdmin) {
+            return q.select('*, linked_post:posts(*)').order('deadline_date', { ascending: true });
+          } else {
+            return q.select('*, linked_post:posts!inner(*)').eq('linked_post.status', 'published').order('deadline_date', { ascending: true });
+          }
+        });
         if (eventsData && Array.isArray(eventsData)) {
-          this.events = eventsData;
+          this.events = isAdmin ? eventsData : eventsData.filter(e => e.linked_post?.status === 'published');
         }
       } catch {
         // ignore if events table not created yet
@@ -907,6 +913,7 @@ class StartupCremeStore {
   public getPostBySlug(slug: string, locale = 'en-us', vertical?: ContentVertical): Post | undefined {
     if (!slug) return undefined;
     const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
+    const isAdmin = this.currentUser?.role === 'admin';
 
     // 1. Exact or case-insensitive match with vertical constraint (respecting dual_silo for finance/tech, excluding founders-mindset)
     let found = this.posts.find(p => {
@@ -936,8 +943,14 @@ class StartupCremeStore {
   }
 
   public async fetchPostBySlug(slug: string, locale = 'en-us', vertical?: ContentVertical): Promise<Post | null> {
+    const isAdmin = this.currentUser?.role === 'admin';
     const existing = this.getPostBySlug(slug, locale, vertical);
-    if (existing) return existing;
+    if (existing) {
+      if (!isAdmin && existing.status !== 'published') {
+        return null;
+      }
+      return existing;
+    }
 
     if (!isSupabaseConfigured()) return null;
 
@@ -945,11 +958,18 @@ class StartupCremeStore {
 
     try {
       // 1. Direct targeted query by slug
-      const { data: postsData } = await supabaseExecute((client) =>
-        client.from('posts').select('*').or(`slug.ilike.${decodedSlug},id.ilike.${decodedSlug}`).maybeSingle()
-      );
+      const { data: postsData } = await supabaseExecute((client) => {
+        let q = client.from('posts').select('*').or(`slug.ilike.${decodedSlug},id.ilike.${decodedSlug}`);
+        if (!isAdmin) {
+          q = q.eq('status', 'published');
+        }
+        return q.maybeSingle();
+      });
 
       if (postsData) {
+        if (!isAdmin && postsData.status !== 'published') {
+          return null;
+        }
         const post: Post = {
           ...postsData,
           cover_image: normalizeImageUrl(postsData.cover_image)
@@ -966,11 +986,18 @@ class StartupCremeStore {
       // 2. Partial/fuzzy query fallback
       if (decodedSlug.length > 8) {
         const shortSlug = decodedSlug.slice(-20);
-        const { data: fuzzyData } = await supabaseExecute((client) =>
-          client.from('posts').select('*').ilike('slug', `%${shortSlug}%`).limit(1)
-        );
+        const { data: fuzzyData } = await supabaseExecute((client) => {
+          let q = client.from('posts').select('*').ilike('slug', `%${shortSlug}%`);
+          if (!isAdmin) {
+            q = q.eq('status', 'published');
+          }
+          return q.limit(1);
+        });
 
         if (fuzzyData && fuzzyData.length > 0) {
+          if (!isAdmin && fuzzyData[0].status !== 'published') {
+            return null;
+          }
           const post: Post = {
             ...fuzzyData[0],
             cover_image: normalizeImageUrl(fuzzyData[0].cover_image)
@@ -1156,6 +1183,14 @@ class StartupCremeStore {
 
   // Admin CRUD for Posts
   public async savePost(post: Partial<Post>): Promise<{ success: boolean; post: Post; error?: string }> {
+    if (!this.currentUser || this.currentUser.role !== 'admin') {
+      return {
+        success: false,
+        post: post as Post,
+        error: 'Unauthorized: Admin privileges required to save articles.'
+      };
+    }
+
     const isUUID = (val?: string): boolean =>
       Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
 
@@ -1201,6 +1236,10 @@ class StartupCremeStore {
         tags: post.tags || ['Finance', 'Tech'],
         reading_time_minutes: post.reading_time_minutes || 5,
         word_count: post.word_count || 800,
+        source_url: post.source_url || null,
+        source_name: post.source_name || null,
+        ai_generated: Boolean(post.ai_generated),
+        hide_ai_disclosure: Boolean(post.hide_ai_disclosure),
         created_at: post.created_at || now,
         updated_at: now,
       };
@@ -1228,6 +1267,10 @@ class StartupCremeStore {
       meta_description: savedPost.meta_description,
       canonical_url: savedPost.canonical_url,
       cover_image: savedPost.cover_image,
+      source_url: savedPost.source_url || null,
+      source_name: savedPost.source_name || null,
+      ai_generated: Boolean(savedPost.ai_generated),
+      hide_ai_disclosure: Boolean(savedPost.hide_ai_disclosure),
       author_name: savedPost.author_name,
       author_role: savedPost.author_role,
       author_avatar: savedPost.author_avatar,
@@ -1269,9 +1312,23 @@ class StartupCremeStore {
 
       // If existing database record found, execute UPDATE
       if (targetDbId) {
-        const res = await supabaseExecute((client) =>
+        let res = await supabaseExecute((client) =>
           client.from('posts').update(basePayload).eq('id', targetDbId).select()
         );
+
+        if (res.error && (res.error.code === 'PGRST204' || String(res.error.message || '').includes('column'))) {
+          const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPayload } = basePayload;
+          res = await supabaseExecute((client) =>
+            client.from('posts').update(legacyPayload).eq('id', targetDbId).select()
+          );
+        }
+
+        if (res.error && res.error.code === '22P02' && String(res.error.message || '').includes('vertical')) {
+          const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPayload } = basePayload;
+          res = await supabaseExecute((client) =>
+            client.from('posts').update({ ...legacyPayload, vertical: 'tech' }).eq('id', targetDbId).select()
+          );
+        }
 
         if (res.error) {
           const errorMsg = res.error?.message || String(res.error);
@@ -1306,6 +1363,20 @@ class StartupCremeStore {
         client.from('posts').insert(insertPayload).select()
       );
 
+      if (res.error && (res.error.code === 'PGRST204' || String(res.error.message || '').includes('column'))) {
+        const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyInsert } = insertPayload;
+        res = await supabaseExecute((client) =>
+          client.from('posts').insert(legacyInsert).select()
+        );
+      }
+
+      if (res.error && res.error.code === '22P02' && String(res.error.message || '').includes('vertical')) {
+        const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyInsert } = insertPayload;
+        res = await supabaseExecute((client) =>
+          client.from('posts').insert({ ...legacyInsert, vertical: 'tech' }).select()
+        );
+      }
+
       if (res.error) {
         const errorMsg = res.error?.message || String(res.error);
         console.error('Failed to insert post into Supabase database:', errorMsg);
@@ -1336,7 +1407,11 @@ class StartupCremeStore {
     }
   }
 
-  public async deletePost(id: string) {
+  public async deletePost(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.currentUser || this.currentUser.role !== 'admin') {
+      return { success: false, error: 'Unauthorized: Admin privileges required to delete articles.' };
+    }
+
     const postToDelete = this.posts.find(p => p.id === id);
     this.posts = this.posts.filter(p => p.id !== id);
     this.persistCache();
@@ -1354,9 +1429,14 @@ class StartupCremeStore {
         );
       }
     }
+    return { success: true };
   }
 
-  public async togglePostStatus(id: string) {
+  public async togglePostStatus(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.currentUser || this.currentUser.role !== 'admin') {
+      return { success: false, error: 'Unauthorized: Admin privileges required to change article publication status.' };
+    }
+
     const post = this.posts.find(p => p.id === id);
     if (post) {
       post.status = post.status === 'published' ? 'draft' : 'published';
@@ -1377,6 +1457,7 @@ class StartupCremeStore {
         }
       }
     }
+    return { success: true };
   }
 
   // Discussion Forum Methods
@@ -2432,10 +2513,16 @@ class StartupCremeStore {
   // MODULE 5: Grants, Accelerators & Events Opportunity Board (startupcreme.events)
   // --------------------------------------------------------------------
   public getEvents(): EventOpportunity[] {
-    return this.events;
+    const isAdmin = this.currentUser?.role === 'admin';
+    if (isAdmin) return this.events;
+    return this.events.filter((e) => {
+      const post = e.linked_post || this.posts.find((p) => p.id === e.linked_post_id);
+      return post?.status === 'published';
+    });
   }
 
   public async fetchEvents(type?: string, search?: string): Promise<EventOpportunity[]> {
+    const isAdmin = this.currentUser?.role === 'admin';
     try {
       const params = new URLSearchParams();
       if (type && type !== 'all') params.set('type', type);
@@ -2447,7 +2534,7 @@ class StartupCremeStore {
         if (Array.isArray(body.events)) {
           this.events = body.events;
           this.notify();
-          return this.events;
+          return this.getEvents();
         }
       }
     } catch {
@@ -2456,19 +2543,36 @@ class StartupCremeStore {
 
     if (isSupabaseConfigured()) {
       const { data, error } = await supabaseExecute<EventOpportunity[]>((client) => {
-        let q = client.from('events').select('*, linked_post:posts(*)').order('deadline_date', { ascending: true });
-        if (type && type !== 'all') {
-          q = q.ilike('opportunity_type', `%${type}%`);
+        let q: any = client.from('events');
+        if (isAdmin) {
+          q = q.select('*, linked_post:posts(*)');
+        } else {
+          q = q.select('*, linked_post:posts!inner(*)').eq('linked_post.status', 'published');
         }
-        return q;
+        if (type && type !== 'all') {
+          const rawTypes = type.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean);
+          const mapped: string[] = [];
+          for (const t of rawTypes) {
+            if (t === 'accelerator') mapped.push('accelerator', 'incubator');
+            else if (t === 'pitch_competition') mapped.push('pitch_competition', 'hackathon');
+            else mapped.push(t);
+          }
+          if (mapped.length > 0) {
+            q = q.in('opportunity_type', mapped);
+          }
+        }
+        return q.order('deadline_date', { ascending: true });
       });
       if (!error && Array.isArray(data)) {
-        this.events = data;
+        this.events = isAdmin ? data : data.filter((e) => {
+          const post = e.linked_post || this.posts.find((p) => p.id === e.linked_post_id);
+          return post?.status === 'published';
+        });
         this.notify();
       }
     }
 
-    return this.events;
+    return this.getEvents();
   }
 
   public async deleteEvent(id: string): Promise<{ success: boolean; error?: string }> {
@@ -2496,12 +2600,10 @@ class StartupCremeStore {
     }
 
     if (isSupabaseConfigured()) {
-      await supabaseExecute(async (client) => {
-        await client.from('events').delete().eq('id', id);
-        if (linkedPostId) {
-          await client.from('posts').delete().eq('id', linkedPostId);
-        }
-      });
+      await supabaseExecute((client) => client.from('events').delete().eq('id', id)).catch(() => {});
+      if (linkedPostId) {
+        await supabaseExecute((client) => client.from('posts').delete().eq('id', linkedPostId)).catch(() => {});
+      }
     }
 
     return { success: true };
@@ -2592,7 +2694,7 @@ class StartupCremeStore {
 
     try {
       const headers = await this.getRequestAuthHeaders();
-      const resp = await fetch('/api/events', {
+      const resp = await fetch('/api/events/webhook', {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),

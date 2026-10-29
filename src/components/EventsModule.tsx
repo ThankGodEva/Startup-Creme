@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { EventOpportunity, UserProfile, Post } from '../types';
 import { store } from '../lib/store';
+import { getPostUrl } from '../lib/router';
 import { useHashAnchorScroll, Route } from '../hooks/useHashAnchorScroll';
 import { PublishEventModal } from './PublishEventModal';
 
@@ -66,14 +67,69 @@ interface EventsModuleProps {
   onOpenAuth?: () => void;
 }
 
-const OPPORTUNITY_TYPES = [
-  { id: 'all', label: 'All Opportunities' },
-  { id: 'grant', label: 'Non-Dilutive Grants' },
-  { id: 'accelerator', label: 'Accelerators & Incubators' },
-  { id: 'fellowship', label: 'Fellowships' },
-  { id: 'pitch_competition', label: 'Pitch Competitions & Hackathons' },
-  { id: 'conference', label: 'Conferences' },
+export interface OpportunityChip {
+  id: string;
+  label: string;
+  types: string[];
+}
+
+/**
+ * Exact mapping of filter chips to opportunity_type enum values:
+ * - Non-Dilutive Grants: grant
+ * - Accelerators & Incubators: accelerator, incubator
+ * - Fellowships: fellowship
+ * - Pitch Competitions & Hackathons: pitch_competition, hackathon
+ * - Conferences: conference
+ * - All Opportunities: shows all published, non-expired events
+ */
+const OPPORTUNITY_CHIPS: OpportunityChip[] = [
+  { id: 'all', label: 'All Opportunities', types: [] },
+  { id: 'grant', label: 'Non-Dilutive Grants', types: ['grant'] },
+  { id: 'accelerator', label: 'Accelerators & Incubators', types: ['accelerator', 'incubator'] },
+  { id: 'fellowship', label: 'Fellowships', types: ['fellowship'] },
+  { id: 'pitch_competition', label: 'Pitch Competitions & Hackathons', types: ['pitch_competition', 'hackathon'] },
+  { id: 'conference', label: 'Conferences', types: ['conference'] },
 ];
+
+export type TimelineFilter = 'all' | '7' | '30' | '90' | 'past';
+
+const formatOpportunityType = (type?: string | null): string => {
+  if (!type) return 'Opportunity';
+  const clean = String(type).toLowerCase().trim();
+  switch (clean) {
+    case 'grant':
+      return 'Grant';
+    case 'accelerator':
+      return 'Accelerator';
+    case 'incubator':
+      return 'Incubator';
+    case 'fellowship':
+      return 'Fellowship';
+    case 'pitch_competition':
+      return 'Pitch Competition';
+    case 'hackathon':
+      return 'Hackathon';
+    case 'conference':
+      return 'Conference';
+    default:
+      return clean.replace(/_/g, ' ');
+  }
+};
+
+const formatDeadline = (dateStr?: string | null): string => {
+  if (!dateStr) return 'Open / Rolling';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return 'Open / Rolling';
+    return d.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return 'Open / Rolling';
+  }
+};
 
 export const EventsModule: React.FC<EventsModuleProps> = ({
   currentUser,
@@ -85,7 +141,7 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState('all');
-  const [deadlineFilter, setDeadlineFilter] = useState<'all' | 'closing-soon' | 'active'>('all');
+  const [deadlineFilter, setDeadlineFilter] = useState<TimelineFilter>('all');
   const [selectedEvent, setSelectedEvent] = useState<EventOpportunity | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showPublishModal, setShowPublishModal] = useState(false);
@@ -94,16 +150,46 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
     const clean = rawHash.replace(/^#/, '').toLowerCase();
     if (clean === 'grants') {
       setSelectedType('grant');
-    } else if (clean === 'accelerators') {
+    } else if (clean === 'accelerators' || clean === 'incubators') {
       setSelectedType('accelerator');
-    } else if (clean === 'closing-soon') {
-      setDeadlineFilter('closing-soon');
+    } else if (clean === 'fellowships') {
+      setSelectedType('fellowship');
+    } else if (clean === 'pitch-competitions' || clean === 'hackathons') {
+      setSelectedType('pitch_competition');
+    } else if (clean === 'conferences') {
+      setSelectedType('conference');
+    } else if (clean === 'closing-soon' || clean === 'closing-7' || clean === '7-days') {
+      setDeadlineFilter('7');
+    } else if (clean === 'closing-30' || clean === '30-days') {
+      setDeadlineFilter('30');
+    } else if (clean === 'closing-90' || clean === '90-days') {
+      setDeadlineFilter('90');
+    } else if (clean === 'past' || clean === 'expired') {
+      setDeadlineFilter('past');
+    } else if (clean === 'opportunities' || clean === 'all') {
+      setSelectedType('all');
+      setDeadlineFilter('all');
     }
   }, []);
 
   const { navigateToHash } = useHashAnchorScroll(handleHashChange, {
     defaultHash: 'opportunities',
-    validHashes: ['opportunities', 'grants', 'accelerators', 'closing-soon'],
+    validHashes: [
+      'opportunities',
+      'all',
+      'grants',
+      'accelerators',
+      'incubators',
+      'fellowships',
+      'pitch-competitions',
+      'hackathons',
+      'conferences',
+      'closing-soon',
+      'closing-7',
+      'closing-30',
+      'closing-90',
+      'past',
+    ],
     metaFn: meta,
   });
 
@@ -137,47 +223,98 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
     };
   }, []);
 
-  // Filter events based on criteria
+  const getDaysRemaining = useCallback((deadlineStr?: string | null): number | null => {
+    if (!deadlineStr) return null;
+    try {
+      const target = new Date(deadlineStr).getTime();
+      if (isNaN(target)) return null;
+      const now = Date.now();
+      return Math.ceil((target - now) / (1000 * 60 * 60 * 24));
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Filter events based on criteria & sort by soonest deadline
   const filteredEvents = useMemo(() => {
-    const now = Date.now();
-    return events.filter((evt) => {
-      // Type match
-      const normType = String(evt.opportunity_type || '').toLowerCase();
-      let matchesType = true;
+    const allPosts = store.getPosts();
+
+    const list = events.filter((evt) => {
+      // 1. Public security boundary: Anonymous and ordinary users can only see events whose linked post is published
+      const linkedPost = evt.linked_post || allPosts.find((p) => p.id === evt.linked_post_id);
+      if (!isAdmin) {
+        if (!linkedPost || linkedPost.status !== 'published') {
+          return false;
+        }
+      }
+
+      // 2. Exact opportunity_type matching from filter chips
       if (selectedType !== 'all') {
-        if (selectedType === 'accelerator') {
-          matchesType = normType.includes('accelerator') || normType.includes('incubator');
-        } else if (selectedType === 'pitch_competition') {
-          matchesType = normType.includes('pitch') || normType.includes('hackathon') || normType.includes('competition');
-        } else {
-          matchesType = normType.includes(selectedType.toLowerCase());
+        const chip = OPPORTUNITY_CHIPS.find((c) => c.id === selectedType);
+        if (chip && chip.types.length > 0) {
+          const normType = String(evt.opportunity_type || '').toLowerCase().trim();
+          const matches = chip.types.some((t) => t.toLowerCase() === normType);
+          if (!matches) return false;
         }
       }
 
-      // Search match
-      const q = searchQuery.toLowerCase().trim();
-      const matchesSearch =
-        !q ||
-        evt.title.toLowerCase().includes(q) ||
-        evt.description.toLowerCase().includes(q) ||
-        evt.location.toLowerCase().includes(q) ||
-        (evt.funding_amount && evt.funding_amount.toLowerCase().includes(q));
-
-      // Deadline match
-      let matchesDeadline = true;
-      if (evt.deadline_date) {
-        const d = new Date(evt.deadline_date).getTime();
-        const diffDays = Math.ceil((d - now) / (1000 * 60 * 60 * 24));
-        if (deadlineFilter === 'closing-soon') {
-          matchesDeadline = diffDays >= 0 && diffDays <= 14;
-        } else if (deadlineFilter === 'active') {
-          matchesDeadline = diffDays >= 0;
+      // 3. Search query matching
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const titleMatch = evt.title.toLowerCase().includes(q);
+        const descMatch = evt.description.toLowerCase().includes(q);
+        const locMatch = evt.location.toLowerCase().includes(q);
+        const fundMatch = evt.funding_amount ? evt.funding_amount.toLowerCase().includes(q) : false;
+        const postMatch = linkedPost ? linkedPost.title.toLowerCase().includes(q) : false;
+        if (!titleMatch && !descMatch && !locMatch && !fundMatch && !postMatch) {
+          return false;
         }
       }
 
-      return matchesType && matchesSearch && matchesDeadline;
+      // 4. Timelines dropdown filter & hide expired events by default
+      const diffDays = getDaysRemaining(evt.deadline_date);
+
+      if (deadlineFilter === 'all') {
+        // "All Opportunities" shows all published, non-expired events.
+        // Hide events whose deadline_date is in the past by default.
+        if (diffDays !== null && diffDays < 0) {
+          return false;
+        }
+      } else if (deadlineFilter === '7') {
+        // Closing in 7 days (non-expired)
+        if (diffDays === null || diffDays < 0 || diffDays > 7) {
+          return false;
+        }
+      } else if (deadlineFilter === '30') {
+        // Closing in 30 days (non-expired)
+        if (diffDays === null || diffDays < 0 || diffDays > 30) {
+          return false;
+        }
+      } else if (deadlineFilter === '90') {
+        // Closing in 90 days (non-expired)
+        if (diffDays === null || diffDays < 0 || diffDays > 90) {
+          return false;
+        }
+      } else if (deadlineFilter === 'past') {
+        // Explicitly view past / closed opportunities
+        if (diffDays === null || diffDays >= 0) {
+          return false;
+        }
+      }
+
+      return true;
     });
-  }, [events, selectedType, searchQuery, deadlineFilter]);
+
+    // 5. Sort by soonest deadline: closest future deadline appears first
+    return list.sort((a, b) => {
+      const timeA = a.deadline_date ? new Date(a.deadline_date).getTime() : Infinity;
+      const timeB = b.deadline_date ? new Date(b.deadline_date).getTime() : Infinity;
+      if (timeA !== timeB) {
+        return timeA - timeB;
+      }
+      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    });
+  }, [events, selectedType, searchQuery, deadlineFilter, isAdmin, getDaysRemaining]);
 
   const handleDeleteEvent = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -196,16 +333,7 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
     }
   };
 
-  const getDaysRemaining = (deadlineStr: string) => {
-    try {
-      const target = new Date(deadlineStr).getTime();
-      const now = Date.now();
-      const diff = Math.ceil((target - now) / (1000 * 60 * 60 * 24));
-      return diff;
-    } catch {
-      return null;
-    }
-  };
+  const allPosts = useMemo(() => store.getPosts(), [events]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-8">
@@ -252,7 +380,7 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
 
       {/* Filter and Search Bar */}
       <div className="space-y-4">
-        {/* Search & Deadline Controls */}
+        {/* Search & Timeline Controls */}
         <div className="flex flex-col sm:flex-row items-center gap-3">
           <div className="relative flex-1 w-full">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none" />
@@ -265,34 +393,60 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
             />
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <select
-              value={deadlineFilter}
-              onChange={(e) => setDeadlineFilter(e.target.value as any)}
-              className="w-full sm:w-auto bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-medium text-slate-700 focus:outline-none focus:border-amber-600 shadow-2xs cursor-pointer"
-            >
-              <option value="all">All Timelines</option>
-              <option value="closing-soon">Closing Soon (&lt; 14 Days)</option>
-              <option value="active">Active Deadlines</option>
-            </select>
+          {/* Timelines Dropdown: Closing in 7 days, 30 days, 90 days */}
+          <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+            <div className="relative w-full sm:w-auto">
+              <select
+                value={deadlineFilter}
+                onChange={(e) => setDeadlineFilter(e.target.value as TimelineFilter)}
+                className="w-full sm:w-auto bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-medium text-slate-700 focus:outline-none focus:border-amber-600 shadow-2xs cursor-pointer"
+                aria-label="Filter opportunities by timeline"
+              >
+                <option value="all">All Timelines (Non-Expired)</option>
+                <option value="7">Closing in 7 days</option>
+                <option value="30">Closing in 30 days</option>
+                <option value="90">Closing in 90 days</option>
+                <option value="past">Past Opportunities</option>
+              </select>
+            </div>
           </div>
         </div>
 
-        {/* Opportunity Type Pill Tabs */}
+        {/* Opportunity Type Pill Tabs (Exactly mapped to opportunity_type) */}
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
-          {OPPORTUNITY_TYPES.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setSelectedType(t.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer border ${
-                selectedType === t.id
-                  ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                  : 'bg-white text-slate-600 border-slate-200 hover:text-slate-900 hover:bg-slate-50'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+          {OPPORTUNITY_CHIPS.map((chip) => {
+            const isSelected = selectedType === chip.id;
+            return (
+              <button
+                key={chip.id}
+                type="button"
+                onClick={() => setSelectedType(chip.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer border ${
+                  isSelected
+                    ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                    : 'bg-white text-slate-600 border-slate-200 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                {chip.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Status bar */}
+        <div className="flex items-center justify-between text-xs text-slate-500 font-mono pt-1">
+          <span>
+            Showing <strong className="text-slate-800">{filteredEvents.length}</strong>{' '}
+            {filteredEvents.length === 1 ? 'opportunity' : 'opportunities'}
+            {deadlineFilter === 'all' && ' (active, non-expired)'}
+            {deadlineFilter === '7' && ' (closing in 7 days)'}
+            {deadlineFilter === '30' && ' (closing in 30 days)'}
+            {deadlineFilter === '90' && ' (closing in 90 days)'}
+            {deadlineFilter === 'past' && ' (past / closed)'}
+          </span>
+          <span className="text-[11px] text-slate-400">
+            Sorted by soonest deadline
+          </span>
         </div>
       </div>
 
@@ -308,7 +462,7 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
           <p className="text-xs text-slate-500 max-w-md mx-auto">
             {events.length === 0
               ? 'Our editorial intelligence team continuously monitors and publishes verified non-dilutive grants, venture accelerators, and hackathons. Check back shortly for active windows.'
-              : 'Try clearing your search query or selecting "All Opportunities" to view the full pipeline.'}
+              : 'Try clearing your search query, adjusting the timeline, or selecting "All Opportunities" to view the full pipeline.'}
           </p>
           {isAdmin ? (
             <button
@@ -332,9 +486,10 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredEvents.map((item) => {
-            const daysLeft = item.deadline_date ? getDaysRemaining(item.deadline_date) : null;
+            const daysLeft = getDaysRemaining(item.deadline_date);
             const isClosingSoon = daysLeft !== null && daysLeft >= 0 && daysLeft <= 14;
             const isExpired = daysLeft !== null && daysLeft < 0;
+            const linkedPost = item.linked_post || allPosts.find((p) => p.id === item.linked_post_id);
 
             return (
               <div
@@ -343,19 +498,20 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
                 className="group bg-white border border-slate-200 hover:border-slate-300 rounded-2xl p-6 shadow-xs hover:shadow-md transition-all flex flex-col justify-between cursor-pointer text-left"
               >
                 <div>
-                  {/* Top Badges */}
+                  {/* Top Badges: Type Badge & Deadline Status */}
                   <div className="flex items-center justify-between gap-2 mb-3">
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-mono uppercase font-bold tracking-wider bg-slate-100 text-slate-700 border border-slate-200">
-                      <Award className="w-3 h-3 text-amber-600" />
-                      {item.opportunity_type?.replace(/_/g, ' ')}
+                    {/* 1. Type Badge */}
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-mono uppercase font-bold tracking-wider bg-slate-100 text-slate-800 border border-slate-200">
+                      <Award className="w-3 h-3 text-amber-600 shrink-0" />
+                      <span>{formatOpportunityType(item.opportunity_type)}</span>
                     </span>
 
                     {/* Deadline Pill */}
-                    {daysLeft !== null && (
+                    {daysLeft !== null ? (
                       <span
                         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold ${
                           isExpired
-                            ? 'bg-slate-100 text-slate-500'
+                            ? 'bg-slate-100 text-slate-500 border border-slate-200'
                             : isClosingSoon
                             ? 'bg-rose-50 text-rose-700 border border-rose-200'
                             : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
@@ -368,6 +524,11 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
                           ? 'Closes Today'
                           : `${daysLeft}d left`}
                       </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                        <Clock className="w-3 h-3" />
+                        Rolling
+                      </span>
                     )}
                   </div>
 
@@ -376,34 +537,58 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
                     {item.title}
                   </h3>
 
-                  {/* Funding Amount Highlight */}
-                  {item.funding_amount && (
-                    <div className="mb-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-mono font-bold">
-                      <DollarSign className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-                      <span>{item.funding_amount}</span>
-                    </div>
-                  )}
+                  {/* 2. Funding Amount */}
+                  <div className="mb-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-mono font-bold">
+                    <DollarSign className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                    <span>{item.funding_amount || 'Non-dilutive / Equity-free'}</span>
+                  </div>
 
-                  {/* Excerpt */}
+                  {/* Excerpt / Description */}
                   <p className="text-xs text-slate-500 line-clamp-3 mb-4 leading-relaxed">
                     {item.description}
                   </p>
+
+                  {/* 5. Links to the Linked Post (inline card highlight) */}
+                  {linkedPost && (
+                    <div className="mb-4 pt-3 border-t border-slate-100">
+                      <a
+                        href={getPostUrl(linkedPost)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onSelectPost) {
+                            e.preventDefault();
+                            onSelectPost(linkedPost);
+                          }
+                        }}
+                        className="group/link flex items-center justify-between gap-2 p-2.5 rounded-xl bg-amber-50/70 hover:bg-amber-100/80 border border-amber-200/80 text-amber-950 transition-colors"
+                        title={`Read editorial analysis: ${linkedPost.title}`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                          <span className="text-xs font-semibold truncate">
+                            Analysis: {linkedPost.title}
+                          </span>
+                        </div>
+                        <ArrowRight className="w-3.5 h-3.5 text-amber-700 shrink-0 transition-transform group-hover/link:translate-x-0.5" />
+                      </a>
+                    </div>
+                  )}
                 </div>
 
                 {/* Footer Info & Actions */}
                 <div className="pt-4 border-t border-slate-100 space-y-3">
-                  <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
-                    <span className="flex items-center gap-1 truncate max-w-[180px]">
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono gap-2">
+                    {/* 3. Location */}
+                    <span className="flex items-center gap-1 truncate max-w-[170px]" title={item.location}>
                       <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span className="truncate">{item.location}</span>
+                      <span className="truncate">{item.location || 'Global (Remote)'}</span>
                     </span>
 
-                    {item.linked_post && (
-                      <span className="text-amber-700 font-medium flex items-center gap-0.5">
-                        <FileText className="w-3 h-3" />
-                        <span>Editorial Post</span>
-                      </span>
-                    )}
+                    {/* 4. Deadline */}
+                    <span className="flex items-center gap-1 text-slate-600 shrink-0" title={`Deadline: ${formatDeadline(item.deadline_date)}`}>
+                      <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span>{formatDeadline(item.deadline_date)}</span>
+                    </span>
                   </div>
 
                   <div className="flex items-center justify-between gap-2 pt-1">
@@ -431,10 +616,24 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
                         </button>
                       )}
 
-                      <span className="text-xs font-medium text-amber-700 flex items-center gap-0.5 group-hover:translate-x-0.5 transition-transform">
-                        <span>Details</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </span>
+                      {linkedPost ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectPost?.(linkedPost);
+                          }}
+                          className="text-xs font-semibold text-amber-700 hover:text-amber-800 flex items-center gap-0.5 group-hover:translate-x-0.5 transition-transform"
+                        >
+                          <span>Read Post</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      ) : (
+                        <span className="text-xs font-medium text-amber-700 flex items-center gap-0.5 group-hover:translate-x-0.5 transition-transform">
+                          <span>Details</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -452,7 +651,7 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono uppercase font-bold tracking-wider bg-slate-100 text-slate-800 border border-slate-200">
-                    {selectedEvent.opportunity_type?.replace(/_/g, ' ')}
+                    {formatOpportunityType(selectedEvent.opportunity_type)}
                   </span>
                   <span className="text-xs font-mono text-slate-500">
                     ID: {selectedEvent.id.slice(0, 8)}...
@@ -482,19 +681,13 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
               <div>
                 <span className="text-slate-500 block text-[10px] uppercase font-mono">Application Deadline</span>
                 <span className="font-semibold text-slate-900 font-mono">
-                  {selectedEvent.deadline_date
-                    ? new Date(selectedEvent.deadline_date).toLocaleDateString(undefined, {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                      })
-                    : 'Open / Rolling'}
+                  {formatDeadline(selectedEvent.deadline_date)}
                 </span>
               </div>
               <div className="col-span-2 sm:col-span-1">
                 <span className="text-slate-500 block text-[10px] uppercase font-mono">Location & Scope</span>
                 <span className="font-semibold text-slate-900">
-                  {selectedEvent.location}
+                  {selectedEvent.location || 'Global (Remote)'}
                 </span>
               </div>
             </div>
@@ -510,30 +703,34 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
             </div>
 
             {/* Linked Post Analysis if available */}
-            {selectedEvent.linked_post && (
-              <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-[10px] font-mono text-amber-800 uppercase font-semibold">
-                    Linked Editorial Article
+            {(() => {
+              const linkedPost = selectedEvent.linked_post || allPosts.find((p) => p.id === selectedEvent.linked_post_id);
+              if (!linkedPost) return null;
+              return (
+                <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-[10px] font-mono text-amber-800 uppercase font-semibold">
+                      Linked Editorial Article
+                    </div>
+                    <div className="font-serif text-sm font-bold text-slate-900 line-clamp-1">
+                      {linkedPost.title}
+                    </div>
                   </div>
-                  <div className="font-serif text-sm font-bold text-slate-900 line-clamp-1">
-                    {selectedEvent.linked_post.title}
-                  </div>
+                  {onSelectPost && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelectPost(linkedPost);
+                        setSelectedEvent(null);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold shrink-0 transition-colors cursor-pointer"
+                    >
+                      Read Analysis
+                    </button>
+                  )}
                 </div>
-                {onSelectPost && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onSelectPost(selectedEvent.linked_post!);
-                      setSelectedEvent(null);
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold shrink-0 transition-colors cursor-pointer"
-                  >
-                    Read Analysis
-                  </button>
-                )}
-              </div>
-            )}
+              );
+            })()}
 
             {/* Modal Bottom Actions */}
             <div className="pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">

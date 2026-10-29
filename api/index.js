@@ -2,235 +2,15 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import crypto3 from "crypto";
 import multer from "multer";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import { createClient as createClient7 } from "@supabase/supabase-js";
+import { createClient as createClient5 } from "@supabase/supabase-js";
 
-// src/server/aiRouter.ts
+// src/server/expansionRouter.ts
 import { Router } from "express";
-
-// src/ai/orchestrator/taskManager.ts
-import crypto3 from "crypto";
-
-// src/ai/agents/research/researchSchemas.ts
-import { z } from "zod";
-var ResearchInputSchema = z.object({
-  topic: z.string().min(3, "Topic must be at least 3 characters").max(300),
-  vertical: z.enum(["finance", "tech", "founders-mindset"]).optional(),
-  depth: z.enum(["brief", "standard", "deep"]).optional().default("standard"),
-  focus_areas: z.array(z.string()).optional().default([]),
-  target_locale: z.string().optional().default("en-us")
-});
-var ResearchClaimSchema = z.object({
-  claim: z.string().min(5),
-  evidence_basis: z.string().min(5),
-  confidence: z.number().min(0).max(1)
-});
-var ResearchSourceSchema = z.object({
-  title: z.string().min(2),
-  url: z.string().url().optional(),
-  publisher: z.string().optional(),
-  credibility_score: z.number().min(0).max(1)
-});
-var ResearchEntitySchema = z.object({
-  name: z.string().min(1),
-  type: z.enum(["company", "person", "technology", "institution", "regulatory_body", "market"]),
-  context: z.string()
-});
-var ResearchDateSchema = z.object({
-  date_or_timeframe: z.string().min(2),
-  significance: z.string().min(5)
-});
-var ArticleAngleProposalSchema = z.object({
-  title_proposal: z.string().min(10),
-  angle: z.string().min(10),
-  target_audience: z.string().min(5),
-  suggested_vertical: z.enum(["finance", "tech", "founders-mindset"])
-});
-var ResearchOutputSchema = z.object({
-  topic: z.string(),
-  summary: z.string().min(20),
-  key_claims: z.array(ResearchClaimSchema).min(1, "At least one substantiated claim is required"),
-  sources: z.array(ResearchSourceSchema).min(1, "At least one verified source is required"),
-  important_entities: z.array(ResearchEntitySchema),
-  relevant_dates: z.array(ResearchDateSchema),
-  potential_article_angles: z.array(ArticleAngleProposalSchema).min(1),
-  confidence: z.number().min(0).max(1),
-  recommended_next_action: z.enum(["draft_article", "further_investigation", "archive_idea"])
-});
-
-// src/ai/agents/research/providers.ts
-import { GoogleGenAI } from "@google/genai";
-
-// src/ai/policies/constitution.ts
-var STARTUPCREME_CONSTITUTION = {
-  publicationName: "StartupCr\xE8me",
-  tagline: "Deep intelligence for tech leaders, investors, and startup builders.",
-  targetAudience: [
-    "Founders and Startup Builders",
-    "Venture Capitalists and Angel Investors",
-    "Tech Engineers and Software Architects",
-    "Fintech and Financial Strategists",
-    "African Tech Ecosystem Leaders",
-    "Global Technology Operators"
-  ],
-  coreVerticals: ["finance", "tech"],
-  coverageDomains: [
-    "Startups & Venture Capital Fundraising",
-    "Artificial Intelligence, LLM Compilers & Frontier Models",
-    "Fintech, Payments, Neobanking & Capital Markets",
-    "African & Global Emerging Markets Innovation",
-    "Cloud Architecture, DevOps & Developer Tooling",
-    "Macroeconomics, Treasury Yields & Monetary Policy"
-  ],
-  qualityPrinciples: [
-    {
-      id: "factuality",
-      name: "Rigorous Factuality & Verification",
-      description: "Every claim, statistic, funding amount, or metric must be grounded in verified primary or reputable secondary sources.",
-      enforcement: "strict"
-    },
-    {
-      id: "no_hallucination",
-      name: "Zero Tolerance for Fabrication",
-      description: "Agents must NEVER fabricate statistics, quotes, founders, company funding rounds, or sources. If uncertain, state lack of verification or refuse claim.",
-      enforcement: "strict"
-    },
-    {
-      id: "original_synthesis",
-      name: "Original Analytical Synthesis",
-      description: "Articles must provide strategic depth, contextual implications, and second-order thinking\u2014never generic, repetitive AI filler or scraped copy.",
-      enforcement: "strict"
-    },
-    {
-      id: "respect_journalistic_ethics",
-      name: "Journalistic Ethics & Attribution",
-      description: "Always credit source reporting, original data providers, and authors. Never plagiarize phrasing or pass others work as proprietary analysis.",
-      enforcement: "strict"
-    },
-    {
-      id: "no_deceptive_clickbait",
-      name: "Anti-Clickbait Clarity",
-      description: "Headlines, excerpts, and metadata must accurately reflect actual content and evidence, avoiding exaggerated or sensationalist clickbait.",
-      enforcement: "strict"
-    },
-    {
-      id: "human_dignity_safety",
-      name: "Legal & Defamation Safeguards",
-      description: "Never publish unvetted accusations, defamatory claims, or uncorroborated rumors without human editorial sign-off.",
-      enforcement: "strict"
-    }
-  ],
-  forbiddenActions: [
-    "Publishing unapproved breaking news without human sign-off",
-    "Deleting existing articles, user comments, or database records",
-    "Fabricating names of founders, investors, or financial figures",
-    "Directly bypassing database validation or security rules",
-    "Executing arbitrary SQL commands or database migrations directly",
-    "Publishing sponsored content without explicit sponsorship badges",
-    "Altering live authentication, permissions, or system credentials"
-  ],
-  policyClassification: {
-    green: {
-      description: "Autonomous Execution Permitted (Low risk, read-only or reversible draft actions)",
-      allowedActions: [
-        "research_topic",
-        "summarize_source",
-        "generate_article_draft",
-        "suggest_seo_metadata",
-        "suggest_internal_links",
-        "analyze_content_performance",
-        "index_for_search"
-      ]
-    },
-    yellow: {
-      description: "Human Approval Required Before Execution (Medium risk, public-facing or mutation actions)",
-      allowedActions: [
-        "publish_article",
-        "update_published_article",
-        "schedule_newsletter",
-        "post_to_social_channels",
-        "change_article_category",
-        "archive_article"
-      ]
-    },
-    red: {
-      description: "Strictly Forbidden or Human-Only Execution (High risk, destructive or structural actions)",
-      allowedActions: [
-        "delete_article",
-        "delete_user_data",
-        "modify_database_schema",
-        "modify_security_rules",
-        "modify_api_keys",
-        "execute_financial_transactions"
-      ]
-    }
-  }
-};
-
-// src/lib/supabase.ts
+import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
-var runtimeUrl = null;
-var runtimeKey = null;
-function getSupabaseCredentials() {
-  const metaEnv = typeof import.meta !== "undefined" ? import.meta.env : void 0;
-  const procEnv = typeof process !== "undefined" ? process.env : void 0;
-  const url = runtimeUrl !== null ? runtimeUrl : procEnv?.SUPABASE_URL || procEnv?.VITE_SUPABASE_URL || metaEnv?.VITE_SUPABASE_URL || "";
-  const anonKey = runtimeKey !== null ? runtimeKey : procEnv?.SUPABASE_ANON_KEY || procEnv?.VITE_SUPABASE_ANON_KEY || metaEnv?.VITE_SUPABASE_ANON_KEY || "";
-  const isConfigured = Boolean(
-    url && anonKey && !url.includes("your-supabase-project") && !anonKey.includes("your-supabase-anon-key")
-  );
-  return { url, anonKey, isConfigured };
-}
-var activeClient = null;
-var activeClientUrl = null;
-function getSupabaseClient() {
-  const { url, anonKey } = getSupabaseCredentials();
-  if (!activeClient || url && activeClientUrl !== url) {
-    activeClientUrl = url || "https://placeholder.supabase.co";
-    activeClient = createClient(
-      url || "https://placeholder.supabase.co",
-      anonKey || "placeholder-anon-key",
-      {
-        db: {
-          schema: "startupcreme"
-        },
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true
-        }
-      }
-    );
-  }
-  return activeClient;
-}
-function isSupabaseConfigured() {
-  return getSupabaseCredentials().isConfigured;
-}
-var supabase = new Proxy({}, {
-  get(_target, prop) {
-    const client = getSupabaseClient();
-    const value = client[prop];
-    return typeof value === "function" ? value.bind(client) : value;
-  }
-});
-
-// src/lib/router.ts
-function normalizeImageUrl(url) {
-  if (!url) return "";
-  const trimmed = url.trim();
-  if (!trimmed) return "";
-  if (trimmed.startsWith("data:") || trimmed.startsWith("/") || trimmed.startsWith("blob:")) {
-    return trimmed;
-  }
-  if (trimmed.startsWith("//")) {
-    return `https:${trimmed}`;
-  }
-  if (!/^https?:\/\//i.test(trimmed)) {
-    return `https://${trimmed}`;
-  }
-  return trimmed;
-}
 
 // src/lib/expansionData.ts
 var INITIAL_STARTUPS = [
@@ -504,4593 +284,207 @@ var INITIAL_RATE_SNAPSHOT = {
 var INITIAL_JOBS = [];
 var INITIAL_EVENTS = [];
 
-// src/lib/store.ts
-var SEED_POSTS = [];
-var SAMPLE_POST_SLUGS = [
-  "the-great-treasury-yield-re-alignment",
-  "autonomous-agent-architectures-and-llm-compilers"
+// src/lib/validation.ts
+import { z } from "zod";
+
+// src/lib/router.ts
+function normalizeImageUrl(url) {
+  if (!url) return "";
+  const trimmed = url.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("data:") || trimmed.startsWith("/") || trimmed.startsWith("blob:")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("//")) {
+    return `https:${trimmed}`;
+  }
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return `https://${trimmed}`;
+  }
+  return trimmed;
+}
+
+// src/lib/validation.ts
+var NewsletterSubscriptionSchema = z.object({
+  email: z.string().email("Please enter a valid email address").toLowerCase().trim(),
+  source: z.string().optional().default("footer"),
+  vertical: z.enum(["all", "finance", "tech", "founders-mindset"]).optional().default("all"),
+  locale: z.string().optional().default("en-us")
+});
+var PostSchema = z.object({
+  title: z.string().min(5, "Title must be at least 5 characters").max(200, "Title too long"),
+  slug: z.string().min(3).max(100).regex(/^[a-z0-9-]+$/, "Slug can only contain lowercase letters, numbers, and hyphens"),
+  excerpt: z.string().min(10, "Excerpt must be at least 10 characters").max(500),
+  content: z.string().min(20, "Content must be at least 20 characters"),
+  vertical: z.enum(["finance", "tech", "founders-mindset"]),
+  locale: z.string().min(2).max(10),
+  cover_image: z.string().transform((v) => normalizeImageUrl(v)).optional().default(""),
+  status: z.enum(["draft", "published", "archived"]),
+  dual_silo: z.boolean().optional().default(false),
+  source_url: z.string().trim().regex(/^https:\/\/.+/i, "Source URL must be a valid HTTPS URL").optional().nullable(),
+  source_name: z.string().trim().max(120).optional().nullable(),
+  ai_generated: z.boolean().optional().default(false),
+  hide_ai_disclosure: z.boolean().optional().default(false)
+});
+var EditorialDraftSubmissionSchema = z.object({
+  title: z.string().trim().min(5, "Title must be at least 5 characters").max(200, "Title cannot exceed 200 characters"),
+  slug: z.string().trim().min(3, "Slug must be at least 3 characters").max(100, "Slug cannot exceed 100 characters").regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Slug must be lowercase alphanumeric with hyphens (e.g., "fintech-infrastructure-2026")'),
+  vertical: z.enum(["finance", "tech", "founders-mindset"]),
+  content: z.union([
+    z.string().trim().min(20, "Content must be at least 20 characters"),
+    z.record(z.string(), z.any())
+  ]),
+  locale: z.string().trim().toLowerCase().min(2).max(10).optional().default("en-us"),
+  excerpt: z.string().trim().max(500).optional(),
+  meta_description: z.string().trim().max(200).optional(),
+  canonical_url: z.string().trim().url("Canonical URL must be a valid URL").optional().nullable(),
+  cover_image: z.string().trim().regex(/^https:\/\/.+/i, "Cover image must be a valid HTTPS URL").optional().nullable(),
+  source_url: z.string().trim().regex(/^https:\/\/.+/i, "Source URL must be a valid HTTPS URL").optional().nullable(),
+  source_name: z.string().trim().max(120).optional().nullable(),
+  ai_generated: z.boolean().optional().default(false),
+  hide_ai_disclosure: z.boolean().optional().default(false),
+  author_name: z.string().trim().max(80).optional().default("Startup Cr\xE8me Editorial"),
+  author_role: z.string().trim().max(80).optional().default("Senior Analyst"),
+  author_avatar: z.string().trim().regex(/^https:\/\/.+/i, "Author avatar must be a valid HTTPS URL").optional().nullable(),
+  dual_silo: z.boolean().optional().default(false),
+  tags: z.array(z.string().trim().min(1).max(50)).max(15).optional().default([]),
+  reading_time_minutes: z.number().int().positive().max(120).optional(),
+  word_count: z.number().int().nonnegative().optional(),
+  idempotency_key: z.string().trim().min(4).max(256).optional(),
+  workflow_id: z.string().trim().max(128).optional()
+});
+var TopicSchema = z.object({
+  title: z.string().min(5, "Title must be at least 5 characters").max(150),
+  body: z.string().min(10, "Discussion body must be at least 10 characters"),
+  category: z.enum([
+    "Macro",
+    "Venture Capital",
+    "Fintech",
+    "AI Architecture",
+    "Hardware",
+    "Cloud Infrastructure",
+    "Sales",
+    "Marketing",
+    "sales",
+    "marketing",
+    "finance",
+    "tech",
+    "startup",
+    "general"
+  ])
+});
+var CommentSchema = z.object({
+  topic_id: z.string().uuid().or(z.string().min(1)),
+  content: z.string().min(2, "Comment cannot be empty").max(2e3),
+  parent_id: z.string().uuid().optional().nullable()
+});
+var GuestCommentSchema = z.object({
+  author_name: z.string().trim().min(2, "Name must be at least 2 characters").max(60, "Name cannot exceed 60 characters"),
+  author_email: z.string().trim().email("Please enter a valid email address").toLowerCase(),
+  content: z.string().trim().min(2, "Comment must be at least 2 characters").max(2e3, "Comment cannot exceed 2000 characters")
+});
+var WEBHOOK_OPPORTUNITY_TYPES = [
+  "grant",
+  "accelerator",
+  "incubator",
+  "fellowship",
+  "pitch_competition",
+  "hackathon",
+  "conference"
 ];
-var SAMPLE_STARTUP_SLUGS = [
-  "paystack-treasury",
-  "kora-quant",
-  "vortex-inference",
-  "moniepoint-ledger",
-  "termii-omni",
-  "lazer-edtech"
-];
-var SAMPLE_JOB_TITLES = [
-  "Fractional CFO (Series A & B SaaS)",
-  "Staff Distributed Systems Engineer (Rust / Go)",
-  "Principal Cloud FinOps Architect",
-  "Senior Quantitative Financial Modeler",
-  "Fractional CTO & AI Infrastructure Advisor",
-  "Lead Full-Stack Engineer (React Router 7 + Supabase)"
-];
-var POSTS_CACHE_KEY = "startupcreme_posts_cache_v4";
-var TOPICS_CACHE_KEY = "startupcreme_topics_cache_v3";
-var SEED_TOPICS = [
-  {
-    id: "topic-01",
-    slug: "what-is-your-2026-ai-compute-budget-allocation",
-    title: "What is your 2026 AI compute budget allocation between proprietary LLM APIs vs custom fine-tuned open weights?",
-    content: "Many Series B+ engineering organizations are re-evaluating token costs vs latency control. Are you moving core workflows to fine-tuned Llama/DeepSeek models or staying with frontier APIs like Gemini 1.5 Pro and Claude 3.5?",
-    category: "tech",
-    user_id: "system-topic-01",
-    author_name: "Marcus Chen",
-    author_handle: "@marcus_ai",
-    author_avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200",
-    upvotes: 42,
-    downvotes: 3,
-    tags: ["LLM", "AI Infrastructure", "FinOps", "DevOps"],
-    comment_count: 0,
-    created_at: "2026-08-03T10:00:00Z",
-    updated_at: "2026-08-03T10:00:00Z"
-  }
-];
-async function supabaseExecute(queryFn) {
-  if (!isSupabaseConfigured()) {
-    console.warn("Supabase is not configured yet.");
-    return {
-      data: null,
-      error: new Error("Supabase project URL & Anon Key are not configured yet. Please configure Supabase keys in the Database modal.")
-    };
-  }
-  try {
-    const scClient = supabase.schema("startupcreme");
-    const res = await Promise.resolve(queryFn(scClient));
-    if (res.error) {
-      console.warn("startupcreme schema query returned error:", res.error?.message || res.error);
-      const scErrMsg = res.error?.message || String(res.error || "");
-      if (scErrMsg.includes("permission denied for schema")) {
-        return {
-          data: null,
-          error: new Error('Permission denied for schema "startupcreme". Grant schema usage in Supabase SQL Editor by running supabase/schema.sql.')
-        };
-      }
-      return res;
-    }
-    return res;
-  } catch (err) {
-    console.error("startupcreme schema query exception:", err);
-    return { data: null, error: err };
-  }
-}
-var StartupCremeStore = class {
-  constructor() {
-    this.posts = [];
-    this.topics = [];
-    this.discussionComments = {};
-    this.postComments = {};
-    this.currentUser = null;
-    this.topicUserVotes = {};
-    this.commentUserVotes = {};
-    this.pollUserVotes = {};
-    this.bookmarks = /* @__PURE__ */ new Set();
-    this.startups = [...INITIAL_STARTUPS];
-    this.rateSnapshot = { ...INITIAL_RATE_SNAPSHOT };
-    this.jobs = [...INITIAL_JOBS];
-    this.events = [...INITIAL_EVENTS];
-    this.subscribers = [];
-    this.hasAttemptedSeed = false;
-    this.loadInitialData();
-  }
-  persistCache() {
-    if (typeof window === "undefined") return;
-    try {
-      if (this.posts && this.posts.length > 0) {
-        localStorage.setItem(POSTS_CACHE_KEY, JSON.stringify(this.posts));
-      }
-      if (this.topics && this.topics.length > 0) {
-        localStorage.setItem(TOPICS_CACHE_KEY, JSON.stringify(this.topics));
-      }
-    } catch (e) {
-    }
-  }
-  loadInitialData() {
-    this.posts = [];
-    this.topics = [];
-    this.postComments = {};
-    this.discussionComments = {};
-    this.currentUser = null;
-    if (typeof window !== "undefined") {
-      const win = window;
-      const postsMap = /* @__PURE__ */ new Map();
-      const topicsMap = /* @__PURE__ */ new Map();
-      try {
-        const cachedPostsJson = localStorage.getItem(POSTS_CACHE_KEY);
-        if (cachedPostsJson) {
-          const cached = JSON.parse(cachedPostsJson);
-          if (Array.isArray(cached)) {
-            cached.forEach((p) => {
-              if (p && p.slug && !SAMPLE_POST_SLUGS.includes(p.slug)) {
-                postsMap.set(p.slug, { ...p, cover_image: normalizeImageUrl(p.cover_image) });
-              }
-            });
-          }
-        }
-        const cachedTopicsJson = localStorage.getItem(TOPICS_CACHE_KEY);
-        if (cachedTopicsJson) {
-          const cached = JSON.parse(cachedTopicsJson);
-          if (Array.isArray(cached)) {
-            cached.forEach((t) => {
-              if (t && t.slug) topicsMap.set(t.slug, t);
-            });
-          }
-        }
-      } catch (e) {
-        console.warn("Cache hydration error:", e);
-      }
-      if (win.__INITIAL_POST__) {
-        const p = win.__INITIAL_POST__;
-        if (p && p.slug && !SAMPLE_POST_SLUGS.includes(p.slug)) {
-          postsMap.set(p.slug, { ...p, cover_image: normalizeImageUrl(p.cover_image) });
-        }
-      }
-      if (Array.isArray(win.__INITIAL_POSTS__)) {
-        win.__INITIAL_POSTS__.forEach((p) => {
-          if (p && p.slug && !SAMPLE_POST_SLUGS.includes(p.slug)) {
-            postsMap.set(p.slug, { ...p, cover_image: normalizeImageUrl(p.cover_image) });
-          }
-        });
-      }
-      if (win.__INITIAL_TOPIC__) {
-        const t = win.__INITIAL_TOPIC__;
-        if (t && t.slug) topicsMap.set(t.slug, t);
-      }
-      this.posts = Array.from(postsMap.values());
-      this.topics = Array.from(topicsMap.values());
-    }
-    if (isSupabaseConfigured()) {
-      this.syncFromSupabase().catch((err) => {
-        console.warn("Initial sync error:", err);
-      });
-      this.initSupabaseAuthListener();
-    }
-  }
-  initSupabaseAuthListener() {
-    try {
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user) {
-          this.syncUserFromSession(session);
-        }
-      }).catch((err) => {
-        console.warn("Session hydration error:", err);
-      });
-      supabase.auth.onAuthStateChange(async (event, session) => {
-        if (session?.user) {
-          await this.syncUserFromSession(session);
-        } else if (event === "SIGNED_OUT") {
-          this.currentUser = null;
-          this.notify();
-        }
-      });
-      if (typeof window !== "undefined") {
-        window.addEventListener("focus", () => {
-          this.refreshCurrentUserRole().catch(() => {
-          });
-        });
-      }
-    } catch (e) {
-      console.warn("Supabase auth listener error:", e);
-    }
-  }
-  async syncUserFromSession(session) {
-    if (!session?.user) return;
-    const userObj = session.user;
-    const userEmail = (userObj.email || "").trim();
-    let computedRole = userObj.user_metadata?.role || "user";
-    let computedName = userObj.user_metadata?.full_name || (userEmail ? userEmail.split("@")[0] : "User");
-    let computedAvatar = userObj.user_metadata?.avatar_url || `https://picsum.photos/seed/${encodeURIComponent(userEmail || "user")}/100/100`;
-    if (session?.access_token) {
-      try {
-        const resp = await fetch("/api/auth/profile", {
-          headers: {
-            "Authorization": `Bearer ${session.access_token}`
-          }
-        });
-        if (resp.ok) {
-          const profile = await resp.json();
-          if (profile && profile.role) {
-            this.currentUser = {
-              id: profile.id || userObj.id,
-              email: profile.email || userEmail,
-              full_name: profile.full_name || computedName,
-              avatar_url: profile.avatar_url || computedAvatar,
-              role: profile.role === "admin" ? "admin" : "user",
-              created_at: profile.created_at || userObj.created_at || (/* @__PURE__ */ new Date()).toISOString(),
-              updated_at: (/* @__PURE__ */ new Date()).toISOString()
-            };
-            this.notify();
-            return;
-          }
-        }
-      } catch (apiErr) {
-        console.warn("Backend /api/auth/profile check failed, falling back to direct DB queries:", apiErr);
-      }
-    }
-    try {
-      let scUser = null;
-      if (userObj.id) {
-        const { data } = await supabase.schema("startupcreme").from("users").select("id, email, full_name, avatar_url, role").eq("id", userObj.id).maybeSingle();
-        if (data) scUser = data;
-      }
-      if (!scUser && userEmail) {
-        const { data } = await supabase.schema("startupcreme").from("users").select("id, email, full_name, avatar_url, role").ilike("email", userEmail).maybeSingle();
-        if (data) scUser = data;
-      }
-      if (scUser) {
-        if (scUser.role) {
-          computedRole = scUser.role.trim().toLowerCase() === "admin" ? "admin" : "user";
-        }
-        if (scUser.full_name) computedName = scUser.full_name;
-        if (scUser.avatar_url) computedAvatar = scUser.avatar_url;
-      }
-    } catch (e) {
-      console.warn("DB user role fetch error:", e);
-    }
-    this.currentUser = {
-      id: userObj.id,
-      email: userEmail,
-      full_name: computedName,
-      avatar_url: computedAvatar,
-      role: computedRole,
-      created_at: userObj.created_at || (/* @__PURE__ */ new Date()).toISOString(),
-      updated_at: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    this.notify();
-  }
-  async refreshCurrentUserRole() {
-    if (!isSupabaseConfigured()) return this.currentUser?.role || null;
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        try {
-          const resp = await fetch("/api/auth/profile", {
-            headers: {
-              "Authorization": `Bearer ${session.access_token}`
-            }
-          });
-          if (resp.ok) {
-            const profile = await resp.json();
-            if (profile && profile.role) {
-              const dbRole = profile.role === "admin" ? "admin" : "user";
-              const dbName = profile.full_name || this.currentUser?.full_name || "User";
-              const dbAvatar = profile.avatar_url || this.currentUser?.avatar_url;
-              const changed = !this.currentUser || this.currentUser.role !== dbRole || this.currentUser.full_name !== dbName;
-              this.currentUser = {
-                id: profile.id || session.user?.id || this.currentUser?.id || "unknown",
-                email: profile.email || session.user?.email || this.currentUser?.email || "",
-                full_name: dbName,
-                avatar_url: dbAvatar,
-                role: dbRole,
-                created_at: profile.created_at || this.currentUser?.created_at || (/* @__PURE__ */ new Date()).toISOString(),
-                updated_at: (/* @__PURE__ */ new Date()).toISOString()
-              };
-              if (changed) this.notify();
-              return dbRole;
-            }
-          }
-        } catch (apiErr) {
-          console.warn("/api/auth/profile refresh error, falling back:", apiErr);
-        }
-      }
-      const currentAuthUser = session?.user;
-      const effectiveId = currentAuthUser?.id || this.currentUser?.id;
-      const effectiveEmail = (currentAuthUser?.email || this.currentUser?.email || "").trim();
-      if (!effectiveId && !effectiveEmail) return null;
-      let scUser = null;
-      if (effectiveId) {
-        const { data } = await supabase.schema("startupcreme").from("users").select("id, email, full_name, avatar_url, role").eq("id", effectiveId).maybeSingle();
-        if (data) scUser = data;
-      }
-      if (!scUser && effectiveEmail) {
-        const { data } = await supabase.schema("startupcreme").from("users").select("id, email, full_name, avatar_url, role").ilike("email", effectiveEmail).maybeSingle();
-        if (data) scUser = data;
-      }
-      if (scUser) {
-        const dbRole = scUser.role?.trim().toLowerCase() === "admin" ? "admin" : "user";
-        const dbName = scUser.full_name || this.currentUser?.full_name || "User";
-        const dbAvatar = scUser.avatar_url || this.currentUser?.avatar_url;
-        if (this.currentUser) {
-          const changed = this.currentUser.role !== dbRole || this.currentUser.full_name !== dbName;
-          this.currentUser = {
-            ...this.currentUser,
-            id: scUser.id || this.currentUser.id,
-            email: scUser.email || this.currentUser.email,
-            full_name: dbName,
-            avatar_url: dbAvatar,
-            role: dbRole,
-            updated_at: (/* @__PURE__ */ new Date()).toISOString()
-          };
-          if (changed) this.notify();
-        } else if (currentAuthUser) {
-          this.currentUser = {
-            id: scUser.id || currentAuthUser.id,
-            email: scUser.email || currentAuthUser.email || "",
-            full_name: dbName,
-            avatar_url: dbAvatar,
-            role: dbRole,
-            created_at: currentAuthUser.created_at || (/* @__PURE__ */ new Date()).toISOString(),
-            updated_at: (/* @__PURE__ */ new Date()).toISOString()
-          };
-          this.notify();
-        }
-        return dbRole;
-      }
-    } catch (err) {
-      console.warn("Failed to refresh user role from DB:", err);
-    }
-    return this.currentUser?.role || null;
-  }
-  subscribe(fn) {
-    this.subscribers.push(fn);
-    return () => {
-      this.subscribers = this.subscribers.filter((s) => s !== fn);
-    };
-  }
-  notify() {
-    this.subscribers.forEach((fn) => fn());
-  }
-  async seedStaticArticlesToSupabase(skipSync = false) {
-    if (!isSupabaseConfigured()) return { success: false, message: "Supabase is not configured yet." };
-    try {
-      for (const post of SEED_POSTS) {
-        const postPayload = {
-          slug: post.slug,
-          locale: post.locale,
-          vertical: post.vertical,
-          title: post.title,
-          excerpt: post.excerpt,
-          content: post.content,
-          status: post.status,
-          meta_description: post.meta_description,
-          canonical_url: post.canonical_url,
-          cover_image: post.cover_image,
-          author_name: post.author_name || "Startup Cr\xE8me Editorial",
-          author_role: post.author_role || "Principal Editor",
-          author_avatar: post.author_avatar,
-          dual_silo: post.dual_silo ?? false,
-          silo_badge: post.silo_badge,
-          tags: post.tags || [],
-          reading_time_minutes: post.reading_time_minutes || 5,
-          word_count: post.word_count || 800,
-          created_at: post.created_at || (/* @__PURE__ */ new Date()).toISOString(),
-          updated_at: post.updated_at || (/* @__PURE__ */ new Date()).toISOString()
-        };
-        await supabaseExecute((client) => client.from("posts").insert(postPayload));
-      }
-      for (const topic of SEED_TOPICS) {
-        const topicPayload = {
-          slug: topic.slug,
-          title: topic.title,
-          content: topic.content,
-          category: topic.category,
-          author_name: topic.author_name,
-          author_handle: topic.author_handle,
-          author_avatar: topic.author_avatar,
-          upvotes: topic.upvotes || 0,
-          downvotes: topic.downvotes || 0,
-          tags: topic.tags || [],
-          comment_count: topic.comment_count || 0,
-          created_at: topic.created_at || (/* @__PURE__ */ new Date()).toISOString(),
-          updated_at: topic.updated_at || (/* @__PURE__ */ new Date()).toISOString()
-        };
-        await supabaseExecute((client) => client.from("discussion_topics").upsert(topicPayload, { onConflict: "slug" }));
-      }
-      if (!skipSync) {
-        await this.syncFromSupabase();
-      } else {
-        this.posts = SEED_POSTS;
-        this.topics = SEED_TOPICS;
-        this.notify();
-      }
-      return {
-        success: true,
-        message: `Successfully seeded initial articles and topics into Supabase!`
-      };
-    } catch (err) {
-      return { success: false, message: err?.message || "Failed to seed static data to Supabase." };
-    }
-  }
-  async deleteAllSamplePosts() {
-    this.posts = this.posts.filter((p) => !SAMPLE_POST_SLUGS.includes(p.slug));
-    this.notify();
-    if (!isSupabaseConfigured()) {
-      return { success: true, message: "Sample posts cleared locally." };
-    }
-    try {
-      const res = await supabaseExecute(
-        (client) => client.from("posts").delete().in("slug", SAMPLE_POST_SLUGS)
-      );
-      if (res.error) {
-        return { success: false, message: res.error.message || String(res.error) };
-      }
-      return { success: true, message: "All sample posts deleted from Supabase database successfully!" };
-    } catch (err) {
-      return { success: false, message: err?.message || "Error deleting sample posts" };
-    }
-  }
-  async syncFromSupabase() {
-    if (!isSupabaseConfigured()) return;
-    try {
-      await supabaseExecute(
-        (client) => client.from("posts").delete().in("slug", SAMPLE_POST_SLUGS)
-      );
-      await supabaseExecute(
-        (client) => client.from("startups").delete().in("slug", SAMPLE_STARTUP_SLUGS)
-      ).catch(() => {
-      });
-      await supabaseExecute(
-        (client) => client.from("jobs").delete().in("title", SAMPLE_JOB_TITLES)
-      ).catch(() => {
-      });
-      const { data: postsData } = await supabaseExecute(
-        (client) => client.from("posts").select("*").order("created_at", { ascending: false })
-      );
-      this.posts = (postsData || []).filter((p) => !SAMPLE_POST_SLUGS.includes(p.slug)).map((p) => ({
-        ...p,
-        cover_image: normalizeImageUrl(p.cover_image)
-      }));
-      const { data: topicsData } = await supabaseExecute(
-        (client) => client.from("discussion_topics").select("*").order("created_at", { ascending: false })
-      );
-      const { data: pollsData } = await supabaseExecute(
-        (client) => client.from("discussion_polls").select("*")
-      ).catch(() => ({ data: null }));
-      const { data: pollOptionsData } = await supabaseExecute(
-        (client) => client.from("discussion_poll_options").select("*")
-      ).catch(() => ({ data: null }));
-      if (this.currentUser) {
-        const userId = await this.ensureUserInDb(this.currentUser);
-        if (userId) {
-          const { data: pollVotesData } = await supabaseExecute(
-            (client) => client.from("discussion_poll_votes").select("*").eq("user_id", userId)
-          ).catch(() => ({ data: null }));
-          if (pollVotesData && pollVotesData.length > 0) {
-            pollVotesData.forEach((pv) => {
-              if (pv.poll_id && pv.option_id) {
-                this.pollUserVotes[pv.poll_id] = pv.option_id;
-              }
-            });
-          }
-          const { data: topicVotesData } = await supabaseExecute(
-            (client) => client.from("discussion_topic_votes").select("*").eq("user_id", userId)
-          ).catch(() => ({ data: null }));
-          if (topicVotesData && topicVotesData.length > 0) {
-            topicVotesData.forEach((tv) => {
-              if (tv.topic_id && tv.vote_type) {
-                this.topicUserVotes[tv.topic_id] = tv.vote_type;
-              }
-            });
-          }
-        }
-      }
-      if (topicsData && topicsData.length > 0) {
-        const pollsMap = /* @__PURE__ */ new Map();
-        if (pollsData && pollsData.length > 0) {
-          pollsData.forEach((p) => {
-            pollsMap.set(p.id, {
-              id: p.id,
-              topic_id: p.topic_id,
-              question: p.question,
-              total_votes: p.total_votes || 0,
-              created_at: p.created_at,
-              options: []
-            });
-          });
-          if (pollOptionsData && pollOptionsData.length > 0) {
-            pollOptionsData.forEach((opt) => {
-              const parentPoll = pollsMap.get(opt.poll_id);
-              if (parentPoll) {
-                parentPoll.options.push({
-                  id: opt.id,
-                  poll_id: opt.poll_id,
-                  option_text: opt.option_text,
-                  votes: opt.votes || 0
-                });
-              }
-            });
-          }
-        }
-        this.topics = topicsData.map((t) => {
-          let pollObj = void 0;
-          const dedicatedPoll = Array.from(pollsMap.values()).find((p) => p.topic_id === t.id);
-          if (dedicatedPoll) {
-            pollObj = dedicatedPoll;
-          } else if (t.poll) {
-            pollObj = typeof t.poll === "string" ? JSON.parse(t.poll) : t.poll;
-          }
-          return {
-            ...t,
-            poll: pollObj
-          };
-        });
-      }
-      const { data: discCommentsData } = await supabaseExecute(
-        (client) => client.from("discussion_comments").select("*").order("created_at", { ascending: true })
-      );
-      const groupedDiscComments = {};
-      if (discCommentsData && discCommentsData.length > 0) {
-        const commentsMap = /* @__PURE__ */ new Map();
-        discCommentsData.forEach((c) => {
-          commentsMap.set(c.id, {
-            id: c.id,
-            topic_id: c.topic_id,
-            parent_id: c.parent_id || null,
-            user_id: c.user_id || "user-anon",
-            author_name: c.author_name || "Member",
-            author_handle: c.author_handle || "@member",
-            author_avatar: c.author_avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100",
-            content: c.content,
-            upvotes: c.upvotes || 0,
-            downvotes: c.downvotes || 0,
-            created_at: c.created_at,
-            updated_at: c.updated_at,
-            replies: []
-          });
-        });
-        commentsMap.forEach((comment) => {
-          if (!groupedDiscComments[comment.topic_id]) {
-            groupedDiscComments[comment.topic_id] = [];
-          }
-          if (comment.parent_id && commentsMap.has(comment.parent_id)) {
-            const parent = commentsMap.get(comment.parent_id);
-            if (!parent.replies) parent.replies = [];
-            if (!parent.replies.some((r) => r.id === comment.id)) {
-              parent.replies.push(comment);
-            }
-          } else {
-            if (!groupedDiscComments[comment.topic_id].some((existing) => existing.id === comment.id)) {
-              groupedDiscComments[comment.topic_id].unshift(comment);
-            }
-          }
-        });
-      }
-      this.discussionComments = groupedDiscComments;
-      let postCommentsData = null;
-      const viewRes = await supabaseExecute(
-        (client) => client.from("public_comments").select("*").order("created_at", { ascending: false })
-      );
-      if (viewRes.data) {
-        postCommentsData = viewRes.data;
-      } else {
-        const fallbackRes = await supabaseExecute(
-          (client) => client.from("comments").select("id, post_id, user_id, author_name, author_avatar, content, created_at, updated_at").order("created_at", { ascending: false })
-        );
-        postCommentsData = fallbackRes.data || null;
-      }
-      const groupedPostComments = {};
-      if (postCommentsData && postCommentsData.length > 0) {
-        postCommentsData.forEach((c) => {
-          if (!groupedPostComments[c.post_id]) {
-            groupedPostComments[c.post_id] = [];
-          }
-          if (!groupedPostComments[c.post_id].some((existing) => existing.id === c.id)) {
-            groupedPostComments[c.post_id].push({
-              id: c.id,
-              post_id: c.post_id,
-              user_id: c.user_id || null,
-              author_name: c.author_name || "Member",
-              author_avatar: c.author_avatar,
-              content: c.content,
-              created_at: c.created_at,
-              updated_at: c.updated_at
-            });
-          }
-        });
-      }
-      this.postComments = groupedPostComments;
-      try {
-        const { data: eventsData } = await supabaseExecute(
-          (client) => client.from("events").select("*, linked_post:posts(*)").order("deadline_date", { ascending: true })
-        );
-        if (eventsData && Array.isArray(eventsData)) {
-          this.events = eventsData;
-        }
-      } catch {
-      }
-      this.persistCache();
-      this.notify();
-    } catch (e) {
-      console.warn("Supabase sync error:", e);
-    }
-  }
-  // Getters
-  getCurrentUser() {
-    return this.currentUser;
-  }
-  setCurrentUser(user) {
-    this.currentUser = user;
-    if (user && user.email) {
-      const lowerEmail = user.email.trim().toLowerCase();
-      let syncedCount = 0;
-      Object.keys(this.postComments).forEach((key) => {
-        this.postComments[key] = this.postComments[key].map((comment) => {
-          if (!comment.user_id && comment.author_email && comment.author_email.toLowerCase() === lowerEmail) {
-            syncedCount++;
-            return {
-              ...comment,
-              user_id: user.id,
-              author_avatar: user.avatar_url || comment.author_avatar
-            };
-          }
-          return comment;
-        });
-      });
-      if (syncedCount > 0) {
-        this.persistCache();
-      }
-    }
-    this.notify();
-    if (user) {
-      this.refreshCurrentUserRole().catch(() => {
-      });
-      if (isSupabaseConfigured()) {
-        this.syncFromSupabase().catch(() => {
-        });
-      }
-    }
-  }
-  switchDemoRole(role) {
-    if (role === "guest") {
-      this.currentUser = null;
-      if (isSupabaseConfigured()) {
-        supabase.auth.signOut().catch(() => {
-        });
-      }
-    } else if (role === "admin") {
-      this.currentUser = {
-        id: "admin-demo-id",
-        email: "admin@startupcreme.com",
-        full_name: "Startup Cr\xE8me Admin",
-        avatar_url: "/logo.jpg",
-        role: "admin",
-        created_at: (/* @__PURE__ */ new Date()).toISOString(),
-        updated_at: (/* @__PURE__ */ new Date()).toISOString()
-      };
-    } else {
-      this.currentUser = {
-        id: "user-demo-id",
-        email: "editor@startupcreme.com",
-        full_name: "Community Member",
-        avatar_url: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200",
-        role: "user",
-        created_at: (/* @__PURE__ */ new Date()).toISOString(),
-        updated_at: (/* @__PURE__ */ new Date()).toISOString()
-      };
-    }
-    this.notify();
-  }
-  async ensureUserInDb(user) {
-    const fallbackUUID = "00000000-0000-0000-0000-000000000001";
-    if (!user) return fallbackUUID;
-    const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.id);
-    const targetUserId = isValidUUID ? user.id : user.role === "admin" ? "00000000-0000-0000-0000-000000000001" : "00000000-0000-0000-0000-000000000002";
-    if (isSupabaseConfigured()) {
-      try {
-        let existingUser = null;
-        if (isValidUUID) {
-          const { data } = await supabase.schema("startupcreme").from("users").select("id, role, full_name, avatar_url").eq("id", targetUserId).maybeSingle();
-          if (data) existingUser = data;
-        }
-        if (!existingUser && user.email) {
-          const { data } = await supabase.schema("startupcreme").from("users").select("id, role, full_name, avatar_url").ilike("email", user.email.trim()).maybeSingle();
-          if (data) existingUser = data;
-        }
-        if (existingUser) {
-          if (existingUser.role && this.currentUser) {
-            const dbRole = existingUser.role.trim().toLowerCase() === "admin" ? "admin" : "user";
-            if (this.currentUser.role !== dbRole) {
-              this.currentUser.role = dbRole;
-              this.notify();
-            }
-          }
-          return existingUser.id || targetUserId;
-        }
-        await supabase.schema("startupcreme").from("users").insert({
-          id: targetUserId,
-          email: user.email || "user@startupcreme.com",
-          full_name: user.full_name || "Community Member",
-          avatar_url: user.avatar_url || "https://picsum.photos/seed/user/100/100",
-          role: user.role || "user"
-        });
-      } catch (e) {
-        console.warn("ensureUserInDb notice:", e);
-      }
-    }
-    return targetUserId;
-  }
-  getPosts(locale = "en-us", vertical, statusOnly = "published") {
-    return this.posts.filter((p) => {
-      const matchesLocale = p.locale.toLowerCase() === locale.toLowerCase() || p.locale === "en-us";
-      const matchesVertical = !vertical ? true : vertical === "founders-mindset" ? p.vertical === "founders-mindset" : p.vertical === vertical || Boolean(p.dual_silo) && (p.vertical === "finance" || p.vertical === "tech");
-      const matchesStatus = statusOnly ? p.status === statusOnly : true;
-      return matchesLocale && matchesVertical && matchesStatus;
-    });
-  }
-  getAllPosts() {
-    return [...this.posts];
-  }
-  getPostBySlug(slug, locale = "en-us", vertical) {
-    if (!slug) return void 0;
-    const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
-    let found = this.posts.find((p) => {
-      const matchSlug = p.slug.toLowerCase() === decodedSlug || p.id.toLowerCase() === decodedSlug;
-      const matchVert = !vertical ? true : vertical === "founders-mindset" ? p.vertical === "founders-mindset" : p.vertical === vertical || Boolean(p.dual_silo) && (p.vertical === "finance" || p.vertical === "tech");
-      return matchSlug && matchVert;
-    });
-    if (!found) {
-      found = this.posts.find((p) => p.slug.toLowerCase() === decodedSlug || p.id.toLowerCase() === decodedSlug);
-    }
-    if (!found && decodedSlug.length > 8) {
-      found = this.posts.find((p) => {
-        const pSlug = p.slug.toLowerCase();
-        return decodedSlug.includes(pSlug) || pSlug.includes(decodedSlug);
-      });
-    }
-    return found;
-  }
-  async fetchPostBySlug(slug, locale = "en-us", vertical) {
-    const existing = this.getPostBySlug(slug, locale, vertical);
-    if (existing) return existing;
-    if (!isSupabaseConfigured()) return null;
-    const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
-    try {
-      const { data: postsData } = await supabaseExecute(
-        (client) => client.from("posts").select("*").or(`slug.ilike.${decodedSlug},id.ilike.${decodedSlug}`).maybeSingle()
-      );
-      if (postsData) {
-        const post = {
-          ...postsData,
-          cover_image: normalizeImageUrl(postsData.cover_image)
-        };
-        const map = /* @__PURE__ */ new Map();
-        map.set(post.slug, post);
-        this.posts.forEach((p) => {
-          if (!map.has(p.slug)) map.set(p.slug, p);
-        });
-        this.posts = Array.from(map.values());
-        this.persistCache();
-        this.notify();
-        return post;
-      }
-      if (decodedSlug.length > 8) {
-        const shortSlug = decodedSlug.slice(-20);
-        const { data: fuzzyData } = await supabaseExecute(
-          (client) => client.from("posts").select("*").ilike("slug", `%${shortSlug}%`).limit(1)
-        );
-        if (fuzzyData && fuzzyData.length > 0) {
-          const post = {
-            ...fuzzyData[0],
-            cover_image: normalizeImageUrl(fuzzyData[0].cover_image)
-          };
-          const map = /* @__PURE__ */ new Map();
-          map.set(post.slug, post);
-          this.posts.forEach((p) => {
-            if (!map.has(p.slug)) map.set(p.slug, p);
-          });
-          this.posts = Array.from(map.values());
-          this.persistCache();
-          this.notify();
-          return post;
-        }
-      }
-    } catch (e) {
-      console.warn("fetchPostBySlug exception:", e);
-    }
-    return null;
-  }
-  async fetchTopicBySlug(slug) {
-    const existing = this.getDiscussionTopicBySlug(slug);
-    if (existing) return existing;
-    if (!isSupabaseConfigured()) return null;
-    const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
-    try {
-      const { data: topicData } = await supabaseExecute(
-        (client) => client.from("discussion_topics").select("*").or(`slug.ilike.${decodedSlug},id.ilike.${decodedSlug}`).maybeSingle()
-      );
-      if (topicData) {
-        const topic = topicData;
-        const map = /* @__PURE__ */ new Map();
-        map.set(topic.slug, topic);
-        this.topics.forEach((t) => {
-          if (!map.has(t.slug)) map.set(t.slug, t);
-        });
-        this.topics = Array.from(map.values());
-        this.persistCache();
-        this.notify();
-        return topic;
-      }
-    } catch (e) {
-      console.warn("fetchTopicBySlug exception:", e);
-    }
-    return null;
-  }
-  getPostComments(postId) {
-    const targetPost = this.posts.find((p) => p.id === postId || p.slug === postId);
-    const listById = this.postComments[postId] || [];
-    const listByTargetId = targetPost?.id ? this.postComments[targetPost.id] || [] : [];
-    const listByTargetSlug = targetPost?.slug ? this.postComments[targetPost.slug] || [] : [];
-    const combined = [...listById, ...listByTargetId, ...listByTargetSlug];
-    const unique = /* @__PURE__ */ new Map();
-    combined.forEach((c) => unique.set(c.id, c));
-    return Array.from(unique.values()).sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-  }
-  async addPostComment(postId, content, guestInfo) {
-    const isGuest = !this.currentUser;
-    if (isGuest && (!guestInfo || !guestInfo.author_name?.trim() || !guestInfo.author_email?.trim())) {
-      console.warn("Guest comment missing author_name or author_email");
-      return null;
-    }
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const commentId = `comment-${Date.now()}`;
-    let targetPost = this.posts.find((p) => p.id === postId || p.slug === postId);
-    let effectivePostId = targetPost?.id || postId;
-    if (isSupabaseConfigured() && targetPost) {
-      const isValidPostUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetPost.id);
-      if (!isValidPostUUID) {
-        const { data: foundPost } = await supabaseExecute(
-          (client) => client.from("posts").select("id, slug").eq("slug", targetPost.slug).maybeSingle()
-        );
-        if (foundPost?.id) {
-          targetPost.id = foundPost.id;
-          effectivePostId = foundPost.id;
-        } else {
-          const saveRes = await this.savePost(targetPost);
-          if (saveRes.success && saveRes.post?.id) {
-            targetPost = saveRes.post;
-            effectivePostId = saveRes.post.id;
-          }
-        }
-      } else {
-        effectivePostId = targetPost.id;
-      }
-    }
-    const authorName = this.currentUser ? this.currentUser.full_name : guestInfo.author_name.trim();
-    const authorEmail = this.currentUser ? this.currentUser.email || null : guestInfo.author_email.trim().toLowerCase();
-    const authorAvatar = this.currentUser ? this.currentUser.avatar_url : null;
-    const userId = this.currentUser ? this.currentUser.id : null;
-    const newComment = {
-      id: commentId,
-      post_id: effectivePostId,
-      user_id: userId,
-      author_name: authorName,
-      author_email: authorEmail,
-      author_avatar: authorAvatar,
-      content: content.trim(),
-      created_at: now,
-      updated_at: now
-    };
-    const keysToUpdate = /* @__PURE__ */ new Set([postId, effectivePostId]);
-    if (targetPost) {
-      if (targetPost.id) keysToUpdate.add(targetPost.id);
-      if (targetPost.slug) keysToUpdate.add(targetPost.slug);
-    }
-    keysToUpdate.forEach((k) => {
-      if (!this.postComments[k]) {
-        this.postComments[k] = [];
-      }
-      if (!this.postComments[k].some((c) => c.id === newComment.id)) {
-        this.postComments[k].unshift(newComment);
-      }
-    });
-    this.persistCache();
-    this.notify();
-    if (!isSupabaseConfigured()) {
-      return newComment;
-    }
-    const isValidUserUUID = Boolean(userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId));
-    const postCommentPayload = {
-      post_id: effectivePostId,
-      user_id: isValidUserUUID ? userId : null,
-      author_name: authorName,
-      author_email: authorEmail,
-      author_avatar: authorAvatar,
-      content: content.trim(),
-      created_at: now,
-      updated_at: now
-    };
-    const res = await supabaseExecute(
-      (client) => client.from("comments").insert(postCommentPayload).select("id, post_id, user_id, author_name, author_avatar, content, created_at, updated_at")
-    );
-    if (res.error) {
-      console.warn("Notice saving article comment to Supabase (using local state fallback):", res.error?.message || res.error);
-    } else if (res.data && res.data[0]) {
-      const realCommentId = res.data[0].id;
-      newComment.id = realCommentId;
-      keysToUpdate.forEach((k) => {
-        const item = this.postComments[k]?.find((c) => c.id === commentId);
-        if (item) item.id = realCommentId;
-      });
-      this.persistCache();
-      this.notify();
-      console.log("Article comment saved to Supabase startupcreme schema successfully:", res.data[0]);
-    }
-    return newComment;
-  }
-  // Admin CRUD for Posts
-  async savePost(post) {
-    const isUUID = (val) => Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
-    const existingIndex = this.posts.findIndex(
-      (p) => post.id && p.id === post.id || p.slug === post.slug && p.locale === post.locale && p.vertical === post.vertical
-    );
-    const originalPost = existingIndex >= 0 ? { ...this.posts[existingIndex] } : null;
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    let savedPost;
-    if (existingIndex >= 0) {
-      const mergedVertical = post.vertical || this.posts[existingIndex].vertical;
-      savedPost = {
-        ...this.posts[existingIndex],
-        ...post,
-        vertical: mergedVertical,
-        dual_silo: mergedVertical === "founders-mindset" ? false : post.dual_silo !== void 0 ? Boolean(post.dual_silo) : this.posts[existingIndex].dual_silo,
-        cover_image: normalizeImageUrl(post.cover_image || this.posts[existingIndex].cover_image),
-        updated_at: now
-      };
-      this.posts[existingIndex] = savedPost;
-    } else {
-      const targetVertical = post.vertical || "finance";
-      savedPost = {
-        id: post.id || `post-${Date.now()}`,
-        slug: post.slug || "new-post-" + Date.now(),
-        locale: post.locale || "en-us",
-        vertical: targetVertical,
-        title: post.title || "Untitled Article",
-        excerpt: post.excerpt || "",
-        content: post.content || "",
-        status: post.status || "draft",
-        meta_description: post.meta_description || "",
-        canonical_url: post.canonical_url || "",
-        cover_image: normalizeImageUrl(post.cover_image) || "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&q=80&w=1200",
-        author_name: post.author_name || this.currentUser?.full_name || "Startup Cr\xE8me Editorial",
-        author_role: post.author_role || "Senior Analyst",
-        author_avatar: post.author_avatar || this.currentUser?.avatar_url,
-        dual_silo: targetVertical === "founders-mindset" ? false : Boolean(post.dual_silo),
-        silo_badge: post.silo_badge || "",
-        tags: post.tags || ["Finance", "Tech"],
-        reading_time_minutes: post.reading_time_minutes || 5,
-        word_count: post.word_count || 800,
-        created_at: post.created_at || now,
-        updated_at: now
-      };
-      this.posts.unshift(savedPost);
-    }
-    this.persistCache();
-    this.notify();
-    if (!isSupabaseConfigured()) {
-      return { success: true, post: savedPost };
-    }
-    const contentPayload = typeof savedPost.content === "object" ? JSON.stringify(savedPost.content) : savedPost.content;
-    const basePayload = {
-      slug: savedPost.slug,
-      locale: savedPost.locale,
-      vertical: savedPost.vertical,
-      title: savedPost.title,
-      excerpt: savedPost.excerpt,
-      content: contentPayload,
-      status: savedPost.status,
-      meta_description: savedPost.meta_description,
-      canonical_url: savedPost.canonical_url,
-      cover_image: savedPost.cover_image,
-      author_name: savedPost.author_name,
-      author_role: savedPost.author_role,
-      author_avatar: savedPost.author_avatar,
-      dual_silo: savedPost.dual_silo,
-      silo_badge: savedPost.silo_badge,
-      tags: savedPost.tags,
-      reading_time_minutes: savedPost.reading_time_minutes,
-      word_count: savedPost.word_count,
-      updated_at: now
-    };
-    try {
-      let targetDbId = null;
-      if (isUUID(savedPost.id)) {
-        targetDbId = savedPost.id;
-      } else if (originalPost && isUUID(originalPost.id)) {
-        targetDbId = originalPost.id;
-      } else if (isUUID(post.id)) {
-        targetDbId = post.id;
-      }
-      if (!targetDbId) {
-        const slugToCheck = originalPost?.slug || savedPost.slug;
-        if (slugToCheck) {
-          const { data: existingRow } = await supabaseExecute(
-            (client) => client.from("posts").select("id").eq("slug", slugToCheck).maybeSingle()
-          );
-          if (existingRow?.id && isUUID(existingRow.id)) {
-            targetDbId = existingRow.id;
-            savedPost.id = existingRow.id;
-            if (existingIndex >= 0) {
-              this.posts[existingIndex].id = existingRow.id;
-            }
-          }
-        }
-      }
-      if (targetDbId) {
-        const res2 = await supabaseExecute(
-          (client) => client.from("posts").update(basePayload).eq("id", targetDbId).select()
-        );
-        if (res2.error) {
-          const errorMsg = res2.error?.message || String(res2.error);
-          console.error("Failed to update post in Supabase:", errorMsg);
-          if (res2.error?.code === "23505" || errorMsg.includes("unique") || errorMsg.includes("duplicate key")) {
-            return {
-              success: false,
-              post: savedPost,
-              error: `An article with the slug "${savedPost.slug}" already exists in the ${savedPost.vertical} vertical.`
-            };
-          }
-          return { success: false, post: savedPost, error: errorMsg };
-        }
-        if (res2.data && res2.data[0]) {
-          savedPost.id = res2.data[0].id;
-          savedPost.updated_at = res2.data[0].updated_at;
-          this.persistCache();
-          this.notify();
-          console.log("Post updated in Supabase database successfully:", res2.data[0].id);
-          return { success: true, post: savedPost };
-        }
-      }
-      const insertPayload = {
-        ...basePayload,
-        created_at: savedPost.created_at || now
-      };
-      let res = await supabaseExecute(
-        (client) => client.from("posts").insert(insertPayload).select()
-      );
-      if (res.error) {
-        const errorMsg = res.error?.message || String(res.error);
-        console.error("Failed to insert post into Supabase database:", errorMsg);
-        if (res.error?.code === "23505" || errorMsg.includes("unique") || errorMsg.includes("duplicate key")) {
-          return {
-            success: false,
-            post: savedPost,
-            error: `An article with the slug "${savedPost.slug}" already exists in the ${savedPost.vertical} vertical. Please choose a different slug.`
-          };
-        }
-        return { success: false, post: savedPost, error: errorMsg };
-      }
-      if (res.data && res.data[0]) {
-        savedPost.id = res.data[0].id;
-        savedPost.created_at = res.data[0].created_at;
-        savedPost.updated_at = res.data[0].updated_at;
-        this.persistCache();
-        this.notify();
-        console.log("Post inserted into Supabase database successfully:", res.data[0].id);
-      }
-      return { success: true, post: savedPost };
-    } catch (err) {
-      const exceptionMsg = err?.message || "Database execution exception";
-      console.error("Exception during post save to Supabase:", exceptionMsg);
-      return { success: false, post: savedPost, error: exceptionMsg };
-    }
-  }
-  async deletePost(id) {
-    const postToDelete = this.posts.find((p) => p.id === id);
-    this.posts = this.posts.filter((p) => p.id !== id);
-    this.persistCache();
-    this.notify();
-    if (postToDelete && isSupabaseConfigured()) {
-      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-      if (isUUID) {
-        await supabaseExecute(
-          (client) => client.from("posts").delete().eq("id", id)
-        );
-      } else if (postToDelete.slug) {
-        await supabaseExecute(
-          (client) => client.from("posts").delete().eq("slug", postToDelete.slug)
-        );
-      }
-    }
-  }
-  async togglePostStatus(id) {
-    const post = this.posts.find((p) => p.id === id);
-    if (post) {
-      post.status = post.status === "published" ? "draft" : "published";
-      post.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-      this.persistCache();
-      this.notify();
-      if (isSupabaseConfigured()) {
-        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-        if (isUUID) {
-          await supabaseExecute(
-            (client) => client.from("posts").update({ status: post.status, updated_at: post.updated_at }).eq("id", id)
-          );
-        } else if (post.slug) {
-          await supabaseExecute(
-            (client) => client.from("posts").update({ status: post.status, updated_at: post.updated_at }).eq("slug", post.slug)
-          );
-        }
-      }
-    }
-  }
-  // Discussion Forum Methods
-  getDiscussionTopics(category) {
-    if (!category || category === "all") return [...this.topics];
-    return this.topics.filter((t) => t.category === category);
-  }
-  getDiscussionTopicBySlug(slug) {
-    if (!slug) return void 0;
-    const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
-    let found = this.topics.find((t) => t.slug.toLowerCase() === decodedSlug || t.id.toLowerCase() === decodedSlug);
-    if (!found && decodedSlug.length > 8) {
-      found = this.topics.find((t) => {
-        const tSlug = t.slug.toLowerCase();
-        return decodedSlug.includes(tSlug) || tSlug.includes(decodedSlug);
-      });
-    }
-    return found;
-  }
-  async createDiscussionTopic(data) {
-    if (!this.currentUser) return null;
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const topicUuid = crypto.randomUUID();
-    const baseSlug = data.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "") || "topic";
-    const uniqueSlug = `${baseSlug}-${Date.now().toString(36)}`;
-    let pollObj = void 0;
-    if (data.pollQuestion && data.pollOptions && data.pollOptions.filter((o) => o.trim()).length > 0) {
-      const pollUuid = crypto.randomUUID();
-      const validOptions = data.pollOptions.filter((o) => o.trim());
-      pollObj = {
-        id: pollUuid,
-        topic_id: topicUuid,
-        question: data.pollQuestion.trim(),
-        total_votes: 0,
-        created_at: now,
-        options: validOptions.map((opt) => ({
-          id: crypto.randomUUID(),
-          poll_id: pollUuid,
-          option_text: opt.trim(),
-          votes: 0
-        }))
-      };
-    }
-    const newTopic = {
-      id: topicUuid,
-      slug: uniqueSlug,
-      title: data.title,
-      content: data.content,
-      category: data.category,
-      user_id: this.currentUser.id,
-      author_name: this.currentUser.full_name,
-      author_handle: `@${this.currentUser.full_name.toLowerCase().replace(/\s+/g, "")}`,
-      author_avatar: this.currentUser.avatar_url,
-      upvotes: 0,
-      downvotes: 0,
-      tags: data.tags || [],
-      comment_count: 0,
-      poll: pollObj,
-      created_at: now,
-      updated_at: now
-    };
-    this.topics.unshift(newTopic);
-    this.notify();
-    if (!isSupabaseConfigured()) return newTopic;
-    const validUserId = await this.ensureUserInDb(this.currentUser);
-    const topicPayload = {
-      id: topicUuid,
-      slug: uniqueSlug,
-      title: newTopic.title,
-      content: newTopic.content,
-      category: newTopic.category,
-      author_name: newTopic.author_name,
-      author_handle: newTopic.author_handle,
-      author_avatar: newTopic.author_avatar,
-      upvotes: 0,
-      downvotes: 0,
-      tags: newTopic.tags || [],
-      comment_count: 0,
-      user_id: validUserId,
-      created_at: now,
-      updated_at: now
-    };
-    const res = await supabaseExecute(
-      (client) => client.from("discussion_topics").insert(topicPayload).select()
-    );
-    if (res.error) {
-      console.error("Failed saving discussion topic to Supabase:", res.error?.message || res.error);
-    } else if (res.data && res.data[0]) {
-      const createdDbTopic = res.data[0];
-      newTopic.id = createdDbTopic.id;
-      if (pollObj) {
-        const pollInsertRes = await supabaseExecute(
-          (client) => client.from("discussion_polls").insert({
-            id: pollObj.id,
-            topic_id: createdDbTopic.id,
-            question: pollObj.question,
-            total_votes: 0,
-            created_at: now
-          }).select()
-        ).catch((err) => {
-          console.warn("Error saving to discussion_polls table:", err);
-          return { data: null };
-        });
-        const dbPoll = pollInsertRes.data && pollInsertRes.data[0] ? pollInsertRes.data[0] : null;
-        const actualPollId = dbPoll ? dbPoll.id : pollObj.id;
-        newTopic.poll = {
-          ...pollObj,
-          id: actualPollId,
-          topic_id: createdDbTopic.id
-        };
-        if (pollObj.options && pollObj.options.length > 0) {
-          const optionsPayload = pollObj.options.map((opt) => ({
-            id: opt.id,
-            poll_id: actualPollId,
-            option_text: opt.option_text,
-            votes: 0
-          }));
-          const optionsInsertRes = await supabaseExecute(
-            (client) => client.from("discussion_poll_options").insert(optionsPayload).select()
-          ).catch((err) => {
-            console.warn("Error saving options to discussion_poll_options table:", err);
-            return { data: null };
-          });
-          if (optionsInsertRes.data && optionsInsertRes.data.length > 0) {
-            newTopic.poll.options = optionsInsertRes.data.map((opt) => ({
-              id: opt.id,
-              poll_id: opt.poll_id,
-              option_text: opt.option_text,
-              votes: opt.votes || 0
-            }));
-          }
-        }
-      }
-      this.notify();
-      console.log("Discussion topic and poll saved to Supabase startupcreme schema successfully:", createdDbTopic);
-    }
-    return newTopic;
-  }
-  async voteTopic(topicId, type) {
-    if (!this.currentUser) return;
-    const topic = this.topics.find((t) => t.id === topicId || t.slug === topicId);
-    if (!topic) return;
-    const key = topic.id;
-    const currentVote = this.topicUserVotes[key] || this.topicUserVotes[topicId] || (topic.slug ? this.topicUserVotes[topic.slug] : null);
-    if (currentVote === type) {
-      if (type === "up") topic.upvotes = Math.max(0, topic.upvotes - 1);
-      if (type === "down") topic.downvotes = Math.max(0, topic.downvotes - 1);
-      this.topicUserVotes[key] = null;
-      this.topicUserVotes[topicId] = null;
-      if (topic.slug) this.topicUserVotes[topic.slug] = null;
-    } else {
-      if (currentVote === "up") topic.upvotes = Math.max(0, topic.upvotes - 1);
-      if (currentVote === "down") topic.downvotes = Math.max(0, topic.downvotes - 1);
-      if (type === "up") topic.upvotes += 1;
-      if (type === "down") topic.downvotes += 1;
-      this.topicUserVotes[key] = type;
-      this.topicUserVotes[topicId] = type;
-      if (topic.slug) this.topicUserVotes[topic.slug] = type;
-    }
-    this.notify();
-    if (!isSupabaseConfigured()) return;
-    const isTopicUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(topic.id);
-    await supabaseExecute((client) => {
-      const q = client.from("discussion_topics").update({
-        upvotes: topic.upvotes,
-        downvotes: topic.downvotes
-      });
-      return isTopicUUID ? q.eq("id", topic.id) : q.eq("slug", topic.slug);
-    });
-    const isUserUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(this.currentUser.id);
-    if (isTopicUUID && isUserUUID) {
-      await supabaseExecute(
-        (client) => client.from("discussion_topic_votes").upsert({
-          topic_id: topic.id,
-          user_id: this.currentUser.id,
-          vote_type: type
-        })
-      ).catch(() => {
-      });
-    }
-  }
-  getUserTopicVote(topicId) {
-    return this.topicUserVotes[topicId] || null;
-  }
-  async votePoll(pollId, optionId) {
-    if (!this.currentUser) return;
-    const topic = this.topics.find((t) => t.poll && (t.poll.id === pollId || t.poll.options.some((o) => o.id === optionId)));
-    if (!topic || !topic.poll) return;
-    const existingOptionId = this.pollUserVotes[pollId] || this.pollUserVotes[topic.poll.id];
-    if (existingOptionId === optionId) {
-      return;
-    }
-    if (existingOptionId) {
-      const prevOpt = topic.poll.options.find((o) => o.id === existingOptionId);
-      if (prevOpt) prevOpt.votes = Math.max(0, prevOpt.votes - 1);
-    } else {
-      topic.poll.total_votes += 1;
-    }
-    const newOpt = topic.poll.options.find((o) => o.id === optionId);
-    if (newOpt) {
-      newOpt.votes += 1;
-    }
-    this.pollUserVotes[pollId] = optionId;
-    if (topic.poll.id) this.pollUserVotes[topic.poll.id] = optionId;
-    this.notify();
-    if (!isSupabaseConfigured()) return;
-    const validUserId = await this.ensureUserInDb(this.currentUser);
-    const realPollId = topic.poll.id;
-    const isPollUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(realPollId);
-    const isOptUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(optionId);
-    if (isPollUUID && isOptUUID) {
-      const voteRes = await supabaseExecute(
-        (client) => client.from("discussion_poll_votes").upsert({
-          poll_id: realPollId,
-          user_id: validUserId,
-          option_id: optionId
-        }, { onConflict: "poll_id,user_id" })
-      );
-      if (voteRes.error) {
-        await supabaseExecute(
-          (client) => client.from("discussion_poll_votes").delete().eq("poll_id", realPollId).eq("user_id", validUserId)
-        );
-        await supabaseExecute(
-          (client) => client.from("discussion_poll_votes").insert({
-            poll_id: realPollId,
-            user_id: validUserId,
-            option_id: optionId
-          })
-        );
-      }
-    }
-    if (isOptUUID && newOpt) {
-      await supabaseExecute(
-        (client) => client.from("discussion_poll_options").update({ votes: newOpt.votes }).eq("id", newOpt.id)
-      ).catch(() => {
-      });
-    }
-    if (existingOptionId) {
-      const prevOpt = topic.poll.options.find((o) => o.id === existingOptionId);
-      if (prevOpt && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(prevOpt.id)) {
-        await supabaseExecute(
-          (client) => client.from("discussion_poll_options").update({ votes: prevOpt.votes }).eq("id", prevOpt.id)
-        ).catch(() => {
-        });
-      }
-    }
-    if (isPollUUID) {
-      await supabaseExecute(
-        (client) => client.from("discussion_polls").update({ total_votes: topic.poll.total_votes }).eq("id", realPollId)
-      ).catch(() => {
-      });
-    }
-  }
-  getUserPollVote(pollId) {
-    return this.pollUserVotes[pollId];
-  }
-  getTopicComments(topicId) {
-    return this.discussionComments[topicId] || [];
-  }
-  async addDiscussionComment(topicId, content, parentId) {
-    if (!this.currentUser) return null;
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const commentId = `dcomm-${Date.now()}`;
-    const newComment = {
-      id: commentId,
-      topic_id: topicId,
-      parent_id: parentId || null,
-      user_id: this.currentUser.id,
-      author_name: this.currentUser.full_name,
-      author_handle: `@${this.currentUser.full_name.toLowerCase().replace(/\s+/g, "")}`,
-      author_avatar: this.currentUser.avatar_url,
-      content,
-      upvotes: 0,
-      downvotes: 0,
-      created_at: now,
-      updated_at: now,
-      replies: []
-    };
-    if (!this.discussionComments[topicId]) {
-      this.discussionComments[topicId] = [];
-    }
-    if (parentId) {
-      const addReply = (list) => {
-        for (const item of list) {
-          if (item.id === parentId) {
-            if (!item.replies) item.replies = [];
-            item.replies.push(newComment);
-            return true;
-          }
-          if (item.replies && addReply(item.replies)) return true;
-        }
-        return false;
-      };
-      addReply(this.discussionComments[topicId]);
-    } else {
-      this.discussionComments[topicId].unshift(newComment);
-    }
-    const topic = this.topics.find((t) => t.id === topicId || t.slug === topicId);
-    if (topic) {
-      topic.comment_count += 1;
-    }
-    this.notify();
-    if (!isSupabaseConfigured()) return newComment;
-    let targetTopicUUID = topicId;
-    if (topic) {
-      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(topic.id);
-      if (isUUID) {
-        targetTopicUUID = topic.id;
-      } else if (topic.slug) {
-        const { data: dbTopic } = await supabaseExecute(
-          (client) => client.from("discussion_topics").select("id").eq("slug", topic.slug).maybeSingle()
-        );
-        if (dbTopic?.id) {
-          topic.id = dbTopic.id;
-          targetTopicUUID = dbTopic.id;
-        }
-      }
-    }
-    const validUserId = await this.ensureUserInDb(this.currentUser);
-    const commentPayload = {
-      topic_id: targetTopicUUID,
-      parent_id: parentId || null,
-      user_id: validUserId,
-      author_name: this.currentUser.full_name,
-      author_handle: `@${this.currentUser.full_name.toLowerCase().replace(/\s+/g, "")}`,
-      author_avatar: this.currentUser.avatar_url,
-      content,
-      upvotes: 0,
-      downvotes: 0,
-      created_at: now,
-      updated_at: now
-    };
-    const res = await supabaseExecute(
-      (client) => client.from("discussion_comments").insert(commentPayload).select()
-    );
-    if (res.error) {
-      console.warn("Notice saving discussion comment to Supabase (using local state fallback):", res.error?.message || res.error);
-    } else if (res.data && res.data[0]) {
-      newComment.id = res.data[0].id;
-      this.notify();
-      console.log("Discussion comment saved to Supabase startupcreme schema successfully:", res.data[0]);
-    }
-    if (topic) {
-      const isTopicUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(topic.id);
-      await supabaseExecute((client) => {
-        const q = client.from("discussion_topics").update({ comment_count: topic.comment_count });
-        return isTopicUUID ? q.eq("id", topic.id) : q.eq("slug", topic.slug);
-      });
-    }
-    return newComment;
-  }
-  async voteComment(commentId, topicId, type) {
-    if (!this.currentUser) return;
-    const commentsList = this.discussionComments[topicId] || [];
-    let updatedItem = null;
-    const findAndVote = (list) => {
-      for (const item of list) {
-        if (item.id === commentId) {
-          const currentVote = this.commentUserVotes[commentId];
-          if (currentVote === type) {
-            if (type === "up") item.upvotes = Math.max(0, item.upvotes - 1);
-            if (type === "down") item.downvotes = Math.max(0, item.downvotes - 1);
-            this.commentUserVotes[commentId] = null;
-          } else {
-            if (currentVote === "up") item.upvotes = Math.max(0, item.upvotes - 1);
-            if (currentVote === "down") item.downvotes = Math.max(0, item.downvotes - 1);
-            if (type === "up") item.upvotes += 1;
-            if (type === "down") item.downvotes += 1;
-            this.commentUserVotes[commentId] = type;
-          }
-          updatedItem = item;
-          return true;
-        }
-        if (item.replies && findAndVote(item.replies)) return true;
-      }
-      return false;
-    };
-    findAndVote(commentsList);
-    this.notify();
-    if (!isSupabaseConfigured() || !updatedItem) return;
-    const targetComment = updatedItem;
-    const isCommentUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetComment.id);
-    await supabaseExecute((client) => {
-      if (isCommentUUID) {
-        return client.from("discussion_comments").update({
-          upvotes: targetComment.upvotes,
-          downvotes: targetComment.downvotes
-        }).eq("id", targetComment.id);
-      } else {
-        return client.from("discussion_comments").update({
-          upvotes: targetComment.upvotes,
-          downvotes: targetComment.downvotes
-        }).eq("content", targetComment.content);
-      }
-    });
-    const isUserUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(this.currentUser.id);
-    if (isCommentUUID && isUserUUID) {
-      await supabaseExecute(
-        (client) => client.from("discussion_comment_votes").upsert({
-          comment_id: targetComment.id,
-          user_id: this.currentUser.id,
-          vote_type: type
-        })
-      ).catch(() => {
-      });
-    }
-  }
-  getUserCommentVote(commentId) {
-    return this.commentUserVotes[commentId] || null;
-  }
-  async deleteTopic(topicId) {
-    const topicToDelete = this.topics.find((t) => t.id === topicId);
-    this.topics = this.topics.filter((t) => t.id !== topicId);
-    delete this.discussionComments[topicId];
-    this.notify();
-    if (topicToDelete) {
-      await supabaseExecute(
-        (client) => client.from("discussion_topics").delete().or(`id.eq.${topicId},slug.eq.${topicToDelete.slug}`)
-      );
-    }
-  }
-  // Bookmarks
-  toggleBookmark(postId) {
-    if (this.bookmarks.has(postId)) {
-      this.bookmarks.delete(postId);
-    } else {
-      this.bookmarks.add(postId);
-    }
-    this.notify();
-  }
-  isBookmarked(postId) {
-    return this.bookmarks.has(postId);
-  }
-  // Newsletter Subscribers
-  async subscribeNewsletter(email, source = "footer", vertical = "all", locale = "en-us") {
-    const trimmed = email.trim().toLowerCase();
-    if (!trimmed) return { success: false, error: "Email address is required." };
-    if (!isSupabaseConfigured()) {
-      return {
-        success: false,
-        error: "Supabase URL & Anon Key are not configured yet. Please enter your Supabase connection keys in the Database modal."
-      };
-    }
-    const payload = {
-      email: trimmed,
-      source,
-      vertical,
-      locale,
-      status: "active",
-      updated_at: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    try {
-      let res = await supabaseExecute(
-        (client) => client.from("newsletter_subscribers").upsert(payload, { onConflict: "email" })
-      );
-      if (res.error) {
-        res = await supabaseExecute(
-          (client) => client.from("newsletter_subscribers").insert(payload)
-        );
-      }
-      if (res.error) {
-        const errorMsg = res.error.message || String(res.error);
-        console.warn("Newsletter subscription database error:", errorMsg);
-        return { success: false, error: errorMsg };
-      }
-      console.log("Newsletter subscription recorded in Supabase database:", trimmed);
-      return { success: true };
-    } catch (err) {
-      console.warn("Newsletter subscription exception:", err);
-      return { success: false, error: err?.message || "Database execution exception" };
-    }
-  }
-  // --------------------------------------------------------------------
-  // MODULE 2: Startup & FinTech Directory (startupcreme.startups)
-  // --------------------------------------------------------------------
-  async getRequestAuthHeaders() {
-    const headers = {
-      "Content-Type": "application/json"
-    };
-    if (this.currentUser) {
-      headers["x-user-id"] = this.currentUser.id;
-      headers["x-user-role"] = this.currentUser.role;
-    }
-    if (isSupabaseConfigured()) {
-      try {
-        const {
-          data: { session }
-        } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          headers["Authorization"] = `Bearer ${session.access_token}`;
-        }
-      } catch {
-      }
-    }
-    return headers;
-  }
-  getStartups(includePending = false) {
-    return this.startups.filter(
-      (s) => !SAMPLE_STARTUP_SLUGS.includes(s.slug) && (includePending || s.is_approved)
-    );
-  }
-  async fetchStartups(includePending = false) {
-    try {
-      const resp = await fetch(`/api/directory?includePending=${includePending ? "true" : "false"}`);
-      if (resp.ok) {
-        const body = await resp.json();
-        if (Array.isArray(body.startups)) {
-          this.startups = body.startups.filter(
-            (s) => !SAMPLE_STARTUP_SLUGS.includes(s.slug)
-          );
-          this.notify();
-          return this.getStartups(includePending);
-        }
-      }
-    } catch {
-    }
-    if (isSupabaseConfigured()) {
-      await supabaseExecute(
-        (client) => client.from("startups").delete().in("slug", SAMPLE_STARTUP_SLUGS)
-      ).catch(() => {
-      });
-      const { data, error } = await supabaseExecute((client) => {
-        let q = client.from("startups").select("*").order("created_at", { ascending: false });
-        if (!includePending) q = q.eq("is_approved", true);
-        return q;
-      });
-      if (!error && Array.isArray(data)) {
-        this.startups = data.filter((s) => !SAMPLE_STARTUP_SLUGS.includes(s.slug));
-        this.notify();
-      }
-    }
-    return this.getStartups(includePending);
-  }
-  async submitStartup(payload) {
-    if (!this.currentUser) {
-      return {
-        success: false,
-        error: "You must be signed in to submit a startup."
-      };
-    }
-    const isAdmin = this.currentUser.role === "admin";
-    const isApproved = isAdmin;
-    const cleanSlug = payload.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + "-" + Math.random().toString(36).substring(2, 6);
-    const validUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      this.currentUser.id
-    ) ? this.currentUser.id : null;
-    const optimisticStartup = {
-      id: `st-${Date.now()}`,
-      name: payload.name.trim(),
-      slug: cleanSlug,
-      tagline: payload.tagline.trim(),
-      description: payload.description.trim(),
-      website_url: payload.website_url.trim(),
-      logo_url: payload.logo_url?.trim() || null,
-      stage: payload.stage || "mvp",
-      vertical: payload.vertical.trim() || "FinTech",
-      tech_stack: payload.tech_stack,
-      submitted_by: validUuid,
-      is_approved: isApproved,
-      created_at: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    try {
-      const headers = await this.getRequestAuthHeaders();
-      const resp = await fetch("/api/directory", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          ...optimisticStartup,
-          submitted_by: this.currentUser.id,
-          userRole: this.currentUser.role,
-          is_approved: isApproved
-        })
-      });
-      if (resp.ok) {
-        const body = await resp.json();
-        if (body.startup) {
-          this.startups = [body.startup, ...this.startups.filter((s) => s.id !== body.startup.id)];
-          this.notify();
-          return { success: true, startup: body.startup };
-        }
-      }
-    } catch {
-    }
-    if (isSupabaseConfigured()) {
-      const { data, error } = await supabaseExecute(
-        (client) => client.from("startups").insert({
-          name: optimisticStartup.name,
-          slug: optimisticStartup.slug,
-          tagline: optimisticStartup.tagline,
-          description: optimisticStartup.description,
-          website_url: optimisticStartup.website_url,
-          logo_url: optimisticStartup.logo_url,
-          stage: optimisticStartup.stage,
-          vertical: optimisticStartup.vertical,
-          tech_stack: optimisticStartup.tech_stack,
-          submitted_by: validUuid,
-          is_approved: isApproved
-        }).select("*").single()
-      );
-      if (!error && data) {
-        this.startups = [data, ...this.startups];
-        this.notify();
-        return { success: true, startup: data };
-      }
-    }
-    this.startups = [optimisticStartup, ...this.startups];
-    this.notify();
-    return { success: true, startup: optimisticStartup };
-  }
-  async approveStartup(id, isApproved = true) {
-    if (!this.currentUser || this.currentUser.role !== "admin") {
-      return { success: false, error: "Admin privileges required." };
-    }
-    this.startups = this.startups.map(
-      (s) => s.id === id ? { ...s, is_approved: isApproved } : s
-    );
-    this.notify();
-    try {
-      const headers = await this.getRequestAuthHeaders();
-      await fetch(`/api/directory/${encodeURIComponent(id)}/approve`, {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify({
-          is_approved: isApproved,
-          userId: this.currentUser.id,
-          userRole: this.currentUser.role
-        })
-      });
-    } catch {
-    }
-    if (isSupabaseConfigured()) {
-      await supabaseExecute(
-        (client) => client.from("startups").update({ is_approved: isApproved }).eq("id", id)
-      );
-    }
-    return { success: true };
-  }
-  async deleteStartup(id) {
-    if (!this.currentUser || this.currentUser.role !== "admin") {
-      return { success: false, error: "Admin privileges required." };
-    }
-    this.startups = this.startups.filter((s) => s.id !== id && s.slug !== id);
-    this.notify();
-    try {
-      const headers = await this.getRequestAuthHeaders();
-      await fetch(`/api/directory/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-        headers
-      });
-    } catch {
-    }
-    if (isSupabaseConfigured()) {
-      await supabaseExecute(
-        (client) => client.from("startups").delete().eq("id", id)
-      );
-    }
-    return { success: true };
-  }
-  // --------------------------------------------------------------------
-  // MODULE 3: Macro & Cloud Rate Trackers (startupcreme.rate_snapshots)
-  // --------------------------------------------------------------------
-  getRateSnapshot() {
-    return this.rateSnapshot;
-  }
-  async fetchRateSnapshot() {
-    try {
-      const resp = await fetch("/api/markets/rates");
-      if (resp.ok) {
-        const snapshot = await resp.json();
-        if (snapshot && Array.isArray(snapshot.central_bank_rates)) {
-          this.rateSnapshot = snapshot;
-          this.notify();
-          return this.rateSnapshot;
-        }
-      }
-    } catch {
-    }
-    if (isSupabaseConfigured()) {
-      const { data, error } = await supabaseExecute(
-        (client) => client.from("rate_snapshots").select("*").order("recorded_at", { ascending: false }).limit(1).maybeSingle()
-      );
-      if (!error && data && Array.isArray(data.central_bank_rates) && data.central_bank_rates.length > 0) {
-        this.rateSnapshot = {
-          id: data.id,
-          source: data.source || "supabase_rate_snapshots",
-          recorded_at: data.recorded_at || data.created_at,
-          central_bank_rates: data.central_bank_rates,
-          cloud_pricing_index: data.cloud_pricing_index || this.rateSnapshot.cloud_pricing_index
-        };
-        this.notify();
-      }
-    }
-    return this.rateSnapshot;
-  }
-  async triggerRateWebhookSync() {
-    try {
-      const resp = await fetch("/api/webhooks/n8n/rates", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source: "n8n_scheduled_webhook_sync",
-          central_bank_rates: this.rateSnapshot.central_bank_rates,
-          cloud_pricing_index: this.rateSnapshot.cloud_pricing_index
-        })
-      });
-      if (resp.ok) {
-        const body = await resp.json();
-        if (body.snapshot) {
-          this.rateSnapshot = body.snapshot;
-          this.notify();
-          return this.rateSnapshot;
-        }
-      }
-    } catch {
-    }
-    this.rateSnapshot = {
-      ...this.rateSnapshot,
-      recorded_at: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    this.notify();
-    return this.rateSnapshot;
-  }
-  // --------------------------------------------------------------------
-  // MODULE 4: Niche Remote Startup Job & Fractional Talent Board (startupcreme.jobs)
-  // --------------------------------------------------------------------
-  getJobs(includePending = false) {
-    return this.jobs.filter(
-      (j) => !SAMPLE_JOB_TITLES.includes(j.title) && (includePending || j.is_active)
-    );
-  }
-  async fetchJobs(includePending = false) {
-    try {
-      const resp = await fetch(`/api/careers?includePending=${includePending ? "true" : "false"}`);
-      if (resp.ok) {
-        const body = await resp.json();
-        if (Array.isArray(body.jobs)) {
-          this.jobs = body.jobs.filter(
-            (j) => !SAMPLE_JOB_TITLES.includes(j.title)
-          );
-          this.notify();
-          return this.getJobs(includePending);
-        }
-      }
-    } catch {
-    }
-    if (isSupabaseConfigured()) {
-      await supabaseExecute(
-        (client) => client.from("jobs").delete().in("title", SAMPLE_JOB_TITLES)
-      ).catch(() => {
-      });
-      const { data, error } = await supabaseExecute((client) => {
-        let q = client.from("jobs").select("*").order("created_at", { ascending: false });
-        if (!includePending) q = q.eq("is_active", true);
-        return q;
-      });
-      if (!error && Array.isArray(data)) {
-        this.jobs = data.filter((j) => !SAMPLE_JOB_TITLES.includes(j.title));
-        this.notify();
-      }
-    }
-    return this.getJobs(includePending);
-  }
-  async postJob(payload) {
-    if (!this.currentUser) {
-      return {
-        success: false,
-        error: "You must be signed in to post a job."
-      };
-    }
-    const isAdmin = this.currentUser.role === "admin";
-    const isActive = isAdmin;
-    const optimisticJob = {
-      id: `job-${Date.now()}`,
-      title: payload.title.trim(),
-      company_name: payload.company_name.trim(),
-      company_logo: payload.company_logo?.trim() || null,
-      location: payload.location.trim() || "Remote (Global)",
-      job_type: payload.job_type.trim() || "Full-time",
-      category: payload.category.trim() || "Engineering",
-      apply_url: payload.apply_url.trim(),
-      salary_range: payload.salary_range?.trim() || null,
-      is_active: isActive,
-      created_at: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    try {
-      const headers = await this.getRequestAuthHeaders();
-      const resp = await fetch("/api/careers", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          ...optimisticJob,
-          userId: this.currentUser.id,
-          userRole: this.currentUser.role,
-          is_active: isActive
-        })
-      });
-      if (resp.ok) {
-        const body = await resp.json();
-        if (body.job) {
-          this.jobs = [body.job, ...this.jobs.filter((j) => j.id !== body.job.id)];
-          this.notify();
-          return { success: true, job: body.job };
-        }
-      }
-    } catch {
-    }
-    if (isSupabaseConfigured()) {
-      const { data, error } = await supabaseExecute(
-        (client) => client.from("jobs").insert({
-          title: optimisticJob.title,
-          company_name: optimisticJob.company_name,
-          company_logo: optimisticJob.company_logo,
-          location: optimisticJob.location,
-          job_type: optimisticJob.job_type,
-          category: optimisticJob.category,
-          apply_url: optimisticJob.apply_url,
-          salary_range: optimisticJob.salary_range,
-          is_active: isActive
-        }).select("*").single()
-      );
-      if (!error && data) {
-        this.jobs = [data, ...this.jobs];
-        this.notify();
-        return { success: true, job: data };
-      }
-    }
-    this.jobs = [optimisticJob, ...this.jobs];
-    this.notify();
-    return { success: true, job: optimisticJob };
-  }
-  async approveJob(id, isActive = true) {
-    if (!this.currentUser || this.currentUser.role !== "admin") {
-      return { success: false, error: "Admin privileges required." };
-    }
-    this.jobs = this.jobs.map(
-      (j) => j.id === id ? { ...j, is_active: isActive } : j
-    );
-    this.notify();
-    try {
-      const headers = await this.getRequestAuthHeaders();
-      await fetch(`/api/careers/${encodeURIComponent(id)}/approve`, {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify({
-          is_active: isActive,
-          userId: this.currentUser.id,
-          userRole: this.currentUser.role
-        })
-      });
-    } catch {
-    }
-    if (isSupabaseConfigured()) {
-      await supabaseExecute(
-        (client) => client.from("jobs").update({ is_active: isActive }).eq("id", id)
-      );
-    }
-    return { success: true };
-  }
-  async deleteJob(id) {
-    if (!this.currentUser || this.currentUser.role !== "admin") {
-      return { success: false, error: "Admin privileges required." };
-    }
-    this.jobs = this.jobs.filter((j) => j.id !== id);
-    this.notify();
-    try {
-      const headers = await this.getRequestAuthHeaders();
-      await fetch(`/api/careers/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-        headers
-      });
-    } catch {
-    }
-    if (isSupabaseConfigured()) {
-      await supabaseExecute(
-        (client) => client.from("jobs").delete().eq("id", id)
-      );
-    }
-    return { success: true };
-  }
-  // --------------------------------------------------------------------
-  // MODULE 5: Grants, Accelerators & Events Opportunity Board (startupcreme.events)
-  // --------------------------------------------------------------------
-  getEvents() {
-    return this.events;
-  }
-  async fetchEvents(type, search) {
-    try {
-      const params = new URLSearchParams();
-      if (type && type !== "all") params.set("type", type);
-      if (search) params.set("search", search);
-      const resp = await fetch(`/api/events?${params.toString()}`);
-      if (resp.ok) {
-        const body = await resp.json();
-        if (Array.isArray(body.events)) {
-          this.events = body.events;
-          this.notify();
-          return this.events;
-        }
-      }
-    } catch {
-    }
-    if (isSupabaseConfigured()) {
-      const { data, error } = await supabaseExecute((client) => {
-        let q = client.from("events").select("*, linked_post:posts(*)").order("deadline_date", { ascending: true });
-        if (type && type !== "all") {
-          q = q.ilike("opportunity_type", `%${type}%`);
-        }
-        return q;
-      });
-      if (!error && Array.isArray(data)) {
-        this.events = data;
-        this.notify();
-      }
-    }
-    return this.events;
-  }
-  async deleteEvent(id) {
-    if (!this.currentUser || this.currentUser.role !== "admin") {
-      return { success: false, error: "Admin privileges required." };
-    }
-    this.events = this.events.filter((e) => e.id !== id);
-    this.notify();
-    try {
-      const headers = await this.getRequestAuthHeaders();
-      await fetch(`/api/events/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-        headers
-      });
-    } catch {
-    }
-    if (isSupabaseConfigured()) {
-      await supabaseExecute(
-        (client) => client.from("events").delete().eq("id", id)
-      );
-    }
-    return { success: true };
-  }
-  async clearAllEvents() {
-    if (!this.currentUser || this.currentUser.role !== "admin") {
-      return { success: false, error: "Admin privileges required." };
-    }
-    const previousEvents = [...this.events];
-    this.events = [];
-    this.notify();
-    try {
-      const headers = await this.getRequestAuthHeaders();
-      for (const e of previousEvents) {
-        await fetch(`/api/events/${encodeURIComponent(e.id)}`, {
-          method: "DELETE",
-          headers
-        }).catch(() => {
-        });
-      }
-    } catch {
-    }
-    if (isSupabaseConfigured()) {
-      await supabaseExecute(
-        (client) => client.from("events").delete().neq("id", "00000000-0000-0000-0000-000000000000")
-      ).catch(() => {
-      });
-    }
-    return { success: true };
-  }
-};
-var store = new StartupCremeStore();
-
-// src/ai/agents/research/providers.ts
-var GeminiResearchProvider = class {
-  constructor() {
-    this.name = "gemini_frontier";
-  }
-  isAvailable() {
-    const key = typeof process !== "undefined" ? process.env?.GEMINI_API_KEY : void 0;
-    return Boolean(key && key !== "MY_GEMINI_API_KEY" && key.trim().length > 0);
-  }
-  async conductResearch(input) {
-    const apiKey = typeof process !== "undefined" ? process.env?.GEMINI_API_KEY : void 0;
-    if (!apiKey) {
-      throw new Error("GEMINI_API_KEY is not configured in the environment.");
-    }
-    const ai = new GoogleGenAI({ apiKey });
-    const systemInstructions = `
-You are the Lead Intelligence Researcher for StartupCr\xE8me (${STARTUPCREME_CONSTITUTION.tagline}).
-Your core mandate is rigorous, verified, high-conviction research on deep technology, venture capital, financial markets, and founder mindset & leadership psychology.
-
-EDITORIAL CONSTITUTION ENFORCEMENT:
-1. Zero tolerance for hallucinations: Do NOT invent founders, funding amounts, dates, or non-existent companies.
-2. Fact-grounding: Every claim must cite the specific market evidence or known dynamic.
-3. Target Audience: Founders, VC investors, software engineers, financial strategists, and executive leaders.
-4. Voice: Precise, analytical, institutional, sober, high-signal.
-
-When investigating the "founders-mindset" vertical, focus on:
-- Founder psychology under extreme uncertainty and stress
-- Executive resilience and high-stakes decision frameworks
-- Team culture design, mental models, and scaling leadership
-- Strategic long-term focus vs short-term noise
-
-You must return valid JSON matching this exact structure:
-{
-  "topic": string,
-  "summary": string,
-  "key_claims": [
-    { "claim": string, "evidence_basis": string, "confidence": number (0.0 to 1.0) }
-  ],
-  "sources": [
-    { "title": string, "url": optional string, "publisher": string, "credibility_score": number (0.0 to 1.0) }
-  ],
-  "important_entities": [
-    { "name": string, "type": "company" | "person" | "technology" | "institution" | "regulatory_body" | "market", "context": string }
-  ],
-  "relevant_dates": [
-    { "date_or_timeframe": string, "significance": string }
-  ],
-  "potential_article_angles": [
-    { "title_proposal": string, "angle": string, "target_audience": string, "suggested_vertical": "finance" | "tech" | "founders-mindset" }
-  ],
-  "confidence": number (0.0 to 1.0),
-  "recommended_next_action": "draft_article" | "further_investigation" | "archive_idea"
-}
-`;
-    const prompt = `
-Conduct in-depth research on the following topic:
-Topic: "${input.topic}"
-Vertical Preference: ${input.vertical || "auto-detect based on context (finance vs tech vs founders-mindset)"}
-Depth: ${input.depth || "standard"}
-Focus Areas: ${input.focus_areas?.length ? input.focus_areas.join(", ") : "core mechanics, capital implications, strategic landscape, founder psychology"}
-Target Locale: ${input.target_locale || "en-us"}
-`;
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: prompt,
-      config: {
-        systemInstruction: systemInstructions,
-        responseMimeType: "application/json"
-      }
-    });
-    const text = response.text || "";
-    if (!text) {
-      throw new Error("Gemini API returned empty response for research query.");
-    }
-    try {
-      const parsed = JSON.parse(text);
-      return parsed;
-    } catch (e) {
-      throw new Error(`Failed to parse Gemini research JSON: ${e.message}. Raw: ${text.slice(0, 200)}`);
-    }
-  }
-};
-var ArchiveResearchProvider = class {
-  constructor() {
-    this.name = "startupcreme_archive";
-  }
-  isAvailable() {
-    return true;
-  }
-  async conductResearch(input) {
-    const q = input.topic.toLowerCase();
-    const posts = store.getPosts();
-    const matches = posts.filter(
-      (p) => p.title.toLowerCase().includes(q) || p.excerpt.toLowerCase().includes(q) || p.tags.some((t) => t.toLowerCase().includes(q))
-    ).slice(0, 5);
-    const vertical = input.vertical || matches[0]?.vertical || "tech";
-    return {
-      topic: input.topic,
-      summary: matches.length > 0 ? `StartupCr\xE8me archive contains ${matches.length} closely related pieces regarding "${input.topic}", focusing primarily on ${matches.map((m) => m.title).join("; ")}.` : `StartupCr\xE8me archive query for "${input.topic}" yielded an untapped coverage opportunity with zero direct duplicates in the catalog.`,
-      key_claims: matches.map((m) => ({
-        claim: `Historical coverage: "${m.title}" documented sector progression.`,
-        evidence_basis: `Published on StartupCr\xE8me (${m.created_at?.slice(0, 10) || "2026"}).`,
-        confidence: 0.95
-      })).concat([
-        {
-          claim: `Coverage opportunity exists for deeper contemporary analysis on ${input.topic}.`,
-          evidence_basis: "StartupCr\xE8me internal editorial catalog gap analysis.",
-          confidence: 0.88
-        }
-      ]),
-      sources: matches.map((m) => ({
-        title: m.title,
-        publisher: "StartupCr\xE8me Editorial",
-        url: `https://startupcreme.com/${m.locale || "en-us"}/${m.vertical}/${m.slug}`,
-        credibility_score: 0.98
-      })).concat([
-        {
-          title: "StartupCr\xE8me Intelligence Index",
-          publisher: "StartupCr\xE8me Research Desk",
-          url: "https://startupcreme.com/research",
-          credibility_score: 0.95
-        }
-      ]),
-      important_entities: [
-        {
-          name: "StartupCr\xE8me Editorial Network",
-          type: "institution",
-          context: "Primary media and intelligence publication platform."
-        }
-      ],
-      relevant_dates: [
-        {
-          date_or_timeframe: "2026-Present",
-          significance: "Active contemporary coverage cycle."
-        }
-      ],
-      potential_article_angles: [
-        {
-          title_proposal: `${input.topic}: Architectural Imperatives and Market Dynamics`,
-          angle: `Deep-dive exploration of ${input.topic} targeting institutional operators and venture builders.`,
-          target_audience: "Founders and Senior Operators",
-          suggested_vertical: vertical
-        }
-      ],
-      confidence: 0.85,
-      recommended_next_action: "draft_article"
-    };
-  }
-};
-var FallbackResearchProvider = class {
-  constructor() {
-    this.name = "deterministic_fallback";
-  }
-  isAvailable() {
-    return true;
-  }
-  async conductResearch(input) {
-    const q = input.topic.toLowerCase();
-    const isFM = q.includes("mindset") || q.includes("founder") || q.includes("psychology") || q.includes("resilience") || q.includes("leadership");
-    const isFin = q.includes("finance") || q.includes("treasury") || q.includes("yield") || q.includes("capital") || q.includes("ipo");
-    const vertical = input.vertical || (isFM ? "founders-mindset" : isFin ? "finance" : "tech");
-    return {
-      topic: input.topic,
-      summary: `Structured baseline research synthesis regarding "${input.topic}". Market participants and engineering leaders are tracking architectural shifts and capital efficiencies in this sector.`,
-      key_claims: [
-        {
-          claim: `Significant acceleration in adoption and capital deployment observed across ${input.topic}.`,
-          evidence_basis: "Aggregated industry data, quarterly earnings commentary, and developer ecosystem benchmarks.",
-          confidence: 0.9
-        },
-        {
-          claim: "Operational cost advantages drive institutional transition away from legacy alternatives.",
-          evidence_basis: "Sector unit economic analysis and reported ROI metrics.",
-          confidence: 0.86
-        }
-      ],
-      sources: [
-        {
-          title: `${input.topic} Market Intelligence Report`,
-          publisher: "StartupCr\xE8me Research Desk",
-          credibility_score: 0.92
-        },
-        {
-          title: "Industry Sector Benchmarks 2026",
-          publisher: "Technology & Capital Analytics Institute",
-          credibility_score: 0.88
-        }
-      ],
-      important_entities: [
-        {
-          name: input.topic.split(" ")[0] || "Core Entity",
-          type: vertical === "finance" ? "market" : "technology",
-          context: "Primary subject of investigation."
-        }
-      ],
-      relevant_dates: [
-        {
-          date_or_timeframe: "Q1-Q3 2026",
-          significance: "Inflection period for sector validation and commercial milestones."
-        }
-      ],
-      potential_article_angles: [
-        {
-          title_proposal: `Why ${input.topic} Is Reshaping Modern Market Infrastructure`,
-          angle: "Strategic implications for Series A-C founders and technical leadership.",
-          target_audience: "Founders, VCs, and System Architects",
-          suggested_vertical: vertical
-        }
-      ],
-      confidence: 0.88,
-      recommended_next_action: "draft_article"
-    };
-  }
-};
-
-// src/ai/policies/policyEngine.ts
-var PolicyEngine = class {
-  /**
-   * Evaluates an intended action against the StartupCrème Editorial Constitution.
-   */
-  static evaluateAction(action, isAutomatedAgent = true) {
-    const normalized = action.toLowerCase().trim();
-    const isRedAction = STARTUPCREME_CONSTITUTION.policyClassification.red.allowedActions.includes(normalized) || normalized.includes("database_schema") || normalized.includes("delete_database") || normalized.includes("drop_table") || normalized.includes("raw_sql") || normalized.includes("modify_security");
-    if (isRedAction) {
-      return {
-        action: normalized,
-        level: "red",
-        requiresApproval: true,
-        isAllowed: false,
-        reason: `Forbidden autonomous action: '${normalized}' is classified as RED (strictly forbidden for autonomous AI agents; manual human administrative execution required).`
-      };
-    }
-    if (STARTUPCREME_CONSTITUTION.policyClassification.yellow.allowedActions.includes(normalized)) {
-      return {
-        action: normalized,
-        level: "yellow",
-        requiresApproval: true,
-        isAllowed: true,
-        reason: `Action '${normalized}' is classified as YELLOW (affects public content or distribution; requires human editorial approval).`
-      };
-    }
-    if (STARTUPCREME_CONSTITUTION.policyClassification.green.allowedActions.includes(normalized)) {
-      return {
-        action: normalized,
-        level: "green",
-        requiresApproval: false,
-        isAllowed: true,
-        reason: `Action '${normalized}' is classified as GREEN (safe, non-destructive, or draft-only; autonomous execution permitted).`
-      };
-    }
-    return {
-      action: normalized,
-      level: "yellow",
-      requiresApproval: true,
-      isAllowed: true,
-      reason: `Action '${normalized}' is not explicitly classified in the constitution; defaulted to YELLOW for human safety oversight.`
-    };
-  }
-  /**
-   * Validates if a content draft violates forbidden claims or lack of sources.
-   */
-  static validateContentSanity(claimsCount, sourcesCount, confidence) {
-    if (claimsCount > 0 && sourcesCount === 0) {
-      return {
-        valid: false,
-        reason: "Zero sources provided for factual claims. Constitution mandates verified evidence basis."
-      };
-    }
-    if (confidence < 0.4) {
-      return {
-        valid: false,
-        reason: `Confidence score (${confidence}) is below the acceptable threshold (0.40) for publication consideration.`
-      };
-    }
-    return { valid: true };
-  }
-};
-
-// src/ai/agents/research/researchAgent.ts
-var ResearchAgent = class {
-  constructor(customProviders) {
-    this.id = "agent_research";
-    this.name = "StartupCr\xE8me Research Agent";
-    this.description = "Conducts deep, factual, verified research on technology, finance, startups, and market shifts.";
-    this.version = "1.0.0";
-    this.capabilities = [
-      "deep_topic_investigation",
-      "claim_fact_grounding",
-      "source_credibility_scoring",
-      "entity_extraction",
-      "article_angle_generation"
-    ];
-    this.permissions = [
-      "content:read",
-      "analytics:read",
-      "research:execute"
-    ];
-    this.defaultPolicyLevel = "green";
-    this.inputSchema = ResearchInputSchema;
-    this.outputSchema = ResearchOutputSchema;
-    this.providers = customProviders || [
-      new GeminiResearchProvider(),
-      new ArchiveResearchProvider(),
-      new FallbackResearchProvider()
-    ];
-  }
-  validateInput(input) {
-    const res = this.inputSchema.safeParse(input);
-    if (!res.success) {
-      return { success: false, errors: res.error.issues };
-    }
-    return { success: true, data: res.data };
-  }
-  validateOutput(output) {
-    const res = this.outputSchema.safeParse(output);
-    if (!res.success) {
-      return { success: false, errors: res.error.issues };
-    }
-    return { success: true, data: res.data };
-  }
-  async execute(input, context) {
-    const startTime = (/* @__PURE__ */ new Date()).toISOString();
-    const t0 = Date.now();
-    const inputValidation = this.validateInput(input);
-    if (!inputValidation.success) {
-      const err = inputValidation.errors?.map((e) => `${e.path.join(".")}: ${e.message}`).join("; ");
-      return {
-        success: false,
-        error: `Input validation failed: ${err}`,
-        confidence: 0,
-        reasoningSummary: "Execution aborted due to invalid input schema.",
-        audit: {
-          agentId: this.id,
-          agentName: this.name,
-          startTime,
-          endTime: (/* @__PURE__ */ new Date()).toISOString(),
-          durationMs: Date.now() - t0,
-          confidenceScore: 0
-        }
-      };
-    }
-    const validatedInput = inputValidation.data;
-    let selectedProviderName = "none";
-    let rawOutput = null;
-    let executionError = null;
-    for (const provider of this.providers) {
-      if (provider.isAvailable()) {
-        try {
-          selectedProviderName = provider.name;
-          rawOutput = await provider.conductResearch(validatedInput);
-          if (rawOutput) break;
-        } catch (err) {
-          executionError = err?.message || "Provider failure";
-          console.warn(`[ResearchAgent] Provider '${provider.name}' failed, attempting fallback:`, err?.message);
-        }
-      }
-    }
-    if (!rawOutput) {
-      return {
-        success: false,
-        error: `All research providers failed. Last error: ${executionError || "No provider available"}`,
-        confidence: 0,
-        reasoningSummary: "Research investigation could not be completed across all configured providers.",
-        audit: {
-          agentId: this.id,
-          agentName: this.name,
-          startTime,
-          endTime: (/* @__PURE__ */ new Date()).toISOString(),
-          durationMs: Date.now() - t0,
-          confidenceScore: 0
-        }
-      };
-    }
-    const outputValidation = this.validateOutput(rawOutput);
-    if (!outputValidation.success) {
-      const issues = outputValidation.errors?.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ");
-      return {
-        success: false,
-        error: `Research output failed validation contract: ${issues}`,
-        confidence: 0,
-        reasoningSummary: "Provider produced malformed research output violating Zod schema requirements.",
-        audit: {
-          agentId: this.id,
-          agentName: this.name,
-          startTime,
-          endTime: (/* @__PURE__ */ new Date()).toISOString(),
-          durationMs: Date.now() - t0,
-          modelUsed: selectedProviderName,
-          confidenceScore: 0
-        }
-      };
-    }
-    const validatedOutput = outputValidation.data;
-    const sanity = PolicyEngine.validateContentSanity(
-      validatedOutput.key_claims.length,
-      validatedOutput.sources.length,
-      validatedOutput.confidence
-    );
-    if (!sanity.valid) {
-      return {
-        success: false,
-        error: `Editorial Constitution violation: ${sanity.reason}`,
-        confidence: validatedOutput.confidence,
-        reasoningSummary: "Output failed editorial constitution factuality rules.",
-        audit: {
-          agentId: this.id,
-          agentName: this.name,
-          startTime,
-          endTime: (/* @__PURE__ */ new Date()).toISOString(),
-          durationMs: Date.now() - t0,
-          modelUsed: selectedProviderName,
-          claimsVerified: validatedOutput.key_claims.length,
-          sourcesExamined: validatedOutput.sources.length,
-          confidenceScore: validatedOutput.confidence
-        }
-      };
-    }
-    const audit = {
-      agentId: this.id,
-      agentName: this.name,
-      startTime,
-      endTime: (/* @__PURE__ */ new Date()).toISOString(),
-      durationMs: Date.now() - t0,
-      modelUsed: selectedProviderName,
-      claimsVerified: validatedOutput.key_claims.length,
-      sourcesExamined: validatedOutput.sources.length,
-      confidenceScore: validatedOutput.confidence
-    };
-    return {
-      success: true,
-      data: validatedOutput,
-      confidence: validatedOutput.confidence,
-      reasoningSummary: `Synthesized ${validatedOutput.key_claims.length} claims backed by ${validatedOutput.sources.length} sources. Proposed ${validatedOutput.potential_article_angles.length} article angles using provider '${selectedProviderName}'.`,
-      audit
-    };
-  }
-};
-
-// src/ai/orchestrator/aiDatabase.ts
-import { createClient as createClient2 } from "@supabase/supabase-js";
-var AIDatabase = class _AIDatabase {
-  constructor() {
-    this.client = null;
-    this.isConfigured = false;
-    this.hasServiceRole = false;
-    this.initClient();
-  }
-  static getInstance() {
-    if (!_AIDatabase.instance) {
-      _AIDatabase.instance = new _AIDatabase();
-    }
-    return _AIDatabase.instance;
-  }
-  initClient() {
-    const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || "";
-    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
-    const chosenKey = serviceRoleKey || anonKey;
-    if (url && chosenKey && !url.includes("your-supabase-project")) {
-      try {
-        this.client = createClient2(url, chosenKey, {
-          db: {
-            schema: "startupcreme"
-          },
-          auth: {
-            persistSession: false,
-            autoRefreshToken: false
-          }
-        });
-        this.isConfigured = true;
-        this.hasServiceRole = Boolean(serviceRoleKey);
-      } catch (e) {
-        console.warn("[AIDatabase] Failed to initialize Supabase client:", e);
-        this.client = null;
-        this.isConfigured = false;
-      }
-    }
-  }
-  isAvailable() {
-    return this.isConfigured && this.client !== null;
-  }
-  getStatus() {
-    return {
-      configured: this.isConfigured,
-      hasServiceRole: this.hasServiceRole,
-      targetSchema: "startupcreme"
-    };
-  }
-  // --------------------------------------------------------------------
-  // AI Tasks Persistence
-  // --------------------------------------------------------------------
-  async findTaskByIdempotencyKey(key) {
-    if (!this.client || !this.isConfigured) return null;
-    try {
-      const { data, error } = await this.client.from("ai_tasks").select("*").eq("idempotency_key", key).order("created_at", { ascending: false }).limit(1).maybeSingle();
-      if (error) {
-        console.warn("[AIDatabase] findTaskByIdempotencyKey error:", error.message);
-        return null;
-      }
-      return data;
-    } catch (err) {
-      console.warn("[AIDatabase] findTaskByIdempotencyKey exception:", err?.message);
-      return null;
-    }
-  }
-  async getTask(taskId) {
-    if (!this.client || !this.isConfigured) return null;
-    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskId);
-    if (!isUUID) return null;
-    try {
-      const { data, error } = await this.client.from("ai_tasks").select("*").eq("id", taskId).maybeSingle();
-      if (error) {
-        console.warn("[AIDatabase] getTask error:", error.message);
-        return null;
-      }
-      return data;
-    } catch (err) {
-      console.warn("[AIDatabase] getTask exception:", err?.message);
-      return null;
-    }
-  }
-  async insertTask(task) {
-    if (!this.client || !this.isConfigured) return false;
-    try {
-      const row = {
-        id: task.id,
-        task_type: task.task_type,
-        priority: task.priority,
-        status: task.status,
-        requested_by: task.requested_by,
-        assigned_agent: task.assigned_agent,
-        payload: task.payload || {},
-        result: task.result || null,
-        error: task.error || null,
-        retry_count: task.retry_count || 0,
-        idempotency_key: task.idempotency_key || null,
-        approval_id: task.approval_id || null,
-        created_at: task.created_at,
-        updated_at: task.updated_at,
-        completed_at: task.completed_at || null
-      };
-      const { error } = await this.client.from("ai_tasks").insert(row);
-      if (error) {
-        console.warn("[AIDatabase] insertTask error:", error.message);
-        return false;
-      }
-      return true;
-    } catch (err) {
-      console.warn("[AIDatabase] insertTask exception:", err?.message);
-      return false;
-    }
-  }
-  async updateTask(taskId, updates) {
-    if (!this.client || !this.isConfigured) return false;
-    try {
-      const payload = {
-        updated_at: (/* @__PURE__ */ new Date()).toISOString()
-      };
-      if (updates.status !== void 0) payload.status = updates.status;
-      if (updates.result !== void 0) payload.result = updates.result;
-      if (updates.error !== void 0) payload.error = updates.error;
-      if (updates.retry_count !== void 0) payload.retry_count = updates.retry_count;
-      if (updates.completed_at !== void 0) payload.completed_at = updates.completed_at;
-      if (updates.approval_id !== void 0) payload.approval_id = updates.approval_id;
-      const { error } = await this.client.from("ai_tasks").update(payload).eq("id", taskId);
-      if (error) {
-        console.warn("[AIDatabase] updateTask error:", error.message);
-        return false;
-      }
-      return true;
-    } catch (err) {
-      console.warn("[AIDatabase] updateTask exception:", err?.message);
-      return false;
-    }
-  }
-  async listTasks(limit = 50, status) {
-    if (!this.client || !this.isConfigured) return [];
-    try {
-      let query = this.client.from("ai_tasks").select("*").order("created_at", { ascending: false }).limit(limit);
-      if (status) {
-        query = query.eq("status", status);
-      }
-      const { data, error } = await query;
-      if (error) {
-        console.warn("[AIDatabase] listTasks error:", error.message);
-        return [];
-      }
-      return data || [];
-    } catch (err) {
-      console.warn("[AIDatabase] listTasks exception:", err?.message);
-      return [];
-    }
-  }
-  // --------------------------------------------------------------------
-  // AI Actions (Audit Log)
-  // --------------------------------------------------------------------
-  async insertAction(action) {
-    if (!this.client || !this.isConfigured) return false;
-    try {
-      const row = {
-        id: action.id,
-        task_id: action.task_id || null,
-        agent: action.agent,
-        action: action.action,
-        status: action.status,
-        policy_level: action.policy_level,
-        input_summary: action.input_summary || null,
-        output_summary: action.output_summary || null,
-        confidence: action.confidence || null,
-        reason: action.reason || null,
-        target_entity: action.target_entity || null,
-        target_entity_id: action.target_entity_id || null,
-        error: action.error || null,
-        created_at: action.created_at,
-        completed_at: action.completed_at || null
-      };
-      const { error } = await this.client.from("ai_actions").insert(row);
-      if (error) {
-        console.warn("[AIDatabase] insertAction error:", error.message);
-        return false;
-      }
-      return true;
-    } catch (err) {
-      console.warn("[AIDatabase] insertAction exception:", err?.message);
-      return false;
-    }
-  }
-  async listActions(limit = 50) {
-    if (!this.client || !this.isConfigured) return [];
-    try {
-      const { data, error } = await this.client.from("ai_actions").select("*").order("created_at", { ascending: false }).limit(limit);
-      if (error) {
-        console.warn("[AIDatabase] listActions error:", error.message);
-        return [];
-      }
-      return data || [];
-    } catch (err) {
-      console.warn("[AIDatabase] listActions exception:", err?.message);
-      return [];
-    }
-  }
-  // --------------------------------------------------------------------
-  // AI Approvals Persistence
-  // --------------------------------------------------------------------
-  async insertApproval(approval) {
-    if (!this.client || !this.isConfigured) return false;
-    try {
-      const row = {
-        id: approval.id,
-        task_id: approval.task_id || null,
-        action_name: approval.action_name,
-        agent: approval.agent,
-        policy_level: approval.policy_level,
-        status: approval.status,
-        description: approval.description,
-        payload: approval.payload || {},
-        decided_by: approval.decided_by || null,
-        decision_reason: approval.decision_reason || null,
-        created_at: approval.created_at,
-        decided_at: approval.decided_at || null
-      };
-      const { error } = await this.client.from("ai_approvals").insert(row);
-      if (error) {
-        console.warn("[AIDatabase] insertApproval error:", error.message);
-        return false;
-      }
-      return true;
-    } catch (err) {
-      console.warn("[AIDatabase] insertApproval exception:", err?.message);
-      return false;
-    }
-  }
-  async updateApproval(approvalId, updates) {
-    if (!this.client || !this.isConfigured) return false;
-    try {
-      const payload = {};
-      if (updates.status !== void 0) payload.status = updates.status;
-      if (updates.decided_by !== void 0) payload.decided_by = updates.decided_by;
-      if (updates.decision_reason !== void 0) payload.decision_reason = updates.decision_reason;
-      if (updates.decided_at !== void 0) payload.decided_at = updates.decided_at;
-      const { error } = await this.client.from("ai_approvals").update(payload).eq("id", approvalId);
-      if (error) {
-        console.warn("[AIDatabase] updateApproval error:", error.message);
-        return false;
-      }
-      return true;
-    } catch (err) {
-      console.warn("[AIDatabase] updateApproval exception:", err?.message);
-      return false;
-    }
-  }
-  async getApproval(approvalId) {
-    if (!this.client || !this.isConfigured) return null;
-    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(approvalId);
-    if (!isUUID) return null;
-    try {
-      const { data, error } = await this.client.from("ai_approvals").select("*").eq("id", approvalId).maybeSingle();
-      if (error) {
-        console.warn("[AIDatabase] getApproval error:", error.message);
-        return null;
-      }
-      return data;
-    } catch (err) {
-      console.warn("[AIDatabase] getApproval exception:", err?.message);
-      return null;
-    }
-  }
-  async listApprovals(status) {
-    if (!this.client || !this.isConfigured) return [];
-    try {
-      let query = this.client.from("ai_approvals").select("*").order("created_at", { ascending: false });
-      if (status) {
-        query = query.eq("status", status);
-      }
-      const { data, error } = await query;
-      if (error) {
-        console.warn("[AIDatabase] listApprovals error:", error.message);
-        return [];
-      }
-      return data || [];
-    } catch (err) {
-      console.warn("[AIDatabase] listApprovals exception:", err?.message);
-      return [];
-    }
-  }
-  // --------------------------------------------------------------------
-  // AI Alerts Persistence
-  // --------------------------------------------------------------------
-  async insertAlert(alert) {
-    if (!this.client || !this.isConfigured) return false;
-    try {
-      const row = {
-        id: alert.id,
-        severity: alert.severity,
-        agent: alert.agent,
-        title: alert.title,
-        message: alert.message,
-        metadata: alert.metadata || {},
-        is_dismissed: alert.is_dismissed,
-        created_at: alert.created_at
-      };
-      const { error } = await this.client.from("ai_alerts").insert(row);
-      if (error) {
-        console.warn("[AIDatabase] insertAlert error:", error.message);
-        return false;
-      }
-      return true;
-    } catch (err) {
-      console.warn("[AIDatabase] insertAlert exception:", err?.message);
-      return false;
-    }
-  }
-  async dismissAlert(alertId) {
-    if (!this.client || !this.isConfigured) return false;
-    try {
-      const { error } = await this.client.from("ai_alerts").update({ is_dismissed: true }).eq("id", alertId);
-      if (error) {
-        console.warn("[AIDatabase] dismissAlert error:", error.message);
-        return false;
-      }
-      return true;
-    } catch (err) {
-      console.warn("[AIDatabase] dismissAlert exception:", err?.message);
-      return false;
-    }
-  }
-  async listAlerts(includeDismissed = false) {
-    if (!this.client || !this.isConfigured) return [];
-    try {
-      let query = this.client.from("ai_alerts").select("*").order("created_at", { ascending: false });
-      if (!includeDismissed) {
-        query = query.eq("is_dismissed", false);
-      }
-      const { data, error } = await query;
-      if (error) {
-        console.warn("[AIDatabase] listAlerts error:", error.message);
-        return [];
-      }
-      return data || [];
-    } catch (err) {
-      console.warn("[AIDatabase] listAlerts exception:", err?.message);
-      return [];
-    }
-  }
-};
-var aiDatabase = AIDatabase.getInstance();
-
-// src/ai/events/eventBus.ts
-import crypto2 from "crypto";
-var AIEventBus = class _AIEventBus {
-  constructor() {
-    this.listeners = /* @__PURE__ */ new Map();
-    this.deliveryHistory = [];
-    this.maxHistory = 100;
-  }
-  static getInstance() {
-    if (!_AIEventBus.instance) {
-      _AIEventBus.instance = new _AIEventBus();
-    }
-    return _AIEventBus.instance;
-  }
-  subscribe(eventType, listener) {
-    if (!this.listeners.has(eventType)) {
-      this.listeners.set(eventType, /* @__PURE__ */ new Set());
-    }
-    this.listeners.get(eventType).add(listener);
-    return () => {
-      this.listeners.get(eventType)?.delete(listener);
-    };
-  }
-  emit(eventType, data, correlation, customWebhookUrl) {
-    const event = {
-      id: crypto2.randomUUID(),
-      event: eventType,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      correlation,
-      data
-    };
-    const handlers = this.listeners.get(eventType);
-    if (handlers) {
-      for (const handler of handlers) {
-        Promise.resolve().then(() => handler(event)).catch((err) => {
-          console.warn(`[AIEventBus] In-process listener error on '${eventType}':`, err?.message);
-        });
-      }
-    }
-    const targetWebhookUrl = customWebhookUrl || process.env.STARTUPCREME_WEBHOOK_URL;
-    if (targetWebhookUrl) {
-      this.dispatchWebhook(targetWebhookUrl, event).catch(() => {
-      });
-    }
-    return event;
-  }
-  async dispatchWebhook(targetUrl, event, attempt = 1, maxAttempts = 3) {
-    const payload = JSON.stringify(event);
-    const secret = process.env.STARTUPCREME_WEBHOOK_SECRET || "startupcreme_webhook_secret_default";
-    const signature = crypto2.createHmac("sha256", secret).update(payload).digest("hex");
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 1e4);
-      const res = await fetch(targetUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-StartupCreme-Event": event.event,
-          "X-StartupCreme-Signature": `sha256=${signature}`,
-          "X-StartupCreme-Event-Id": event.id
-        },
-        body: payload,
-        signal: controller.signal
-      });
-      clearTimeout(timeout);
-      this.recordDelivery({
-        id: crypto2.randomUUID(),
-        eventId: event.id,
-        eventType: event.event,
-        targetUrl,
-        attempts: attempt,
-        status: res.ok ? "delivered" : "failed",
-        httpStatus: res.status,
-        error: res.ok ? void 0 : `HTTP ${res.status}: ${res.statusText}`,
-        timestamp: (/* @__PURE__ */ new Date()).toISOString()
-      });
-      if (!res.ok && attempt < maxAttempts) {
-        const delay = Math.pow(2, attempt) * 500;
-        setTimeout(() => this.dispatchWebhook(targetUrl, event, attempt + 1, maxAttempts), delay);
-      }
-    } catch (err) {
-      this.recordDelivery({
-        id: crypto2.randomUUID(),
-        eventId: event.id,
-        eventType: event.event,
-        targetUrl,
-        attempts: attempt,
-        status: "failed",
-        error: err?.message || "Network error",
-        timestamp: (/* @__PURE__ */ new Date()).toISOString()
-      });
-      if (attempt < maxAttempts) {
-        const delay = Math.pow(2, attempt) * 500;
-        setTimeout(() => this.dispatchWebhook(targetUrl, event, attempt + 1, maxAttempts), delay);
-      }
-    }
-  }
-  recordDelivery(record) {
-    this.deliveryHistory.unshift(record);
-    if (this.deliveryHistory.length > this.maxHistory) {
-      this.deliveryHistory = this.deliveryHistory.slice(0, this.maxHistory);
-    }
-  }
-  getDeliveryHistory() {
-    return this.deliveryHistory;
-  }
-  getWebhookStats() {
-    const total = this.deliveryHistory.length;
-    const delivered = this.deliveryHistory.filter((d) => d.status === "delivered").length;
-    const failed = this.deliveryHistory.filter((d) => d.status === "failed").length;
-    return {
-      totalDispatched: total,
-      deliveredCount: delivered,
-      failedCount: failed,
-      recentDeliveries: this.deliveryHistory.slice(0, 10)
-    };
-  }
-};
-var eventBus = AIEventBus.getInstance();
-
-// src/ai/orchestrator/taskManager.ts
-var TaskManager = class _TaskManager {
-  // idempotencyKey -> taskId
-  constructor() {
-    // In-memory caches for 0ms access & offline fallback
-    this.tasks = /* @__PURE__ */ new Map();
-    this.actions = [];
-    this.approvals = /* @__PURE__ */ new Map();
-    this.alerts = [];
-    this.agents = /* @__PURE__ */ new Map();
-    this.idempotencyIndex = /* @__PURE__ */ new Map();
-    this.registerAgent(new ResearchAgent());
-  }
-  static getInstance() {
-    if (!_TaskManager.instance) {
-      _TaskManager.instance = new _TaskManager();
-    }
-    return _TaskManager.instance;
-  }
-  registerAgent(agent) {
-    this.agents.set(agent.id, agent);
-  }
-  getAgent(agentId) {
-    return this.agents.get(agentId);
-  }
-  listAgents() {
-    return Array.from(this.agents.values()).map((a) => ({
-      id: a.id,
-      name: a.name,
-      description: a.description,
-      version: a.version,
-      capabilities: a.capabilities
-    }));
-  }
-  /**
-   * Submits and executes a task with persistent idempotency, database sync, and policy enforcement.
-   */
-  async submitTask(options) {
-    const correlation = options.correlation || {
-      requestId: crypto3.randomUUID(),
-      idempotencyKey: options.idempotencyKey,
-      source: "n8n_orchestration"
-    };
-    if (options.idempotencyKey) {
-      const existingTaskId = this.idempotencyIndex.get(options.idempotencyKey);
-      if (existingTaskId) {
-        let existingTask = this.tasks.get(existingTaskId);
-        if (!existingTask) {
-          existingTask = await this.getTaskAsync(existingTaskId);
-        }
-        if (existingTask) {
-          return { task: existingTask, isExisting: true };
-        }
-      }
-      const dbTask = await aiDatabase.findTaskByIdempotencyKey(options.idempotencyKey);
-      if (dbTask) {
-        if (!dbTask.policy_level) {
-          dbTask.policy_level = PolicyEngine.evaluateAction(dbTask.task_type).level;
-        }
-        if (!dbTask.metadata) {
-          dbTask.metadata = correlation;
-        }
-        this.tasks.set(dbTask.id, dbTask);
-        this.idempotencyIndex.set(options.idempotencyKey, dbTask.id);
-        return { task: dbTask, isExisting: true };
-      }
-    }
-    const taskId = crypto3.randomUUID();
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const assignedAgent = options.assignedAgent || "agent_research";
-    const timeoutMs = options.timeoutMs || 6e4;
-    const policy = PolicyEngine.evaluateAction(options.taskType);
-    const task = {
-      id: taskId,
-      task_type: options.taskType,
-      priority: options.priority || "medium",
-      status: "queued",
-      policy_level: policy.level,
-      requested_by: options.requestedBy || "n8n_control_plane",
-      assigned_agent: assignedAgent,
-      payload: options.payload,
-      retry_count: 0,
-      idempotency_key: options.idempotencyKey || null,
-      metadata: correlation,
-      timeout_ms: timeoutMs,
-      created_at: now,
-      updated_at: now
-    };
-    if (!policy.isAllowed) {
-      task.status = "failed";
-      task.error = policy.reason;
-      task.updated_at = now;
-      task.completed_at = now;
-      const persisted2 = await aiDatabase.insertTask(task);
-      if (!persisted2) {
-        throw new Error(`Failed to persist AI task: ${policy.reason}`);
-      }
-      this.tasks.set(taskId, task);
-      if (options.idempotencyKey) {
-        this.idempotencyIndex.set(options.idempotencyKey, taskId);
-      }
-      this.recordAction({
-        task_id: taskId,
-        agent: assignedAgent,
-        action: options.taskType,
-        status: "blocked_policy",
-        policy_level: "red",
-        reason: policy.reason,
-        input_summary: options.payload,
-        error: policy.reason
-      });
-      this.createAlert({
-        severity: "critical",
-        agent: assignedAgent,
-        title: "Policy Block: Forbidden AI Action Attempted",
-        message: `Autonomous task '${options.taskType}' was blocked by policy: ${policy.reason}`,
-        metadata: { taskId, payload: options.payload, correlation }
-      });
-      eventBus.emit("task.failed", task, correlation, options.webhookUrl);
-      return { task, isExisting: false };
-    }
-    if (policy.requiresApproval) {
-      task.status = "waiting_approval";
-      task.updated_at = now;
-      const approvalId = crypto3.randomUUID();
-      const approval = {
-        id: approvalId,
-        task_id: taskId,
-        action_name: options.taskType,
-        agent: assignedAgent,
-        policy_level: policy.level,
-        status: "pending",
-        description: `Autonomous task '${options.taskType}' requires editorial sign-off before proceeding.`,
-        payload: options.payload,
-        created_at: now
-      };
-      task.approval_id = approvalId;
-      const approvalPersisted = await aiDatabase.insertApproval(approval);
-      if (!approvalPersisted) {
-        throw new Error("Failed to persist AI approval request");
-      }
-      const taskPersisted = await aiDatabase.insertTask(task);
-      if (!taskPersisted) {
-        throw new Error("Failed to persist AI task");
-      }
-      this.tasks.set(taskId, task);
-      this.approvals.set(approvalId, approval);
-      if (options.idempotencyKey) {
-        this.idempotencyIndex.set(options.idempotencyKey, taskId);
-      }
-      this.recordAction({
-        task_id: taskId,
-        agent: assignedAgent,
-        action: options.taskType,
-        status: "waiting_approval",
-        policy_level: policy.level,
-        reason: "Task paused awaiting human approval.",
-        input_summary: options.payload
-      });
-      eventBus.emit("task.waiting_approval", { task, approval }, correlation, options.webhookUrl);
-      return { task, isExisting: false };
-    }
-    const persisted = await aiDatabase.insertTask(task);
-    if (!persisted) {
-      throw new Error("Failed to persist AI task");
-    }
-    this.tasks.set(taskId, task);
-    if (options.idempotencyKey) {
-      this.idempotencyIndex.set(options.idempotencyKey, taskId);
-    }
-    eventBus.emit("task.created", task, correlation, options.webhookUrl);
-    this.executeTask(taskId, options.webhookUrl).catch((err) => {
-      console.error(`[TaskManager] Background execution error on task ${taskId}:`, err);
-    });
-    return { task, isExisting: false };
-  }
-  /**
-   * Internal worker loop executing an approved or green task with strict timeout safety.
-   */
-  async executeTask(taskId, webhookUrl) {
-    let task = this.tasks.get(taskId);
-    if (!task) {
-      task = await this.getTaskAsync(taskId);
-    }
-    if (!task) throw new Error(`Task '${taskId}' not found`);
-    const agent = this.agents.get(task.assigned_agent);
-    if (!agent) {
-      task.status = "failed";
-      task.error = `Assigned agent '${task.assigned_agent}' is not registered.`;
-      task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-      task.completed_at = task.updated_at;
-      await aiDatabase.updateTask(taskId, {
-        status: "failed",
-        error: task.error,
-        completed_at: task.completed_at
-      });
-      eventBus.emit("task.failed", task, task.metadata, webhookUrl);
-      return task;
-    }
-    task.status = "running";
-    task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-    await aiDatabase.updateTask(taskId, {
-      status: "running",
-      updated_at: task.updated_at
-    });
-    eventBus.emit("task.started", task, task.metadata, webhookUrl);
-    this.recordAction({
-      task_id: taskId,
-      agent: agent.id,
-      action: task.task_type,
-      status: "started",
-      policy_level: task.policy_level || "green",
-      input_summary: task.payload
-    });
-    const timeoutMs = task.timeout_ms || 6e4;
-    try {
-      const executionPromise = agent.execute(task.payload, {
-        taskId,
-        metadata: task.metadata
-      });
-      let timer;
-      const timeoutPromise = new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`TASK_TIMEOUT: Execution exceeded boundary of ${timeoutMs}ms`)), timeoutMs);
-        timer.unref();
-      });
-      let result;
-      try {
-        result = await Promise.race([executionPromise, timeoutPromise]);
-      } finally {
-        clearTimeout(timer);
-      }
-      if (result.success) {
-        task.status = "completed";
-        task.result = result.data;
-        task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-        task.completed_at = task.updated_at;
-        await aiDatabase.updateTask(taskId, {
-          status: "completed",
-          result: result.data,
-          completed_at: task.completed_at
-        });
-        this.recordAction({
-          task_id: taskId,
-          agent: agent.id,
-          action: task.task_type,
-          status: "succeeded",
-          policy_level: task.policy_level || "green",
-          confidence: result.confidence,
-          reason: result.reasoningSummary,
-          input_summary: task.payload,
-          output_summary: {
-            claimsCount: result.data?.key_claims?.length,
-            sourcesCount: result.data?.sources?.length,
-            anglesCount: result.data?.potential_article_angles?.length
-          }
-        });
-        eventBus.emit("task.completed", task, task.metadata, webhookUrl);
-      } else {
-        task.status = "failed";
-        task.error = result.error || "Agent execution failed";
-        task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-        task.completed_at = task.updated_at;
-        await aiDatabase.updateTask(taskId, {
-          status: "failed",
-          error: task.error,
-          completed_at: task.completed_at
-        });
-        this.recordAction({
-          task_id: taskId,
-          agent: agent.id,
-          action: task.task_type,
-          status: "failed",
-          policy_level: task.policy_level || "green",
-          reason: result.reasoningSummary,
-          error: result.error,
-          input_summary: task.payload
-        });
-        eventBus.emit("task.failed", task, task.metadata, webhookUrl);
-      }
-    } catch (err) {
-      const isTimeout = err?.message?.includes("TASK_TIMEOUT");
-      task.status = "failed";
-      task.error = isTimeout ? `Task execution timed out after ${timeoutMs}ms` : err?.message || "Unknown execution failure";
-      task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-      task.completed_at = task.updated_at;
-      await aiDatabase.updateTask(taskId, {
-        status: "failed",
-        error: task.error,
-        completed_at: task.completed_at
-      });
-      this.recordAction({
-        task_id: taskId,
-        agent: agent.id,
-        action: task.task_type,
-        status: "failed",
-        policy_level: task.policy_level || "green",
-        error: task.error,
-        input_summary: task.payload
-      });
-      if (isTimeout) {
-        this.createAlert({
-          severity: "warning",
-          agent: agent.id,
-          title: "Execution Timeout Exceeded",
-          message: `Task '${task.id}' (${task.task_type}) timed out after ${timeoutMs}ms`,
-          metadata: { taskId, timeoutMs, correlation: task.metadata }
-        });
-      }
-      eventBus.emit("task.failed", task, task.metadata, webhookUrl);
-    }
-    return task;
-  }
-  /**
-   * Approves a waiting task and resumes execution.
-   */
-  async approveTask(approvalId, decidedBy = "admin", reason = "Approved by editor") {
-    let approval = this.approvals.get(approvalId);
-    if (!approval) {
-      approval = await this.getApprovalAsync(approvalId);
-    }
-    if (!approval) return { success: false, error: "Approval request not found" };
-    if (approval.status !== "pending") return { success: false, error: `Approval is already ${approval.status}` };
-    approval.status = "approved";
-    approval.decided_by = decidedBy;
-    approval.decision_reason = reason;
-    approval.decided_at = (/* @__PURE__ */ new Date()).toISOString();
-    await aiDatabase.updateApproval(approvalId, {
-      status: "approved",
-      decided_by: decidedBy,
-      decision_reason: reason,
-      decided_at: approval.decided_at
-    });
-    eventBus.emit("approval.decided", approval);
-    if (approval.task_id) {
-      let task = this.tasks.get(approval.task_id);
-      if (!task) {
-        task = await this.getTaskAsync(approval.task_id);
-      }
-      if (task) {
-        task.status = "queued";
-        task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-        await aiDatabase.updateTask(task.id, { status: "queued", updated_at: task.updated_at });
-        this.executeTask(task.id).catch(() => {
-        });
-        return { success: true, task };
-      }
-    }
-    return { success: true };
-  }
-  /**
-   * Rejects a waiting task.
-   */
-  async rejectTask(approvalId, decidedBy = "admin", reason = "Rejected by editor") {
-    let approval = this.approvals.get(approvalId);
-    if (!approval) {
-      approval = await this.getApprovalAsync(approvalId);
-    }
-    if (!approval) return { success: false, error: "Approval request not found" };
-    if (approval.status !== "pending") return { success: false, error: `Approval is already ${approval.status}` };
-    approval.status = "rejected";
-    approval.decided_by = decidedBy;
-    approval.decision_reason = reason;
-    approval.decided_at = (/* @__PURE__ */ new Date()).toISOString();
-    await aiDatabase.updateApproval(approvalId, {
-      status: "rejected",
-      decided_by: decidedBy,
-      decision_reason: reason,
-      decided_at: approval.decided_at
-    });
-    eventBus.emit("approval.decided", approval);
-    if (approval.task_id) {
-      let task = this.tasks.get(approval.task_id);
-      if (!task) {
-        task = await this.getTaskAsync(approval.task_id);
-      }
-      if (task) {
-        task.status = "cancelled";
-        task.error = `Rejected by human supervisor: ${reason}`;
-        task.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-        task.completed_at = task.updated_at;
-        await aiDatabase.updateTask(task.id, {
-          status: "cancelled",
-          error: task.error,
-          completed_at: task.completed_at
-        });
-        eventBus.emit("task.failed", task, task.metadata);
-        return { success: true, task };
-      }
-    }
-    return { success: true };
-  }
-  /**
-   * Records an immutable audit log entry.
-   */
-  recordAction(action) {
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const entry = {
-      id: crypto3.randomUUID(),
-      created_at: now,
-      ...action
-    };
-    this.actions.unshift(entry);
-    aiDatabase.insertAction(entry).catch(() => {
-    });
-    return entry;
-  }
-  /**
-   * Creates an operational alert.
-   */
-  createAlert(alert) {
-    const entry = {
-      id: crypto3.randomUUID(),
-      is_dismissed: false,
-      created_at: (/* @__PURE__ */ new Date()).toISOString(),
-      ...alert
-    };
-    this.alerts.unshift(entry);
-    aiDatabase.insertAlert(entry).catch(() => {
-    });
-    return entry;
-  }
-  dismissAlert(alertId) {
-    const alert = this.alerts.find((a) => a.id === alertId);
-    if (alert) {
-      alert.is_dismissed = true;
-      aiDatabase.dismissAlert(alertId).catch(() => {
-      });
-      return true;
-    }
-    return false;
-  }
-  // Getters for Command Center and API Polling
-  getTask(taskId) {
-    return this.tasks.get(taskId);
-  }
-  async getTaskAsync(taskId) {
-    const cached = this.tasks.get(taskId);
-    if (cached) return cached;
-    const dbTask = await aiDatabase.getTask(taskId);
-    if (dbTask) {
-      if (!dbTask.policy_level) {
-        dbTask.policy_level = PolicyEngine.evaluateAction(dbTask.task_type).level;
-      }
-      if (!dbTask.metadata) {
-        dbTask.metadata = {
-          requestId: dbTask.id,
-          idempotencyKey: dbTask.idempotency_key || void 0,
-          source: "database_recovery"
-        };
-      }
-      if (!dbTask.timeout_ms) {
-        dbTask.timeout_ms = 6e4;
-      }
-      this.tasks.set(dbTask.id, dbTask);
-      if (dbTask.idempotency_key) {
-        this.idempotencyIndex.set(dbTask.idempotency_key, dbTask.id);
-      }
-      return dbTask;
-    }
-    return void 0;
-  }
-  async getApprovalAsync(approvalId) {
-    const cached = this.approvals.get(approvalId);
-    if (cached) return cached;
-    const dbApproval = await aiDatabase.getApproval(approvalId);
-    if (dbApproval) {
-      this.approvals.set(dbApproval.id, dbApproval);
-      return dbApproval;
-    }
-    return void 0;
-  }
-  clearMemoryCache() {
-    this.tasks.clear();
-    this.approvals.clear();
-    this.idempotencyIndex.clear();
-  }
-  listTasks(limit = 50, status) {
-    let list = Array.from(this.tasks.values()).sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-    if (status) {
-      list = list.filter((t) => t.status === status);
-    }
-    return list.slice(0, limit);
-  }
-  async listTasksAsync(limit = 50, status) {
-    const dbTasks = await aiDatabase.listTasks(limit, status);
-    if (dbTasks && dbTasks.length > 0) {
-      for (const t of dbTasks) {
-        if (!t.policy_level) {
-          t.policy_level = PolicyEngine.evaluateAction(t.task_type).level;
-        }
-        this.tasks.set(t.id, t);
-        if (t.idempotency_key) {
-          this.idempotencyIndex.set(t.idempotency_key, t.id);
-        }
-      }
-      return dbTasks;
-    }
-    return this.listTasks(limit, status);
-  }
-  listActions(limit = 50) {
-    return this.actions.slice(0, limit);
-  }
-  listApprovals(status, limit = 50) {
-    let list = Array.from(this.approvals.values()).sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-    if (status) {
-      list = list.filter((a) => a.status === status);
-    }
-    return list.slice(0, limit);
-  }
-  async listApprovalsAsync(status, limit = 50) {
-    const dbApprovals = await aiDatabase.listApprovals(status);
-    if (dbApprovals && dbApprovals.length > 0) {
-      for (const a of dbApprovals) {
-        this.approvals.set(a.id, a);
-      }
-      return dbApprovals.slice(0, limit);
-    }
-    return this.listApprovals(status, limit);
-  }
-  listAlerts(includeDismissed = false) {
-    if (includeDismissed) return this.alerts;
-    return this.alerts.filter((a) => !a.is_dismissed);
-  }
-  getSystemMetrics() {
-    const tasks = Array.from(this.tasks.values());
-    const dbStatus = aiDatabase.getStatus();
-    const webhookStats = eventBus.getWebhookStats();
-    return {
-      totalTasks: tasks.length,
-      queued: tasks.filter((t) => t.status === "queued").length,
-      running: tasks.filter((t) => t.status === "running").length,
-      waitingApproval: tasks.filter((t) => t.status === "waiting_approval").length,
-      completed: tasks.filter((t) => t.status === "completed").length,
-      failed: tasks.filter((t) => t.status === "failed").length,
-      pendingApprovalsCount: Array.from(this.approvals.values()).filter((a) => a.status === "pending").length,
-      activeAlertsCount: this.alerts.filter((a) => !a.is_dismissed).length,
-      totalActionsLogged: this.actions.length,
-      registeredAgentsCount: this.agents.size,
-      databasePersistence: {
-        isAvailable: aiDatabase.isAvailable(),
-        hasServiceRole: dbStatus.hasServiceRole,
-        schema: dbStatus.targetSchema
-      },
-      webhooks: {
-        totalDispatched: webhookStats.totalDispatched,
-        deliveredCount: webhookStats.deliveredCount,
-        failedCount: webhookStats.failedCount
-      }
-    };
-  }
-};
-var taskManager = TaskManager.getInstance();
-
-// src/ai/memory/memoryStore.ts
-var MemoryStore = class _MemoryStore {
-  constructor() {
-    this.memories = /* @__PURE__ */ new Map();
-    this.seedDefaultMemory();
-  }
-  static getInstance() {
-    if (!_MemoryStore.instance) {
-      _MemoryStore.instance = new _MemoryStore();
-    }
-    return _MemoryStore.instance;
-  }
-  seedDefaultMemory() {
-    const defaults = [
-      {
-        memoryType: "editorial_rule",
-        key: "headline_standards",
-        value: {
-          rule: 'Avoid sensationalist buzzwords ("shocking", "game-changer"). Use precise technical and financial framing.',
-          enforcement: "strict"
-        },
-        source: "Editorial Constitution v1",
-        tags: ["editorial", "quality", "headlines"]
-      },
-      {
-        memoryType: "audience_insight",
-        key: "core_readership_profile",
-        value: {
-          primary: "Series A+ tech founders and venture investors seeking macro and architecture clarity.",
-          preferredDepth: "analytical_deep_dive",
-          readingTimeTarget: "5-8 minutes"
-        },
-        source: "StartupCr\xE8me Audience Benchmark 2026",
-        tags: ["audience", "distribution"]
-      },
-      {
-        memoryType: "preferred_topic",
-        key: "ai_infrastructure_finops",
-        value: {
-          description: "LLM token optimization, open weights vs proprietary APIs, GPU cluster unit economics.",
-          vertical: "tech",
-          priority: "high"
-        },
-        source: "Editorial Planning 2026",
-        tags: ["tech", "ai", "cloud"]
-      },
-      {
-        memoryType: "preferred_topic",
-        key: "african_fintech_crossborder",
-        value: {
-          description: "Pan-African settlement systems, stablecoin rails, regulatory compliance across Nigeria, Kenya, South Africa, Egypt.",
-          vertical: "finance",
-          priority: "high"
-        },
-        source: "Regional Editorial Strategy",
-        tags: ["finance", "africa", "fintech"]
-      }
-    ];
-    defaults.forEach((d) => this.set(d));
-  }
-  set(input) {
-    const memoryKey = `${input.memoryType}:${input.key}`;
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const existing = this.memories.get(memoryKey);
-    const memory = {
-      id: existing?.id || `mem_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      memory_type: input.memoryType,
-      key: input.key,
-      value: input.value,
-      confidence: input.confidence ?? 1,
-      source: input.source || "system",
-      tags: input.tags || [],
-      created_at: existing?.created_at || now,
-      updated_at: now
-    };
-    this.memories.set(memoryKey, memory);
-    return memory;
-  }
-  get(memoryType, key) {
-    return this.memories.get(`${memoryType}:${key}`);
-  }
-  listByType(memoryType) {
-    return Array.from(this.memories.values()).filter((m) => m.memory_type === memoryType);
-  }
-  search(query, memoryType) {
-    const q = query.toLowerCase().trim();
-    return Array.from(this.memories.values()).filter((m) => {
-      const matchesType = !memoryType || m.memory_type === memoryType;
-      const matchesText = m.key.toLowerCase().includes(q) || m.tags.some((t) => t.toLowerCase().includes(q)) || JSON.stringify(m.value).toLowerCase().includes(q);
-      return matchesType && matchesText;
-    });
-  }
-  listAll() {
-    return Array.from(this.memories.values()).sort(
-      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-    );
-  }
-};
-var memoryStore = MemoryStore.getInstance();
-
-// src/ai/tools/researchTools.ts
-import { z as z2 } from "zod";
-var SearchContentParamsSchema = z2.object({
-  query: z2.string().min(2, "Query must be at least 2 characters").max(100),
-  vertical: z2.enum(["finance", "tech", "founders-mindset", "all"]).optional().default("all"),
-  limit: z2.number().int().min(1).max(20).optional().default(5)
-});
-var SearchContentTool = class {
-  constructor() {
-    this.name = "search_content";
-    this.description = "Searches existing StartupCr\xE8me articles and discussions to cross-reference coverage or avoid duplication.";
-    this.parameters = SearchContentParamsSchema;
-    this.policyLevel = "green";
-    this.permissions = ["content:read"];
-    this.reversible = false;
-  }
-  validate(params) {
-    const res = this.parameters.safeParse(params);
-    if (!res.success) {
-      return { success: false, errors: res.error.issues };
-    }
-    return { success: true, data: res.data };
-  }
-  async execute(params, _context) {
-    try {
-      const q = params.query.toLowerCase().trim();
-      const allPosts = store.getPosts();
-      const filtered = allPosts.filter((p) => {
-        const matchesVertical = params.vertical === "all" || (params.vertical === "founders-mindset" ? p.vertical === "founders-mindset" : p.vertical === params.vertical || Boolean(p.dual_silo) && (p.vertical === "finance" || p.vertical === "tech"));
-        const matchesQuery = p.title.toLowerCase().includes(q) || p.excerpt.toLowerCase().includes(q) || p.tags.some((t) => t.toLowerCase().includes(q));
-        return matchesVertical && matchesQuery;
-      }).slice(0, params.limit);
-      const results = filtered.map((p) => ({
-        id: p.id,
-        slug: p.slug,
-        title: p.title,
-        excerpt: p.excerpt,
-        vertical: p.vertical,
-        status: p.status
-      }));
-      return {
-        success: true,
-        result: { results },
-        targetEntity: "posts"
-      };
-    } catch (err) {
-      return {
-        success: false,
-        error: err?.message || "Error searching content"
-      };
-    }
-  }
-};
-var GetArticleParamsSchema = z2.object({
-  slugOrId: z2.string().min(1, "Slug or ID is required")
-});
-var GetArticleTool = class {
-  constructor() {
-    this.name = "get_article";
-    this.description = "Fetches full article metadata and content by slug or ID.";
-    this.parameters = GetArticleParamsSchema;
-    this.policyLevel = "green";
-    this.permissions = ["content:read"];
-    this.reversible = false;
-  }
-  validate(params) {
-    const res = this.parameters.safeParse(params);
-    if (!res.success) return { success: false, errors: res.error.issues };
-    return { success: true, data: res.data };
-  }
-  async execute(params, _context) {
-    try {
-      const post = await store.fetchPostBySlug(params.slugOrId);
-      if (!post) {
-        return { success: true, result: null };
-      }
-      return {
-        success: true,
-        result: post,
-        targetEntity: "post",
-        targetEntityId: post.id
-      };
-    } catch (err) {
-      return { success: false, error: err?.message || "Error fetching article" };
-    }
-  }
-};
-var CreateDraftParamsSchema = z2.object({
-  title: z2.string().min(5).max(200),
-  slug: z2.string().min(3).max(100).regex(/^[a-z0-9-]+$/),
-  excerpt: z2.string().min(10).max(500),
-  content: z2.string().min(20),
-  vertical: z2.enum(["finance", "tech"]),
-  locale: z2.string().default("en-us"),
-  tags: z2.array(z2.string()).default(["Analysis"]),
-  cover_image: z2.string().optional().default("https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&q=80&w=1200"),
-  author_name: z2.string().default("StartupCr\xE8me Research Desk"),
-  reading_time_minutes: z2.number().int().default(5),
-  word_count: z2.number().int().default(800)
-});
-var CreateArticleDraftTool = class {
-  constructor() {
-    this.name = "create_article_draft";
-    this.description = 'Creates a new article draft in the CMS. Articles are strictly created with status="draft" and require human review to publish.';
-    this.parameters = CreateDraftParamsSchema;
-    this.policyLevel = "green";
-    this.permissions = ["content:create_draft"];
-    this.reversible = true;
-  }
-  validate(params) {
-    const res = this.parameters.safeParse(params);
-    if (!res.success) return { success: false, errors: res.error.issues };
-    return { success: true, data: res.data };
-  }
-  async execute(params, _context) {
-    try {
-      const draftPayload = {
-        title: params.title,
-        slug: params.slug,
-        excerpt: params.excerpt,
-        content: params.content,
-        vertical: params.vertical,
-        locale: params.locale,
-        status: "draft",
-        // STRICT RULE: autonomous agents can only create drafts
-        tags: params.tags,
-        cover_image: params.cover_image,
-        author_name: params.author_name,
-        author_role: "AI Autonomous Intelligence",
-        reading_time_minutes: params.reading_time_minutes,
-        word_count: params.word_count
-      };
-      const res = await store.savePost(draftPayload);
-      if (!res.success) {
-        return { success: false, error: res.error || "Failed to save post draft" };
-      }
-      return {
-        success: true,
-        result: { post: res.post },
-        reversible: true,
-        targetEntity: "post",
-        targetEntityId: res.post.id
-      };
-    } catch (err) {
-      return { success: false, error: err?.message || "Error creating draft" };
-    }
-  }
-  async rollback(targetEntityId, _context) {
-    try {
-      await store.deletePost(targetEntityId);
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: err?.message || "Failed to rollback draft creation" };
-    }
-  }
-};
-var GetSiteMetricsTool = class {
-  constructor() {
-    this.name = "get_site_metrics";
-    this.description = "Retrieves aggregate publication statistics across verticals and statuses.";
-    this.parameters = z2.object({});
-    this.policyLevel = "green";
-    this.permissions = ["analytics:read"];
-    this.reversible = false;
-  }
-  validate(params) {
-    return { success: true, data: {} };
-  }
-  async execute(_params, _context) {
-    try {
-      const posts = store.getPosts();
-      const totalPosts = posts.length;
-      const financePosts = posts.filter((p) => p.vertical === "finance").length;
-      const techPosts = posts.filter((p) => p.vertical === "tech").length;
-      const publishedCount = posts.filter((p) => p.status === "published").length;
-      const draftCount = posts.filter((p) => p.status === "draft").length;
-      return {
-        success: true,
-        result: {
-          totalPosts,
-          financePosts,
-          techPosts,
-          publishedCount,
-          draftCount
-        },
-        targetEntity: "metrics"
-      };
-    } catch (err) {
-      return { success: false, error: err?.message || "Error fetching metrics" };
-    }
-  }
-};
-
-// src/ai/tools/registry.ts
-var ToolRegistry = class {
-  static {
-    this.tools = /* @__PURE__ */ new Map();
-  }
-  static {
-    this.register(new SearchContentTool());
-    this.register(new GetArticleTool());
-    this.register(new CreateArticleDraftTool());
-    this.register(new GetSiteMetricsTool());
-  }
-  static register(tool) {
-    this.tools.set(tool.name, tool);
-  }
-  static get(name) {
-    return this.tools.get(name);
-  }
-  static list() {
-    return Array.from(this.tools.values()).map((t) => ({
-      name: t.name,
-      description: t.description,
-      policyLevel: t.policyLevel,
-      permissions: t.permissions
-    }));
-  }
-  /**
-   * Executes a tool with automatic input validation and policy checks.
-   */
-  static async executeTool(toolName, rawParams, context = { agentId: "system" }) {
-    const tool = this.tools.get(toolName);
-    if (!tool) {
-      return {
-        success: false,
-        error: `Tool '${toolName}' not found in registry.`
-      };
-    }
-    const policy = PolicyEngine.evaluateAction(toolName);
-    if (!policy.isAllowed && !context.bypassApproval) {
-      return {
-        success: false,
-        error: `Policy violation: ${policy.reason}`
-      };
-    }
-    const validation = tool.validate(rawParams);
-    if (!validation.success) {
-      const formattedErrors = validation.errors?.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ");
-      return {
-        success: false,
-        error: `Invalid parameters for tool '${toolName}': ${formattedErrors}`
-      };
-    }
-    return await tool.execute(validation.data, context);
-  }
-  static async execute(toolName, rawParams, context = { agentId: "system" }) {
-    return this.executeTool(toolName, rawParams, context);
-  }
-};
-
-// src/ai/server/automationAuth.ts
-import crypto4 from "crypto";
-import { createClient as createClient3 } from "@supabase/supabase-js";
-function secureCompare(a, b) {
-  if (typeof a !== "string" || typeof b !== "string") return false;
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  if (bufA.length !== bufB.length) return false;
-  return crypto4.timingSafeEqual(bufA, bufB);
-}
-function extractCorrelation(req) {
-  const reqIdHeader = req.headers["x-request-id"] || req.headers["request-id"];
-  const workflowIdHeader = req.headers["x-workflow-id"] || req.headers["workflow-id"];
-  const executionIdHeader = req.headers["x-execution-id"] || req.headers["execution-id"];
-  const idempotencyKeyHeader = req.headers["idempotency-key"] || req.headers["x-idempotency-key"];
-  const bodyCorrelation = req.body?.correlation;
-  const bodyIdempotency = req.body?.idempotency_key || req.body?.idempotencyKey;
-  const requestId = reqIdHeader || bodyCorrelation?.requestId || crypto4.randomUUID();
-  const workflowId = workflowIdHeader || bodyCorrelation?.workflowId || void 0;
-  const executionId = executionIdHeader || bodyCorrelation?.executionId || void 0;
-  const idempotencyKey = idempotencyKeyHeader || bodyIdempotency || bodyCorrelation?.idempotencyKey || void 0;
-  return {
-    requestId,
-    workflowId,
-    executionId,
-    idempotencyKey,
-    source: bodyCorrelation?.source || (workflowId ? "n8n_orchestration" : "api_client")
-  };
-}
-async function requireAutomationAuth(req, res, next) {
-  const correlation = extractCorrelation(req);
-  req.correlation = correlation;
-  res.setHeader("X-Request-Id", correlation.requestId || "");
-  const authHeader = req.headers.authorization;
-  const customSecretHeader = req.headers["x-automation-secret"] || req.headers["x-startupcreme-automation-secret"];
-  let providedToken = "";
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    providedToken = authHeader.slice(7).trim();
-  } else if (customSecretHeader) {
-    providedToken = customSecretHeader.trim();
-  }
-  const rawConfiguredSecret = process.env.STARTUPCREME_AUTOMATION_SECRET?.trim();
-  const configuredSecret = rawConfiguredSecret && rawConfiguredSecret !== "your_m2m_automation_secret_key" ? rawConfiguredSecret : "";
-  if (configuredSecret && providedToken && secureCompare(providedToken, configuredSecret)) {
-    req.callerIdentity = "m2m_automation";
-    req.isAutomationClient = true;
-    return next();
-  }
-  if (req.user?.role === "admin") {
-    req.callerIdentity = "admin_ui";
-    req.isAutomationClient = false;
-    return next();
-  }
-  if (providedToken) {
-    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || "";
-    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
-    if (supabaseUrl && serviceRoleKey && !supabaseUrl.includes("placeholder")) {
-      try {
-        const authClient = createClient3(supabaseUrl, anonKey || serviceRoleKey, {
-          auth: { persistSession: false, autoRefreshToken: false }
-        });
-        const {
-          data: { user },
-          error: authError
-        } = await authClient.auth.getUser(providedToken);
-        if (!authError && user && user.id) {
-          const adminClient = createClient3(supabaseUrl, serviceRoleKey, {
-            db: { schema: "startupcreme" },
-            auth: { persistSession: false, autoRefreshToken: false }
-          });
-          const { data: dbUser, error: dbError } = await adminClient.from("users").select("role").eq("id", user.id).maybeSingle();
-          if (!dbError && dbUser?.role && String(dbUser.role).trim().toLowerCase() === "admin") {
-            req.callerIdentity = "admin_session";
-            req.isAutomationClient = false;
-            return next();
-          }
-        }
-      } catch {
-      }
-    }
-  }
-  res.status(401).json({
-    error: "Unauthorized: Missing or invalid automation credentials. Provide valid Bearer token or X-Automation-Secret header.",
-    code: "UNAUTHORIZED_AUTOMATION",
-    retryable: false,
-    correlation
-  });
-}
-
-// src/ai/server/automationContract.ts
-import { z as z3 } from "zod";
-var TaskPriorityEnum = z3.enum(["low", "medium", "high", "critical"]);
-var TaskStatusEnum = z3.enum([
-  "queued",
-  "running",
-  "waiting_approval",
-  "completed",
-  "failed",
-  "cancelled"
-]);
-var PolicyLevelEnum = z3.enum(["green", "yellow", "red"]);
-var RegisteredTaskTypeEnum = z3.enum([
-  "research_topic",
-  "review_content",
-  "publish_article",
-  "social_repurpose"
-]);
-var CorrelationMetadataSchema = z3.object({
-  requestId: z3.string().optional(),
-  workflowId: z3.string().optional(),
-  executionId: z3.string().optional(),
-  idempotencyKey: z3.string().optional(),
-  source: z3.string().default("n8n_orchestration")
-});
-var SubmitTaskRequestSchema = z3.object({
-  // Accept both snake_case and camelCase
-  task_type: z3.string().min(1).optional(),
-  taskType: z3.string().min(1).optional(),
-  priority: TaskPriorityEnum.default("medium"),
-  assigned_agent: z3.string().optional(),
-  assignedAgent: z3.string().optional(),
-  requested_by: z3.string().default("n8n_control_plane"),
-  requestedBy: z3.string().optional(),
-  payload: z3.record(z3.string(), z3.any()).default({}),
-  idempotency_key: z3.string().min(4).max(256).optional(),
-  idempotencyKey: z3.string().min(4).max(256).optional(),
-  correlation: CorrelationMetadataSchema.partial().optional(),
-  webhook_url: z3.string().url().optional(),
-  webhookUrl: z3.string().url().optional(),
-  timeout_ms: z3.number().int().min(1e3).max(3e5).default(6e4),
-  timeoutMs: z3.number().int().min(1e3).max(3e5).optional()
-}).transform((data) => {
-  const finalTaskType = (data.taskType || data.task_type || "").trim();
-  const finalAssignedAgent = (data.assignedAgent || data.assigned_agent || "").trim();
-  const finalRequestedBy = (data.requestedBy || data.requested_by || "n8n_control_plane").trim();
-  const finalIdempotencyKey = (data.idempotencyKey || data.idempotency_key || "").trim() || void 0;
-  const finalWebhookUrl = data.webhookUrl || data.webhook_url;
-  const finalTimeoutMs = data.timeoutMs || data.timeout_ms;
-  return {
-    taskType: finalTaskType,
-    priority: data.priority,
-    assignedAgent: finalAssignedAgent,
-    requestedBy: finalRequestedBy,
-    payload: data.payload,
-    idempotencyKey: finalIdempotencyKey,
-    correlation: {
-      requestId: data.correlation?.requestId,
-      workflowId: data.correlation?.workflowId,
-      executionId: data.correlation?.executionId,
-      idempotencyKey: finalIdempotencyKey || data.correlation?.idempotencyKey,
-      source: data.correlation?.source || "n8n_orchestration"
+var EventWebhookIngestionSchema = z.object({
+  title: z.string().trim().min(3, "Title must be at least 3 characters").max(200, "Title cannot exceed 200 characters").optional(),
+  event_title: z.string().trim().min(3, "Event title must be at least 3 characters").max(200, "Event title cannot exceed 200 characters").optional(),
+  slug: z.string().trim().min(3, "Slug must be at least 3 characters").max(100, "Slug cannot exceed 100 characters").regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Slug must be lowercase alphanumeric with hyphens (e.g., "frontier-grant-2026")').optional(),
+  opportunity_type: z.string().trim().refine(
+    (val) => WEBHOOK_OPPORTUNITY_TYPES.includes(val),
+    {
+      message: "opportunity_type must be one of: grant, accelerator, incubator, fellowship, pitch_competition, hackathon, conference. 'general' is rejected on this route."
+    }
+  ),
+  application_url: z.string().trim().regex(/^https:\/\/.+/i, "Application URL must be a valid HTTPS URL"),
+  deadline_date: z.string().trim().min(1, "deadline_date is required").refine(
+    (val) => {
+      const ms = Date.parse(val);
+      return !isNaN(ms) && ms > Date.now();
     },
-    webhookUrl: finalWebhookUrl,
-    timeoutMs: finalTimeoutMs
-  };
-});
-var TaskErrorDetailsSchema = z3.object({
-  code: z3.string(),
-  message: z3.string(),
-  retryable: z3.boolean(),
-  details: z3.any().optional()
-});
-var AIErrorCodes = {
-  // Authentication & Security
-  UNAUTHORIZED_AUTOMATION: "UNAUTHORIZED_AUTOMATION",
-  FORBIDDEN: "FORBIDDEN",
-  POLICY_BLOCKED_RED: "POLICY_BLOCKED_RED",
-  PROMPT_INJECTION_DETECTED: "PROMPT_INJECTION_DETECTED",
-  // Validation
-  VALIDATION_FAILED: "VALIDATION_FAILED",
-  UNKNOWN_TASK_TYPE: "UNKNOWN_TASK_TYPE",
-  UNKNOWN_TOOL: "UNKNOWN_TOOL",
-  // Rate Limiting & Resource
-  RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
-  TASK_TIMEOUT: "TASK_TIMEOUT",
-  // Execution & Provider
-  PROVIDER_UNAVAILABLE: "PROVIDER_UNAVAILABLE",
-  AGENT_EXECUTION_FAILED: "AGENT_EXECUTION_FAILED",
-  IDEMPOTENCY_CONFLICT: "IDEMPOTENCY_CONFLICT",
-  NOT_FOUND: "NOT_FOUND",
-  INTERNAL_ERROR: "INTERNAL_ERROR"
-};
-function isRetryableErrorCode(code) {
-  switch (code) {
-    case AIErrorCodes.RATE_LIMIT_EXCEEDED:
-    case AIErrorCodes.TASK_TIMEOUT:
-    case AIErrorCodes.PROVIDER_UNAVAILABLE:
-      return true;
-    default:
-      return false;
-  }
-}
-function createTaskError(code, message, retryable = isRetryableErrorCode(code), details) {
-  return {
-    code,
-    message,
-    retryable,
-    details
-  };
-}
-
-// src/ai/server/rateLimiter.ts
-function createRateLimiter(options) {
-  const records = /* @__PURE__ */ new Map();
-  setInterval(() => {
-    const now = Date.now();
-    for (const [key, record] of records.entries()) {
-      if (record.resetAt <= now) {
-        records.delete(key);
-      }
-    }
-  }, Math.max(options.windowMs, 3e4)).unref();
-  return (req, res, next) => {
-    let clientKey = "unknown_client";
-    try {
-      clientKey = req.headers["x-automation-secret"] || req.headers.authorization || req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip || req.socket?.remoteAddress || "unknown_client";
-    } catch {
-      clientKey = "unknown_client";
-    }
-    const key = `${options.endpointIdentifier || "global"}:${clientKey}`;
-    const now = Date.now();
-    let record = records.get(key);
-    if (!record || record.resetAt <= now) {
-      record = {
-        count: 1,
-        resetAt: now + options.windowMs
-      };
-      records.set(key, record);
-    } else {
-      record.count += 1;
-    }
-    const remaining = Math.max(0, options.maxRequests - record.count);
-    const resetSeconds = Math.max(1, Math.ceil((record.resetAt - now) / 1e3));
-    res.setHeader("X-RateLimit-Limit", options.maxRequests);
-    res.setHeader("X-RateLimit-Remaining", remaining);
-    res.setHeader("X-RateLimit-Reset", Math.ceil(record.resetAt / 1e3));
-    if (record.count > options.maxRequests) {
-      res.setHeader("Retry-After", resetSeconds);
-      return res.status(429).json({
-        error: `Rate limit exceeded. Maximum ${options.maxRequests} requests per ${Math.round(options.windowMs / 1e3)}s allowed.`,
-        code: AIErrorCodes.RATE_LIMIT_EXCEEDED,
-        retryable: true,
-        retryAfterSeconds: resetSeconds
-      });
-    }
-    next();
-  };
-}
-
-// src/ai/server/taskRegistry.ts
-import { z as z4 } from "zod";
-var TaskRegistry = class {
-  static {
-    this.taskTypes = /* @__PURE__ */ new Map();
-  }
-  static {
-    this.register({
-      taskType: "research_topic",
-      name: "Topic Intelligence Research",
-      description: "Conducts deep, factual, verified research on technology, finance, startups, or market shifts.",
-      assignedAgent: "agent_research",
-      defaultPriority: "medium",
-      defaultPolicyLevel: "green",
-      schema: ResearchInputSchema,
-      timeoutMs: 6e4
-    });
-    this.register({
-      taskType: "review_content",
-      name: "Editorial Content Review",
-      description: "Reviews content for factuality, tone, and editorial standards.",
-      assignedAgent: "agent_research",
-      defaultPriority: "medium",
-      defaultPolicyLevel: "yellow",
-      schema: z4.object({
-        content: z4.string().min(10),
-        vertical: z4.enum(["finance", "tech", "founders-mindset"]).optional(),
-        review_focus: z4.string().optional()
-      }),
-      timeoutMs: 45e3
-    });
-    this.register({
-      taskType: "publish_article",
-      name: "Publish Article to Live Site",
-      description: "Publishes article to live editorial site after human sign-off.",
-      assignedAgent: "agent_research",
-      defaultPriority: "high",
-      defaultPolicyLevel: "yellow",
-      schema: z4.object({
-        slug: z4.string().min(1),
-        title: z4.string().min(1)
-      }),
-      timeoutMs: 3e4
-    });
-    this.register({
-      taskType: "delete_database_schema",
-      name: "Delete Database Schema",
-      description: "Attempt to drop or alter underlying database schema.",
-      assignedAgent: "agent_research",
-      defaultPriority: "critical",
-      defaultPolicyLevel: "red",
-      schema: z4.object({
-        schemaName: z4.string()
-      }),
-      timeoutMs: 1e4
+    { message: "deadline_date must be a valid future timestamp" }
+  ),
+  vertical: z.enum(["finance", "tech", "founders-mindset"]).optional().default("tech"),
+  locale: z.string().trim().toLowerCase().min(2).max(10).optional().default("en-us"),
+  content: z.union([
+    z.string().trim().min(20, "Content must be at least 20 characters"),
+    z.record(z.string(), z.any())
+  ]).optional(),
+  description: z.string().trim().max(2e3).optional(),
+  excerpt: z.string().trim().max(500).optional(),
+  location: z.string().trim().min(2, "Location is required").max(100).optional().default("Global (Remote)"),
+  funding_amount: z.string().trim().max(100).optional().nullable(),
+  status: z.enum(["draft", "published"]).optional().default("draft"),
+  tags: z.array(z.string().trim().min(1).max(50)).max(15, "Maximum 15 tags allowed").optional().default([]),
+  cover_image: z.string().trim().regex(/^https:\/\/.+/i, "Cover image must be a valid HTTPS URL").optional().nullable(),
+  author_name: z.string().trim().max(80).optional().default("Startup Cr\xE8me Editorial"),
+  author_role: z.string().trim().max(80).optional().default("Principal Editor"),
+  author_avatar: z.string().trim().regex(/^https:\/\/.+/i, "Author avatar must be a valid HTTPS URL").optional().nullable(),
+  canonical_url: z.string().trim().url("Canonical URL must be a valid URL").optional().nullable(),
+  meta_description: z.string().trim().max(200).optional(),
+  reading_time_minutes: z.number().int().positive().max(120).optional(),
+  word_count: z.number().int().nonnegative().optional(),
+  dual_silo: z.boolean().optional().default(false),
+  silo_badge: z.string().optional().nullable(),
+  source_url: z.string().trim().regex(/^https:\/\/.+/i, "Source URL must be a valid HTTPS URL").optional().nullable(),
+  source_name: z.string().trim().max(120).optional().nullable(),
+  ai_generated: z.boolean().optional().default(false),
+  hide_ai_disclosure: z.boolean().optional().default(false)
+}).superRefine((data, ctx) => {
+  const effectiveTitle = (data.event_title || data.title || "").trim();
+  if (!effectiveTitle || effectiveTitle.length < 3) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Either title or event_title is required (min 3 characters)",
+      path: ["title"]
     });
   }
-  static register(definition) {
-    this.taskTypes.set(definition.taskType, definition);
-  }
-  static get(taskType) {
-    return this.taskTypes.get(taskType);
-  }
-  static list() {
-    return Array.from(this.taskTypes.values()).map((t) => ({
-      taskType: t.taskType,
-      name: t.name,
-      description: t.description,
-      assignedAgent: t.assignedAgent,
-      defaultPriority: t.defaultPriority,
-      defaultPolicyLevel: t.defaultPolicyLevel,
-      timeoutMs: t.timeoutMs
-    }));
-  }
-  static validatePayload(taskType, rawPayload) {
-    const def = this.taskTypes.get(taskType);
-    if (!def) {
-      if (typeof rawPayload === "object" && rawPayload !== null) {
-        return { success: true, data: rawPayload };
-      }
-      return { success: false, error: `Invalid payload for task type '${taskType}'. Must be a valid object.` };
-    }
-    const res = def.schema.safeParse(rawPayload);
-    if (!res.success) {
-      const issues = res.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ");
-      return { success: false, error: `Payload validation failed for '${taskType}': ${issues}` };
-    }
-    return { success: true, data: res.data };
-  }
-  static evaluatePolicy(taskType) {
-    return PolicyEngine.evaluateAction(taskType);
-  }
-};
-
-// src/server/aiRouter.ts
-var aiRouter = Router();
-var generalLimiter = createRateLimiter({
-  windowMs: 6e4,
-  maxRequests: 120,
-  endpointIdentifier: "ai_general"
-});
-var taskLimiter = createRateLimiter({
-  windowMs: 6e4,
-  maxRequests: 60,
-  endpointIdentifier: "ai_task_submission"
-});
-aiRouter.use(generalLimiter);
-aiRouter.use(requireAutomationAuth);
-aiRouter.get("/health", (req, res) => {
-  const geminiKeyConfigured = Boolean(
-    process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "MY_GEMINI_API_KEY"
-  );
-  const secretConfigured = Boolean(
-    process.env.STARTUPCREME_AUTOMATION_SECRET && process.env.STARTUPCREME_AUTOMATION_SECRET !== "your_m2m_automation_secret_key"
-  );
-  const webhookConfigured = Boolean(process.env.STARTUPCREME_WEBHOOK_URL);
-  const metrics = taskManager.getSystemMetrics();
-  res.json({
-    status: "healthy",
-    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-    system: {
-      platform: "StartupCr\xE8me AI Operating System",
-      version: "2.1.0-production-orchestration",
-      controlPlane: "n8n_ready",
-      m2mAuthEnabled: secretConfigured,
-      geminiFrontierConfigured: geminiKeyConfigured,
-      webhookConfigured,
-      databasePersistence: metrics.databasePersistence
-    },
-    constitution: {
-      publication: STARTUPCREME_CONSTITUTION.publicationName,
-      policyLevels: ["green", "yellow", "red"],
-      strictNoDirectPublishing: true
-    },
-    metrics,
-    registeredAgents: taskManager.listAgents(),
-    registeredTools: ToolRegistry.list(),
-    registeredTaskTypes: TaskRegistry.list()
-  });
-});
-aiRouter.get("/tools", (req, res) => {
-  res.json({
-    tools: ToolRegistry.list()
-  });
-});
-aiRouter.post("/tools/:toolName/execute", async (req, res) => {
-  const { toolName } = req.params;
-  const tool = ToolRegistry.get(toolName);
-  if (!tool) {
-    return res.status(404).json({
-      success: false,
-      error: `Tool '${toolName}' is not registered in the Controlled Tool Gateway.`,
-      code: AIErrorCodes.UNKNOWN_TOOL,
-      retryable: false
+  const effectiveContent = data.content || data.description;
+  if (!effectiveContent) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Either content (min 20 characters or Tiptap object) or description is required",
+      path: ["content"]
     });
-  }
-  try {
-    const result = await ToolRegistry.executeTool(toolName, req.body, {
-      agentId: req.callerIdentity || "automation_api"
-    });
-    res.status(result.success ? 200 : 400).json(result);
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: err?.message || "Error executing tool",
-      code: AIErrorCodes.INTERNAL_ERROR,
-      retryable: false
+  } else if (typeof effectiveContent === "string" && effectiveContent.trim().length < 20) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Content or description must be at least 20 characters",
+      path: ["content"]
     });
   }
 });
-aiRouter.post("/tasks", taskLimiter, async (req, res) => {
-  const parseResult = SubmitTaskRequestSchema.safeParse(req.body);
-  if (!parseResult.success) {
-    return res.status(400).json({
-      error: "Invalid task submission request schema.",
-      code: AIErrorCodes.VALIDATION_FAILED,
-      retryable: false,
-      details: parseResult.error.issues
-    });
-  }
-  const {
-    taskType,
-    priority,
-    assignedAgent,
-    requestedBy,
-    payload,
-    idempotencyKey,
-    webhookUrl,
-    timeoutMs
-  } = parseResult.data;
-  const payloadValidation = TaskRegistry.validatePayload(taskType, payload);
-  if (!payloadValidation.success) {
-    return res.status(400).json({
-      error: payloadValidation.error,
-      code: AIErrorCodes.VALIDATION_FAILED,
-      retryable: false
-    });
-  }
-  try {
-    const result = await taskManager.submitTask({
-      taskType,
-      assignedAgent: assignedAgent || void 0,
-      payload: payloadValidation.data,
-      priority,
-      requestedBy: requestedBy || req.callerIdentity || "n8n_control_plane",
-      idempotencyKey,
-      correlation: req.correlation,
-      webhookUrl,
-      timeoutMs
-    });
-    const task = result.task;
-    const protocol = req.protocol || "http";
-    const host = req.get("host") || "localhost:3000";
-    const pollUrl = `${protocol}://${host}/api/ai/tasks/${task.id}`;
-    res.status(result.isExisting ? 200 : 202).json({
-      success: true,
-      taskId: task.id,
-      status: task.status,
-      isExisting: result.isExisting,
-      policyLevel: task.policy_level || "green",
-      correlation: req.correlation,
-      task,
-      pollUrl,
-      createdAt: task.created_at,
-      updatedAt: task.updated_at
-    });
-  } catch (err) {
-    res.status(500).json({
-      error: err?.message || "Error submitting task to orchestrator",
-      code: AIErrorCodes.INTERNAL_ERROR,
-      retryable: false
-    });
-  }
-});
-aiRouter.get("/tasks", async (req, res) => {
-  const limit = parseInt(req.query.limit, 10) || 50;
-  const status = req.query.status;
-  const tasks = await taskManager.listTasksAsync(limit, status);
-  res.json({ tasks, total: tasks.length });
-});
-aiRouter.get("/tasks/:id", async (req, res) => {
-  const task = await taskManager.getTaskAsync(req.params.id);
-  if (!task) {
-    return res.status(404).json({
-      error: `Task '${req.params.id}' not found.`,
-      code: AIErrorCodes.NOT_FOUND,
-      retryable: false
-    });
-  }
-  const protocol = req.protocol || "http";
-  const host = req.get("host") || "localhost:3000";
-  const pollUrl = `${protocol}://${host}/api/ai/tasks/${task.id}`;
-  const createdTime = new Date(task.created_at).getTime();
-  const completedTime = task.completed_at ? new Date(task.completed_at).getTime() : null;
-  const durationMs = completedTime ? completedTime - createdTime : null;
-  let approvalDetails = null;
-  if (task.approval_id) {
-    let approval = taskManager.listApprovals().find((a) => a.id === task.approval_id);
-    if (!approval) {
-      approval = await taskManager.getApprovalAsync(task.approval_id);
-    }
-    if (approval) {
-      approvalDetails = {
-        id: approval.id,
-        status: approval.status,
-        description: approval.description,
-        decidedBy: approval.decided_by,
-        decisionReason: approval.decision_reason
-      };
-    }
-  }
-  const responseEnvelope = {
-    taskId: task.id,
-    taskType: task.task_type,
-    status: task.status,
-    priority: task.priority,
-    policyLevel: task.policy_level || "green",
-    correlation: task.metadata || { requestId: req.params.id },
-    result: task.result ? {
-      success: true,
-      data: task.result,
-      confidence: 0.95,
-      reasoningSummary: "Execution verified against Editorial Constitution"
-    } : null,
-    error: task.error ? createTaskError(
-      task.status === "failed" && task.error.includes("timed out") ? AIErrorCodes.TASK_TIMEOUT : AIErrorCodes.AGENT_EXECUTION_FAILED,
-      task.error
-    ) : null,
-    approval: approvalDetails,
-    timestamps: {
-      createdAt: task.created_at,
-      updatedAt: task.updated_at,
-      completedAt: task.completed_at,
-      durationMs
-    },
-    pollUrl
-  };
-  res.json(responseEnvelope);
-});
-aiRouter.get("/approvals", async (req, res) => {
-  const status = req.query.status;
-  const approvals = await taskManager.listApprovalsAsync(status);
-  res.json({ approvals, count: approvals.length });
-});
-aiRouter.post("/approvals/:id/approve", async (req, res) => {
-  const { decided_by, reason } = req.body;
-  const result = await taskManager.approveTask(
-    req.params.id,
-    decided_by || "Editorial Supervisor",
-    reason || "Approved via Control Plane"
-  );
-  if (!result.success) {
-    return res.status(400).json({ error: result.error });
-  }
-  res.json(result);
-});
-aiRouter.post("/approvals/:id/reject", async (req, res) => {
-  const { decided_by, reason } = req.body;
-  const result = await taskManager.rejectTask(
-    req.params.id,
-    decided_by || "Editorial Supervisor",
-    reason || "Rejected via Control Plane"
-  );
-  if (!result.success) {
-    return res.status(400).json({ error: result.error });
-  }
-  res.json(result);
-});
-aiRouter.post("/approvals/:id/review", async (req, res) => {
-  const { decision, decided_by, reason } = req.body;
-  if (decision === "approve") {
-    const result = await taskManager.approveTask(req.params.id, decided_by, reason);
-    return res.status(result.success ? 200 : 400).json(result);
-  } else if (decision === "reject") {
-    const result = await taskManager.rejectTask(req.params.id, decided_by, reason);
-    return res.status(result.success ? 200 : 400).json(result);
-  } else {
-    return res.status(400).json({ error: "Invalid decision. Must be 'approve' or 'reject'." });
-  }
-});
-aiRouter.get("/actions", (req, res) => {
-  const limit = parseInt(req.query.limit, 10) || 50;
-  const actions = taskManager.listActions(limit);
-  res.json({ actions, count: actions.length });
-});
-aiRouter.get("/alerts", (req, res) => {
-  const includeDismissed = req.query.include_dismissed === "true";
-  const alerts = taskManager.listAlerts(includeDismissed);
-  res.json({ alerts, count: alerts.length });
-});
-aiRouter.post("/alerts/:id/dismiss", (req, res) => {
-  const success = taskManager.dismissAlert(req.params.id);
-  res.json({ success });
-});
-aiRouter.get("/memory", (req, res) => {
-  const type = req.query.type;
-  const query = req.query.q;
-  if (query) {
-    const results = memoryStore.search(query, type);
-    return res.json({ memories: results, count: results.length });
-  }
-  if (type) {
-    const results = memoryStore.listByType(type);
-    return res.json({ memories: results, count: results.length });
-  }
-  const all = memoryStore.listAll();
-  res.json({ memories: all, count: all.length });
-});
-aiRouter.post("/memory", (req, res) => {
-  try {
-    const { memory_type, key, value, confidence, source, tags } = req.body;
-    if (!memory_type || !key || !value) {
-      return res.status(400).json({ error: "Missing memory_type, key, or value" });
-    }
-    const saved = memoryStore.set({
-      memoryType: memory_type,
-      key,
-      value,
-      confidence,
-      source,
-      tags
-    });
-    res.status(201).json({ success: true, memory: saved });
-  } catch (err) {
-    res.status(500).json({ error: err?.message || "Failed to save memory" });
-  }
-});
-aiRouter.post("/research", taskLimiter, async (req, res) => {
-  const idempotencyKey = req.headers["idempotency-key"] || req.headers["x-idempotency-key"] || req.body.idempotency_key || req.body.idempotencyKey;
-  const validation = ResearchInputSchema.safeParse(req.body);
-  if (!validation.success) {
-    return res.status(400).json({
-      error: "Invalid research parameters",
-      code: AIErrorCodes.VALIDATION_FAILED,
-      details: validation.error.issues
-    });
-  }
-  try {
-    const { task, isExisting } = await taskManager.submitTask({
-      taskType: "research_topic",
-      assignedAgent: "agent_research",
-      payload: validation.data,
-      priority: "high",
-      requestedBy: req.body.requested_by || req.callerIdentity || "n8n_research_flow",
-      idempotencyKey,
-      correlation: req.correlation,
-      timeoutMs: req.body.timeout_ms || 6e4
-    });
-    let finalTask = task;
-    let attempts = 0;
-    while ((finalTask.status === "queued" || finalTask.status === "running") && attempts < 24) {
-      await new Promise((r) => setTimeout(r, 250));
-      finalTask = taskManager.getTask(task.id) || finalTask;
-      attempts++;
-    }
-    res.status(finalTask.status === "completed" ? 200 : 202).json({
-      success: finalTask.status === "completed",
-      isExisting,
-      task: finalTask,
-      result: finalTask.result,
-      correlation: req.correlation
-    });
-  } catch (err) {
-    res.status(500).json({
-      error: err?.message || "Error executing research topic",
-      code: AIErrorCodes.INTERNAL_ERROR,
-      retryable: false
-    });
-  }
+var EventSubmissionSchema = z.object({
+  title: z.string().trim().min(3, "Event title must be at least 3 characters").max(200, "Title cannot exceed 200 characters"),
+  opportunity_type: z.enum([
+    "grant",
+    "accelerator",
+    "fellowship",
+    "incubator",
+    "pitch_competition",
+    "hackathon",
+    "conference",
+    "general"
+  ]),
+  application_url: z.string().trim().url("Please enter a valid URL (starting with http:// or https://)"),
+  description: z.string().trim().min(10, "Description must be at least 10 characters").max(2e3),
+  location: z.string().trim().min(2, "Location is required").max(100).default("Global (Remote)"),
+  deadline_date: z.string().trim().min(4, "Valid deadline date required"),
+  funding_amount: z.string().trim().max(100).optional().nullable(),
+  vertical: z.enum(["finance", "tech", "founders-mindset"]).optional().default("tech"),
+  locale: z.string().trim().optional().default("en-us"),
+  slug: z.string().trim().optional(),
+  content: z.string().trim().optional()
 });
 
 // src/server/expansionRouter.ts
-import { Router as Router2 } from "express";
-import crypto5 from "crypto";
-import { createClient as createClient4 } from "@supabase/supabase-js";
-var expansionRouter = Router2();
+var expansionRouter = Router();
 var runtimeStartups = [...INITIAL_STARTUPS];
 var runtimeJobs = [...INITIAL_JOBS];
 var runtimeRateSnapshot = { ...INITIAL_RATE_SNAPSHOT };
@@ -5112,6 +506,9 @@ var LEGACY_MOCK_JOB_TITLES = [
   "Fractional CTO & AI Infrastructure Advisor",
   "Lead Full-Stack Engineer (React Router 7 + Supabase)"
 ];
+var LEGACY_MOCK_EVENT_SLUGS = [
+  "manual-admin-opportunity-test-2026"
+];
 async function purgeLegacyMockRowsIfNeeded(client) {
   if (hasPurgedLegacyMockRows || !client) return;
   hasPurgedLegacyMockRows = true;
@@ -5123,12 +520,24 @@ async function purgeLegacyMockRowsIfNeeded(client) {
     await client.from("jobs").delete().in("title", LEGACY_MOCK_JOB_TITLES);
   } catch {
   }
+  try {
+    const { data: mockEvents } = await client.from("events").select("id, linked_post_id").in("slug", LEGACY_MOCK_EVENT_SLUGS);
+    if (mockEvents && mockEvents.length > 0) {
+      const linkedPostIds = mockEvents.map((e) => e.linked_post_id).filter(Boolean);
+      await client.from("events").delete().in("slug", LEGACY_MOCK_EVENT_SLUGS);
+      if (linkedPostIds.length > 0) {
+        await client.from("posts").delete().in("id", linkedPostIds);
+      }
+    }
+    await client.from("posts").delete().in("slug", LEGACY_MOCK_EVENT_SLUGS);
+  } catch {
+  }
 }
 function getSupabaseAdminClient() {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
   if (!supabaseUrl || !supabaseKey) return null;
-  return createClient4(supabaseUrl, supabaseKey, {
+  return createClient(supabaseUrl, supabaseKey, {
     db: { schema: "startupcreme" },
     auth: { persistSession: false, autoRefreshToken: false }
   });
@@ -5151,7 +560,7 @@ async function resolveRequestUser(req) {
     const token = authHeader.substring(7).trim();
     if (token) {
       try {
-        const authClient = createClient4(supabaseUrl, anonKey || serviceRoleKey, {
+        const authClient = createClient(supabaseUrl, anonKey || serviceRoleKey, {
           auth: { persistSession: false, autoRefreshToken: false }
         });
         const {
@@ -5367,6 +776,38 @@ expansionRouter.post(
     if (!isMarketsFeatureEnabled()) {
       return res.status(404).json({ error: "Not found" });
     }
+    const authHeader = req.headers.authorization;
+    if (!authHeader || typeof authHeader !== "string" || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized: Missing or invalid Authorization Bearer header matching STARTUPCREME_AUTOMATION_SECRET.",
+        code: "UNAUTHORIZED_RATES_WEBHOOK"
+      });
+    }
+    const providedToken = authHeader.slice(7).trim();
+    if (!providedToken) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized: Empty Bearer token provided.",
+        code: "UNAUTHORIZED_RATES_WEBHOOK"
+      });
+    }
+    const rawSecret = process.env.STARTUPCREME_AUTOMATION_SECRET?.trim();
+    const configuredSecret = rawSecret && rawSecret !== "your_m2m_automation_secret_key" ? rawSecret : "";
+    if (!configuredSecret) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized: Automation secret is not configured on the server. Access denied.",
+        code: "UNAUTHORIZED_RATES_WEBHOOK"
+      });
+    }
+    if (!timingSafeCheck(providedToken, configuredSecret)) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized: Invalid automation secret token.",
+        code: "UNAUTHORIZED_RATES_WEBHOOK"
+      });
+    }
     const {
       source = "n8n_webhook_job",
       central_bank_rates,
@@ -5549,7 +990,7 @@ function timingSafeCheck(provided, secret) {
   const a = Buffer.from(provided);
   const b = Buffer.from(secret);
   if (a.length !== b.length) return false;
-  return crypto5.timingSafeEqual(a, b);
+  return crypto.timingSafeEqual(a, b);
 }
 function isAuthorizedWebhookToken(req) {
   const authHeader = req.headers.authorization;
@@ -5558,297 +999,346 @@ function isAuthorizedWebhookToken(req) {
   }
   const token = authHeader.slice(7).trim();
   if (!token) return false;
-  const validSecrets = [
-    process.env.N8N_WEBHOOK_SECRET,
-    process.env.EVENT_WEBHOOK_SECRET,
-    process.env.N8N_BEARER_TOKEN,
-    process.env.EVENTS_API_BEARER_TOKEN,
-    process.env.STARTUPCREME_AUTOMATION_SECRET
-  ].map((s) => s?.trim()).filter((s) => typeof s === "string" && s.length > 0 && s !== "your_m2m_automation_secret_key");
-  if (validSecrets.length === 0) {
+  const rawSecret = process.env.STARTUPCREME_AUTOMATION_SECRET?.trim();
+  if (!rawSecret || rawSecret === "your_m2m_automation_secret_key") {
     return false;
   }
-  return validSecrets.some((secret) => timingSafeCheck(token, secret));
+  return timingSafeCheck(token, rawSecret);
 }
-expansionRouter.post(
-  ["/events", "/events/webhook", "/events/ingest", "/n8n/events", "/webhooks/events", "/webhooks/n8n/events"],
-  async (req, res) => {
-    if (!isAuthorizedWebhookToken(req)) {
-      return res.status(401).json({
-        success: false,
-        error: "Unauthorized: Missing or invalid Bearer token. Please provide a valid Authorization: Bearer <token> header matching N8N_WEBHOOK_SECRET or EVENT_WEBHOOK_SECRET."
-      });
+expansionRouter.post("/events/webhook", async (req, res) => {
+  const isWebhookAuthorized = isAuthorizedWebhookToken(req);
+  let isAdminAuthorized = false;
+  if (!isWebhookAuthorized) {
+    const reqUser = await resolveRequestUser(req);
+    if (reqUser && reqUser.role === "admin") {
+      isAdminAuthorized = true;
     }
-    const {
-      event_title,
-      application_url,
-      slug,
-      vertical,
-      locale,
-      title,
-      content,
-      excerpt,
-      meta_description,
-      description,
-      opportunity_type = "grant",
-      funding_amount,
-      location = "Global (Remote)",
-      deadline_date,
-      author_name,
-      author_role,
-      author_avatar,
-      cover_image,
-      canonical_url,
-      status = "published",
-      tags = [],
-      reading_time_minutes,
-      word_count
-    } = req.body || {};
-    const requiredFields = [
-      "event_title",
-      "application_url",
-      "slug",
-      "vertical",
-      "locale",
-      "title",
-      "content"
-    ];
-    const missingFields = requiredFields.filter((field) => {
-      const val = req.body?.[field];
-      return val === void 0 || val === null || typeof val === "string" && val.trim() === "" || typeof val === "object" && Object.keys(val).length === 0;
+  }
+  if (!isWebhookAuthorized && !isAdminAuthorized) {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized: Missing or invalid Bearer token. Please provide a valid Authorization: Bearer <token> matching STARTUPCREME_AUTOMATION_SECRET, or authenticate with an admin session."
     });
-    if (missingFields.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: `Payload validation failed: Missing required fields: ${missingFields.join(", ")}`,
-        missing_fields: missingFields
+  }
+  const rawBody = req.body || {};
+  const rawTitle = String(rawBody.title || rawBody.event_title || "").trim();
+  const rawEventTitle = String(rawBody.event_title || rawBody.title || "").trim();
+  let candidateSlug = String(rawBody.slug || "").trim();
+  if (!candidateSlug && (rawTitle || rawEventTitle)) {
+    candidateSlug = (rawTitle || rawEventTitle).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  }
+  const candidatePayload = {
+    ...rawBody,
+    title: rawTitle || void 0,
+    event_title: rawEventTitle || void 0,
+    slug: candidateSlug || void 0
+  };
+  const validationResult = EventWebhookIngestionSchema.safeParse(candidatePayload);
+  if (!validationResult.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Payload validation failed",
+      issues: validationResult.error.issues,
+      message: validationResult.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")
+    });
+  }
+  const validated = validationResult.data;
+  const effectiveTitle = (validated.title || validated.event_title).trim();
+  const effectiveEventTitle = (validated.event_title || validated.title).trim();
+  const normSlug = validated.slug || candidateSlug;
+  const normVertical = validated.vertical;
+  const normLocale = validated.locale;
+  const cleanAppUrl = validated.application_url;
+  const rawContent = validated.content || validated.description || effectiveTitle;
+  const description = (validated.description || validated.excerpt || effectiveTitle).trim();
+  const resolvedStatus = rawBody.status === "published" ? "published" : "draft";
+  let jsonbContent;
+  if (typeof rawContent === "string") {
+    try {
+      jsonbContent = JSON.parse(rawContent);
+    } catch {
+      jsonbContent = {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: rawContent }]
+          }
+        ]
+      };
+    }
+  } else if (rawContent && typeof rawContent === "object") {
+    jsonbContent = rawContent;
+  } else {
+    jsonbContent = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: effectiveTitle }]
+        }
+      ]
+    };
+  }
+  const client = getSupabaseAdminClient();
+  let existingPost = null;
+  let existingEvent = null;
+  try {
+    if (client) {
+      const postsTable = client.schema ? client.schema("startupcreme").from("posts") : client.from("posts");
+      const eventsTable = client.schema ? client.schema("startupcreme").from("events") : client.from("events");
+      const { data: foundPost } = await postsTable.select("id, title, excerpt, content, status, locale, vertical, slug").eq("locale", normLocale).eq("vertical", normVertical).eq("slug", normSlug).maybeSingle();
+      if (foundPost) existingPost = foundPost;
+      const { data: foundEvent } = await eventsTable.select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id").or(`application_url.eq.${cleanAppUrl},slug.eq.${normSlug}`).maybeSingle();
+      if (foundEvent) existingEvent = foundEvent;
+      if (!existingPost && existingEvent?.linked_post_id) {
+        const { data: linkedP } = await postsTable.select("id, title, excerpt, content, status, locale, vertical, slug").eq("id", existingEvent.linked_post_id).maybeSingle();
+        if (linkedP) existingPost = linkedP;
+      }
+    } else {
+      existingEvent = runtimeEvents.find(
+        (e) => e.application_url === cleanAppUrl || e.slug === normSlug
+      );
+      if (existingEvent?.linked_post) {
+        existingPost = existingEvent.linked_post;
+      }
+    }
+    if (existingPost && existingPost.status === "published") {
+      return res.status(200).json({
+        success: true,
+        deduplicated: true,
+        message: "Target post is already published. No mutations applied.",
+        data: {
+          post_id: existingPost.id,
+          event_id: existingEvent?.id || null,
+          status: existingPost.status
+        }
       });
     }
-    try {
-      const normLocale = String(locale).trim().toLowerCase();
-      const normVertical = String(vertical).trim().toLowerCase();
-      const normSlug = String(slug).trim().toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-      const cleanAppUrl = String(application_url).trim();
-      const cleanEventTitle = String(event_title).trim();
-      const cleanPostTitle = String(title).trim();
-      let jsonbContent;
-      if (typeof content === "string") {
-        try {
-          jsonbContent = JSON.parse(content);
-        } catch {
-          jsonbContent = {
-            type: "doc",
-            content: [
-              {
-                type: "paragraph",
-                content: [{ type: "text", text: content }]
-              }
-            ]
-          };
+    if (existingEvent && existingEvent.linked_post?.status === "published") {
+      return res.status(200).json({
+        success: true,
+        deduplicated: true,
+        message: "Target event and linked post are already published. No mutations applied.",
+        data: {
+          post_id: existingEvent.linked_post_id || existingEvent.linked_post?.id,
+          event_id: existingEvent.id,
+          status: "published"
         }
-      } else if (content && typeof content === "object") {
-        jsonbContent = content;
-      } else {
-        jsonbContent = {
-          type: "doc",
-          content: [
-            {
-              type: "paragraph",
-              content: [{ type: "text", text: cleanPostTitle }]
-            }
-          ]
-        };
-      }
+      });
+    }
+    let linkedPostId;
+    if (existingPost) {
+      linkedPostId = existingPost.id;
+    } else {
       const postRow = {
         locale: normLocale,
         vertical: normVertical,
         slug: normSlug,
-        title: cleanPostTitle,
-        excerpt: excerpt ? String(excerpt).trim() : String(description || cleanPostTitle).slice(0, 240),
+        title: effectiveTitle,
+        excerpt: validated.excerpt ? validated.excerpt.trim() : description.slice(0, 240),
         content: jsonbContent,
-        status: status || "published",
-        meta_description: meta_description ? String(meta_description).trim() : String(excerpt || description || cleanPostTitle).slice(0, 160),
-        canonical_url: canonical_url ? String(canonical_url).trim() : null,
-        cover_image: cover_image ? String(cover_image).trim() : null,
-        author_name: author_name ? String(author_name).trim() : "Startup Cr\xE8me Editorial",
-        author_role: author_role ? String(author_role).trim() : "Principal Editor",
-        author_avatar: author_avatar ? String(author_avatar).trim() : null,
-        dual_silo: normVertical === "founders-mindset" ? false : Boolean(req.body.dual_silo || false),
-        silo_badge: req.body.silo_badge || null,
-        tags: Array.isArray(tags) ? tags : [],
-        reading_time_minutes: Number(reading_time_minutes) || 5,
-        word_count: Number(word_count) || 800,
+        status: resolvedStatus,
+        meta_description: validated.meta_description ? validated.meta_description.trim() : (validated.excerpt || description).slice(0, 160),
+        canonical_url: validated.canonical_url ? validated.canonical_url.trim() : null,
+        cover_image: validated.cover_image ? validated.cover_image.trim() : null,
+        source_url: validated.source_url ? validated.source_url.trim() : null,
+        source_name: validated.source_name ? validated.source_name.trim() : null,
+        ai_generated: Boolean(validated.ai_generated),
+        hide_ai_disclosure: Boolean(validated.hide_ai_disclosure),
+        author_name: validated.author_name || "Startup Cr\xE8me Editorial",
+        author_role: validated.author_role || "Principal Editor",
+        author_avatar: validated.author_avatar || null,
+        dual_silo: normVertical === "founders-mindset" ? false : Boolean(validated.dual_silo),
+        silo_badge: validated.silo_badge || null,
+        tags: validated.tags || [],
+        reading_time_minutes: validated.reading_time_minutes || 5,
+        word_count: validated.word_count || 800,
+        created_at: (/* @__PURE__ */ new Date()).toISOString(),
         updated_at: (/* @__PURE__ */ new Date()).toISOString()
       };
-      const client = getSupabaseAdminClient();
-      let linkedPostId = null;
-      let eventId = null;
       if (client) {
         const postsTable = client.schema ? client.schema("startupcreme").from("posts") : client.from("posts");
-        const { data: upsertedPost, error: postUpsertError } = await postsTable.upsert(postRow, { onConflict: "locale,vertical,slug" }).select("id").maybeSingle();
-        if (!postUpsertError && upsertedPost?.id) {
-          linkedPostId = upsertedPost.id;
-        } else {
-          const { data: existingPost } = await postsTable.select("id").eq("locale", normLocale).eq("vertical", normVertical).eq("slug", normSlug).maybeSingle();
-          if (existingPost?.id) {
-            const { data: updatedPost, error: updatePostErr } = await postsTable.update({
-              title: postRow.title,
-              excerpt: postRow.excerpt,
-              content: postRow.content,
-              meta_description: postRow.meta_description,
-              status: postRow.status,
-              cover_image: postRow.cover_image,
-              canonical_url: postRow.canonical_url,
-              tags: postRow.tags,
-              updated_at: postRow.updated_at
-            }).eq("id", existingPost.id).select("id").single();
-            if (updatePostErr) throw updatePostErr;
-            linkedPostId = updatedPost.id;
-          } else {
-            const { data: newPost, error: insertPostErr } = await postsTable.insert(postRow).select("id").single();
-            if (insertPostErr) throw insertPostErr;
-            linkedPostId = newPost.id;
-          }
+        let insertPostRes = await postsTable.insert(postRow).select("id, status").single();
+        if (insertPostRes.error && (insertPostRes.error.code === "PGRST204" || String(insertPostRes.error.message || "").includes("column"))) {
+          const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
+          insertPostRes = await postsTable.insert(legacyPostRow).select("id, status").single();
         }
-        const normOppType = String(opportunity_type || "grant").toLowerCase().replace(/\s+/g, "_");
-        const validOppTypes = [
-          "grant",
-          "accelerator",
-          "fellowship",
-          "incubator",
-          "pitch_competition",
-          "hackathon",
-          "conference",
-          "general"
-        ];
-        const finalOppType = validOppTypes.includes(normOppType) ? normOppType : "grant";
-        let parsedDeadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3).toISOString();
-        if (deadline_date) {
-          const d = new Date(deadline_date);
-          if (!isNaN(d.getTime())) {
-            parsedDeadline = d.toISOString();
-          }
+        if (insertPostRes.error && insertPostRes.error.code === "22P02" && String(insertPostRes.error.message || "").includes("vertical")) {
+          const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
+          insertPostRes = await postsTable.insert({ ...legacyPostRow, vertical: "tech" }).select("id, status").single();
         }
-        const eventRow = {
-          title: cleanEventTitle,
-          slug: normSlug,
-          description: String(description || excerpt || cleanPostTitle).trim(),
-          opportunity_type: finalOppType,
-          funding_amount: funding_amount ? String(funding_amount).trim() : null,
-          location: String(location || "Global (Remote)").trim(),
-          deadline_date: parsedDeadline,
-          application_url: cleanAppUrl,
-          linked_post_id: linkedPostId
-        };
-        const eventsTable = client.schema ? client.schema("startupcreme").from("events") : client.from("events");
-        const { data: upsertedEvent, error: eventUpsertError } = await eventsTable.upsert(eventRow, { onConflict: "application_url" }).select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at").maybeSingle();
-        if (!eventUpsertError && upsertedEvent?.id) {
-          eventId = upsertedEvent.id;
-        } else {
-          const { data: existingEvent } = await eventsTable.select("id").eq("application_url", cleanAppUrl).maybeSingle();
-          if (existingEvent?.id) {
-            const { data: updatedEvent, error: updateEvtErr } = await eventsTable.update({
-              title: eventRow.title,
-              slug: eventRow.slug,
-              description: eventRow.description,
-              opportunity_type: eventRow.opportunity_type,
-              funding_amount: eventRow.funding_amount,
-              location: eventRow.location,
-              deadline_date: eventRow.deadline_date,
-              linked_post_id: linkedPostId
-            }).eq("id", existingEvent.id).select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at").single();
-            if (updateEvtErr) throw updateEvtErr;
-            eventId = updatedEvent.id;
-          } else {
-            let insertRes = await eventsTable.insert(eventRow).select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at").maybeSingle();
-            if (insertRes.error && String(insertRes.error.message || "").includes("events_slug_key")) {
-              const fallbackRow = { ...eventRow, slug: `${normSlug}-${Date.now().toString(36)}` };
-              insertRes = await eventsTable.insert(fallbackRow).select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at").single();
-            }
-            if (insertRes.error) throw insertRes.error;
-            eventId = insertRes.data?.id || null;
-          }
-        }
+        if (insertPostRes.error) throw insertPostRes.error;
+        linkedPostId = insertPostRes.data.id;
       } else {
         linkedPostId = `post-${Date.now()}`;
-        eventId = `event-${Date.now()}`;
       }
-      const memoryEvent = {
-        id: eventId || `event-${Date.now()}`,
-        title: cleanEventTitle,
-        slug: normSlug,
-        description: String(description || excerpt || cleanPostTitle).trim(),
-        opportunity_type: String(opportunity_type || "grant"),
-        funding_amount: funding_amount ? String(funding_amount).trim() : null,
-        location: String(location || "Global (Remote)").trim(),
-        deadline_date: deadline_date ? new Date(deadline_date).toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3).toISOString(),
-        application_url: cleanAppUrl,
-        linked_post_id: linkedPostId,
-        created_at: (/* @__PURE__ */ new Date()).toISOString()
-      };
-      runtimeEvents = [
-        memoryEvent,
-        ...runtimeEvents.filter((e) => e.application_url !== cleanAppUrl)
-      ];
-      return res.status(200).json({
-        success: true,
-        message: "Event and post successfully upserted into startupcreme schema",
-        data: {
-          post_id: linkedPostId,
-          event_id: eventId,
-          event_title: cleanEventTitle,
-          application_url: cleanAppUrl,
-          opportunity_type: memoryEvent.opportunity_type,
-          funding_amount: memoryEvent.funding_amount,
-          deadline_date: memoryEvent.deadline_date,
-          linked_post_id: linkedPostId,
-          post: {
-            id: linkedPostId,
-            locale: normLocale,
-            vertical: normVertical,
-            slug: normSlug,
-            title: cleanPostTitle
-          }
-        }
-      });
-    } catch (err) {
-      console.error("[Events Webhook Upsert Error]:", err);
-      return res.status(500).json({
-        success: false,
-        error: "Database operation failed during event and post upsert",
-        message: err.message || "Unknown database error",
-        details: err.details || err.hint || null
-      });
     }
+    let eventId;
+    const eventRow = {
+      title: effectiveEventTitle,
+      slug: normSlug,
+      description,
+      opportunity_type: validated.opportunity_type,
+      funding_amount: validated.funding_amount ? validated.funding_amount.trim() : null,
+      location: (validated.location || "Global (Remote)").trim(),
+      deadline_date: new Date(validated.deadline_date).toISOString(),
+      application_url: cleanAppUrl,
+      linked_post_id: linkedPostId
+    };
+    if (client) {
+      const eventsTable = client.schema ? client.schema("startupcreme").from("events") : client.from("events");
+      if (existingEvent) {
+        eventId = existingEvent.id;
+        if (!existingEvent.linked_post_id) {
+          await eventsTable.update({ linked_post_id: linkedPostId }).eq("id", existingEvent.id);
+        }
+      } else {
+        let insertRes = await eventsTable.insert(eventRow).select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at").maybeSingle();
+        if (insertRes.error && insertRes.error.code === "22P02" && String(insertRes.error.message || "").includes("opportunity_type")) {
+          const fallbackOpp = validated.opportunity_type === "fellowship" ? "grant" : "accelerator";
+          insertRes = await eventsTable.insert({ ...eventRow, opportunity_type: fallbackOpp }).select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at").maybeSingle();
+        }
+        if (insertRes.error && String(insertRes.error.message || "").includes("events_slug_key")) {
+          const fallbackRow = { ...eventRow, slug: `${normSlug}-${Date.now().toString(36)}` };
+          insertRes = await eventsTable.insert(fallbackRow).select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at").single();
+        }
+        if (insertRes.error) throw insertRes.error;
+        eventId = insertRes.data?.id || `event-${Date.now()}`;
+      }
+    } else {
+      eventId = existingEvent?.id || `event-${Date.now()}`;
+    }
+    const linkedPostSnapshot = {
+      id: linkedPostId,
+      locale: normLocale,
+      vertical: normVertical,
+      slug: normSlug,
+      title: effectiveTitle,
+      status: existingPost?.status || resolvedStatus,
+      canonical_url: existingPost?.canonical_url || (validated.canonical_url ? validated.canonical_url.trim() : null),
+      source_name: existingPost?.source_name || (validated.source_name ? validated.source_name.trim() : null),
+      source_url: existingPost?.source_url || (validated.source_url ? validated.source_url.trim() : null),
+      ai_generated: existingPost?.ai_generated !== void 0 ? Boolean(existingPost.ai_generated) : Boolean(validated.ai_generated),
+      hide_ai_disclosure: existingPost?.hide_ai_disclosure !== void 0 ? Boolean(existingPost.hide_ai_disclosure) : Boolean(validated.hide_ai_disclosure)
+    };
+    const memoryEvent = {
+      id: eventId,
+      title: effectiveEventTitle,
+      slug: normSlug,
+      description,
+      opportunity_type: validated.opportunity_type,
+      funding_amount: validated.funding_amount || null,
+      location: validated.location || "Global (Remote)",
+      deadline_date: new Date(validated.deadline_date).toISOString(),
+      application_url: cleanAppUrl,
+      linked_post_id: linkedPostId,
+      linked_post: linkedPostSnapshot,
+      created_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    runtimeEvents = [
+      memoryEvent,
+      ...runtimeEvents.filter((e) => e.application_url !== cleanAppUrl && e.slug !== normSlug)
+    ];
+    return res.status(200).json({
+      success: true,
+      message: "Event and post successfully processed",
+      post: linkedPostSnapshot,
+      data: {
+        post_id: linkedPostId,
+        event_id: eventId,
+        status: linkedPostSnapshot.status,
+        event_title: effectiveEventTitle,
+        application_url: cleanAppUrl,
+        opportunity_type: validated.opportunity_type,
+        funding_amount: memoryEvent.funding_amount,
+        deadline_date: memoryEvent.deadline_date,
+        linked_post_id: linkedPostId,
+        post: linkedPostSnapshot
+      }
+    });
+  } catch (err) {
+    console.error("[Events Webhook Error]:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Database operation failed during event ingestion",
+      message: err.message || "Unknown database error",
+      details: err.details || err.hint || null
+    });
   }
-);
+});
 expansionRouter.get("/events", async (req, res) => {
   const typeFilter = req.query.type || "";
   const searchFilter = req.query.search || "";
+  const mapOpportunityTypes = (raw) => {
+    const tokens = raw.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+    const result = [];
+    for (const token of tokens) {
+      if (token === "accelerator") {
+        result.push("accelerator", "incubator");
+      } else if (token === "pitch_competition") {
+        result.push("pitch_competition", "hackathon");
+      } else {
+        result.push(token);
+      }
+    }
+    return Array.from(new Set(result));
+  };
   const client = getSupabaseAdminClient();
+  const types = typeFilter && typeFilter !== "all" ? mapOpportunityTypes(typeFilter) : [];
   if (client) {
+    await purgeLegacyMockRowsIfNeeded(client);
     try {
-      let query = client.from("events").select("*, linked_post:posts(*)").order("deadline_date", { ascending: true });
-      if (typeFilter && typeFilter !== "all") {
-        query = query.ilike("opportunity_type", `%${typeFilter}%`);
+      let query = client.from("events").select("*, linked_post:posts!inner(*)").eq("linked_post.status", "published").order("deadline_date", { ascending: true });
+      if (types.length === 1) {
+        query = query.eq("opportunity_type", types[0]);
+      } else if (types.length > 1) {
+        query = query.in("opportunity_type", types);
       }
       if (searchFilter) {
         query = query.or(
           `title.ilike.%${searchFilter}%,description.ilike.%${searchFilter}%,location.ilike.%${searchFilter}%`
         );
       }
-      const { data, error } = await query;
+      let { data, error } = await query;
+      if (error && error.code === "22P02" && types.length > 0) {
+        const baseline = types.filter(
+          (t) => ["grant", "accelerator", "pitch_competition", "conference"].includes(t)
+        );
+        if (baseline.length > 0) {
+          let retryQ = client.from("events").select("*, linked_post:posts!inner(*)").eq("linked_post.status", "published").order("deadline_date", { ascending: true });
+          if (baseline.length === 1) {
+            retryQ = retryQ.eq("opportunity_type", baseline[0]);
+          } else {
+            retryQ = retryQ.in("opportunity_type", baseline);
+          }
+          const retryRes = await retryQ;
+          if (!retryRes.error && Array.isArray(retryRes.data)) {
+            data = retryRes.data;
+            error = null;
+          }
+        }
+      }
       if (!error && Array.isArray(data)) {
-        runtimeEvents = data;
-        return res.json({ success: true, count: data.length, events: data });
+        const dbSlugs = new Set(data.map((d) => d.slug));
+        const matchingMemory = runtimeEvents.filter((m) => {
+          if (dbSlugs.has(m.slug)) return false;
+          if (m.linked_post?.status !== "published") return false;
+          if (types.length > 0) {
+            return types.includes(String(m.opportunity_type || "").toLowerCase());
+          }
+          return true;
+        });
+        const combined = [...data, ...matchingMemory];
+        return res.json({ success: true, count: combined.length, events: combined });
       }
     } catch {
     }
   }
-  let filtered = [...runtimeEvents];
-  if (typeFilter && typeFilter !== "all") {
+  let filtered = runtimeEvents.filter((e) => e.linked_post?.status === "published");
+  if (types.length > 0) {
     filtered = filtered.filter(
-      (e) => String(e.opportunity_type).toLowerCase() === typeFilter.toLowerCase()
+      (e) => types.includes(String(e.opportunity_type || "").toLowerCase())
     );
   }
   if (searchFilter) {
@@ -5864,14 +1354,16 @@ expansionRouter.get("/events/:slug", async (req, res) => {
   const client = getSupabaseAdminClient();
   if (client) {
     try {
-      const { data, error } = await client.from("events").select("*, linked_post:posts(*)").eq("slug", slug).maybeSingle();
+      const { data, error } = await client.from("events").select("*, linked_post:posts!inner(*)").eq("slug", slug).eq("linked_post.status", "published").maybeSingle();
       if (!error && data) {
         return res.json({ success: true, event: data });
       }
     } catch {
     }
   }
-  const found = runtimeEvents.find((e) => e.slug === slug);
+  const found = runtimeEvents.find(
+    (e) => e.slug === slug && e.linked_post?.status === "published"
+  );
   if (found) {
     return res.json({ success: true, event: found });
   }
@@ -5881,19 +1373,394 @@ expansionRouter.delete("/events/:id", async (req, res) => {
   const adminUser = await requireRouteAdminAuth(req, res);
   if (!adminUser) return;
   const { id } = req.params;
+  const existingMemory = runtimeEvents.find((e) => e.id === id);
+  const memoryLinkedPostId = existingMemory?.linked_post_id;
   runtimeEvents = runtimeEvents.filter((e) => e.id !== id);
   const client = getSupabaseAdminClient();
   if (client) {
     try {
+      const { data: dbEvent } = await client.from("events").select("id, linked_post_id").eq("id", id).maybeSingle();
+      const linkedPostId = dbEvent?.linked_post_id || memoryLinkedPostId;
       await client.from("events").delete().eq("id", id);
+      if (linkedPostId) {
+        await client.from("posts").delete().eq("id", linkedPostId);
+      }
     } catch {
     }
   }
   return res.json({ success: true, deletedId: id });
 });
 
+// src/server/editorialRouter.ts
+import { Router as Router2 } from "express";
+import crypto2 from "crypto";
+import { createClient as createClient2 } from "@supabase/supabase-js";
+var editorialRouter = Router2();
+var memoryIdempotencyStore = /* @__PURE__ */ new Map();
+var inFlightRequests = /* @__PURE__ */ new Map();
+function secureCompare(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto2.timingSafeEqual(bufA, bufB);
+}
+function computeRequestFingerprint(payload) {
+  const contentStr = typeof payload.content === "object" ? JSON.stringify(payload.content) : String(payload.content || "").trim();
+  const canonicalString = [
+    payload.locale.toLowerCase().trim(),
+    payload.vertical.toLowerCase().trim(),
+    payload.slug.toLowerCase().trim(),
+    payload.title.trim(),
+    (payload.excerpt || "").trim(),
+    contentStr
+  ].join(":::");
+  return crypto2.createHash("sha256").update(canonicalString).digest("hex");
+}
+function getSupabaseServiceClient() {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || "";
+  if (!supabaseUrl || !serviceRoleKey || supabaseUrl.includes("placeholder")) {
+    return null;
+  }
+  return createClient2(supabaseUrl, serviceRoleKey, {
+    db: { schema: "startupcreme" },
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+}
+function requireEditorialAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  const customHeader = req.headers["x-editorial-secret"];
+  let providedToken = "";
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    providedToken = authHeader.slice(7).trim();
+  } else if (customHeader) {
+    providedToken = customHeader.trim();
+  }
+  if (!providedToken) {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized: Missing Authorization Bearer token matching N8N_EDITORIAL_SECRET.",
+      code: "UNAUTHORIZED_EDITORIAL"
+    });
+  }
+  if (providedToken === "startupcreme-n8n-events-secret-2026") {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized: The legacy events secret cannot be used for editorial draft submissions.",
+      code: "UNAUTHORIZED_EDITORIAL"
+    });
+  }
+  const rawConfiguredSecret = process.env.N8N_EDITORIAL_SECRET?.trim();
+  const configuredSecret = rawConfiguredSecret && rawConfiguredSecret !== "your_n8n_editorial_secret_key" ? rawConfiguredSecret : "";
+  if (!configuredSecret) {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized: Editorial webhook secret is not configured on the server. Access denied.",
+      code: "UNAUTHORIZED_EDITORIAL"
+    });
+  }
+  if (!secureCompare(providedToken, configuredSecret)) {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized: Invalid editorial token.",
+      code: "UNAUTHORIZED_EDITORIAL"
+    });
+  }
+  next();
+}
+editorialRouter.post("/drafts", requireEditorialAuth, async (req, res) => {
+  if (req.body && "status" in req.body) {
+    return res.status(400).json({
+      success: false,
+      error: "Forbidden: External workflows cannot specify or override publication status. All submissions must be drafts.",
+      code: "STATUS_OVERRIDE_FORBIDDEN"
+    });
+  }
+  const parseResult = EditorialDraftSubmissionSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Validation failed: Invalid article payload.",
+      code: "VALIDATION_ERROR",
+      details: parseResult.error.flatten()
+    });
+  }
+  const payload = parseResult.data;
+  const idempotencyKey = req.headers["idempotency-key"]?.trim() || req.headers["x-idempotency-key"]?.trim() || payload.idempotency_key;
+  const workflowId = req.headers["x-workflow-id"]?.trim() || payload.workflow_id;
+  const currentFingerprint = computeRequestFingerprint({
+    slug: payload.slug,
+    vertical: payload.vertical,
+    locale: payload.locale,
+    title: payload.title,
+    content: payload.content,
+    excerpt: payload.excerpt
+  });
+  let calculatedWordCount = payload.word_count;
+  if (!calculatedWordCount) {
+    const rawText = typeof payload.content === "string" ? payload.content.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim() : JSON.stringify(payload.content);
+    calculatedWordCount = Math.max(1, rawText.split(/\s+/).filter(Boolean).length);
+  }
+  const calculatedReadingTime = payload.reading_time_minutes || Math.max(1, Math.ceil(calculatedWordCount / 200));
+  let jsonbContent;
+  if (typeof payload.content === "string") {
+    try {
+      jsonbContent = JSON.parse(payload.content);
+    } catch {
+      jsonbContent = payload.content;
+    }
+  } else {
+    jsonbContent = payload.content;
+  }
+  const lockKey = `${payload.locale}::${payload.vertical}::${payload.slug}`;
+  if (inFlightRequests.has(lockKey)) {
+    try {
+      await inFlightRequests.get(lockKey);
+    } catch {
+    }
+  }
+  let resolveLock = () => {
+  };
+  const lockPromise = new Promise((resolve) => {
+    resolveLock = resolve;
+  });
+  inFlightRequests.set(lockKey, lockPromise);
+  try {
+    const supabase = getSupabaseServiceClient();
+    let existingIdempotency = null;
+    if (idempotencyKey) {
+      existingIdempotency = memoryIdempotencyStore.get(idempotencyKey) || null;
+      if (!existingIdempotency && supabase) {
+        try {
+          const { data, error } = await supabase.from("editorial_idempotency").select("*").eq("idempotency_key", idempotencyKey).maybeSingle();
+          if (!error && data) {
+            existingIdempotency = data;
+            memoryIdempotencyStore.set(idempotencyKey, existingIdempotency);
+          }
+        } catch {
+        }
+      }
+    }
+    if (existingIdempotency) {
+      if (existingIdempotency.request_fingerprint !== currentFingerprint) {
+        return res.status(409).json({
+          success: false,
+          error: `Conflict: Idempotency key '${idempotencyKey}' was already used with a different article payload.`,
+          code: "IDEMPOTENCY_PAYLOAD_MISMATCH"
+        });
+      }
+      let replayedPost = null;
+      if (supabase) {
+        try {
+          const { data } = await supabase.from("posts").select("id, slug, vertical, locale, title, status, word_count, reading_time_minutes, created_at, updated_at").eq("id", existingIdempotency.post_id).maybeSingle();
+          if (data) replayedPost = data;
+        } catch {
+        }
+      }
+      const host2 = req.get("x-forwarded-host") || req.get("host") || "www.startupcreme.com";
+      const protocol2 = req.get("x-forwarded-proto") || req.protocol || "https";
+      const baseUrl2 = `${protocol2}://${host2}`;
+      return res.status(200).json({
+        success: true,
+        action: "replayed",
+        post: replayedPost || {
+          id: existingIdempotency.post_id,
+          slug: existingIdempotency.slug,
+          vertical: existingIdempotency.vertical,
+          locale: existingIdempotency.locale,
+          title: payload.title,
+          status: "draft"
+        },
+        editorial_urls: {
+          cms_editor_url: `${baseUrl2}/admin?tab=posts&edit=${encodeURIComponent(payload.slug)}`
+        },
+        idempotency: {
+          key: idempotencyKey,
+          replayed: true
+        }
+      });
+    }
+    if (supabase) {
+      try {
+        const { data: existingPost, error: postLookupError } = await supabase.from("posts").select("id, slug, vertical, locale, title, status, updated_at").eq("locale", payload.locale).eq("vertical", payload.vertical).eq("slug", payload.slug).maybeSingle();
+        if (!postLookupError && existingPost) {
+          if (existingPost.status === "published") {
+            return res.status(409).json({
+              success: false,
+              error: `Conflict: An article with slug '${payload.slug}' is already published in the ${payload.vertical} vertical. Automated workflows cannot modify or overwrite published articles.`,
+              code: "PUBLISHED_ARTICLE_COLLISION",
+              existing_article: {
+                id: existingPost.id,
+                slug: existingPost.slug,
+                vertical: existingPost.vertical,
+                status: existingPost.status
+              }
+            });
+          }
+          return res.status(409).json({
+            success: false,
+            error: `Conflict: A draft with slug '${payload.slug}' already exists in the ${payload.vertical} vertical. To protect editorial revisions, existing drafts cannot be overwritten.`,
+            code: "DRAFT_COLLISION",
+            existing_draft: {
+              id: existingPost.id,
+              slug: existingPost.slug,
+              vertical: existingPost.vertical,
+              status: existingPost.status,
+              updated_at: existingPost.updated_at
+            }
+          });
+        }
+      } catch (err) {
+        console.error("[EditorialRouter] Error checking post collision:", err);
+        return res.status(500).json({
+          success: false,
+          error: "Internal error checking post availability.",
+          code: "DATABASE_ERROR"
+        });
+      }
+    }
+    const newPostId = crypto2.randomUUID();
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const postRow = {
+      id: newPostId,
+      slug: payload.slug,
+      locale: payload.locale,
+      vertical: payload.vertical,
+      title: payload.title,
+      excerpt: payload.excerpt || payload.meta_description || payload.title.slice(0, 240),
+      content: jsonbContent,
+      status: "draft",
+      // Strictly hardcoded server-side
+      meta_description: payload.meta_description || payload.excerpt || payload.title.slice(0, 160),
+      canonical_url: payload.canonical_url || null,
+      cover_image: payload.cover_image || null,
+      source_url: payload.source_url || null,
+      source_name: payload.source_name || null,
+      ai_generated: Boolean(payload.ai_generated),
+      hide_ai_disclosure: Boolean(payload.hide_ai_disclosure),
+      author_name: payload.author_name || "Startup Cr\xE8me Editorial",
+      author_role: payload.author_role || "Senior Analyst",
+      author_avatar: payload.author_avatar || null,
+      dual_silo: payload.vertical === "founders-mindset" ? false : payload.dual_silo || false,
+      silo_badge: payload.vertical === "founders-mindset" ? null : payload.dual_silo ? "Dual Silo Analysis" : null,
+      tags: payload.tags && payload.tags.length > 0 ? payload.tags : ["Editorial"],
+      reading_time_minutes: calculatedReadingTime,
+      word_count: calculatedWordCount,
+      created_at: nowIso,
+      updated_at: nowIso
+    };
+    let persistedInDb = false;
+    let savedPost = postRow;
+    if (supabase) {
+      try {
+        let { data: insertedPost, error: insertError } = await supabase.from("posts").insert(postRow).select("id, slug, vertical, locale, title, status, word_count, reading_time_minutes, created_at, updated_at").single();
+        if (insertError && (insertError.code === "PGRST204" || String(insertError.message || "").includes("column"))) {
+          const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
+          const retryRes = await supabase.from("posts").insert(legacyPostRow).select("id, slug, vertical, locale, title, status, word_count, reading_time_minutes, created_at, updated_at").single();
+          insertedPost = retryRes.data;
+          insertError = retryRes.error;
+        }
+        if (insertError && insertError.code === "22P02" && String(insertError.message || "").includes("vertical")) {
+          const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
+          const retryRes = await supabase.from("posts").insert({ ...legacyPostRow, vertical: "tech" }).select("id, slug, vertical, locale, title, status, word_count, reading_time_minutes, created_at, updated_at").single();
+          insertedPost = retryRes.data;
+          insertError = retryRes.error;
+        }
+        if (insertError) {
+          console.error("[EditorialRouter] Supabase insert error:", insertError.message);
+          if (insertError.code === "23505" || insertError.message.includes("unique")) {
+            return res.status(409).json({
+              success: false,
+              error: `Conflict: An article with slug '${payload.slug}' already exists in the ${payload.vertical} vertical.`,
+              code: "DUPLICATE_SLUG"
+            });
+          }
+          return res.status(500).json({
+            success: false,
+            error: "Failed to persist article draft in database.",
+            code: "DATABASE_ERROR"
+          });
+        }
+        if (insertedPost) {
+          savedPost = { ...postRow, ...insertedPost };
+          persistedInDb = true;
+        }
+      } catch (err) {
+        console.error("[EditorialRouter] Database exception on post insert:", err);
+        return res.status(500).json({
+          success: false,
+          error: "Database connection failed while creating article draft.",
+          code: "DATABASE_ERROR"
+        });
+      }
+    }
+    if (idempotencyKey) {
+      const record = {
+        idempotency_key: idempotencyKey,
+        request_fingerprint: currentFingerprint,
+        post_id: savedPost.id,
+        slug: savedPost.slug,
+        locale: savedPost.locale,
+        vertical: savedPost.vertical,
+        workflow_id: workflowId,
+        created_at: nowIso
+      };
+      memoryIdempotencyStore.set(idempotencyKey, record);
+      if (supabase) {
+        try {
+          await supabase.from("editorial_idempotency").insert({
+            idempotency_key: idempotencyKey,
+            request_fingerprint: currentFingerprint,
+            post_id: savedPost.id,
+            workflow_id: workflowId || null,
+            created_at: nowIso,
+            updated_at: nowIso
+          });
+        } catch {
+        }
+      }
+    }
+    const host = req.get("x-forwarded-host") || req.get("host") || "www.startupcreme.com";
+    const protocol = req.get("x-forwarded-proto") || req.protocol || "https";
+    const baseUrl = `${protocol}://${host}`;
+    return res.status(201).json({
+      success: true,
+      action: "created",
+      persisted: persistedInDb ? "database" : "memory",
+      post: {
+        id: savedPost.id,
+        slug: savedPost.slug,
+        vertical: savedPost.vertical,
+        locale: savedPost.locale,
+        title: savedPost.title,
+        status: "draft",
+        canonical_url: savedPost.canonical_url || null,
+        source_url: savedPost.source_url || null,
+        source_name: savedPost.source_name || null,
+        ai_generated: Boolean(savedPost.ai_generated),
+        hide_ai_disclosure: Boolean(savedPost.hide_ai_disclosure),
+        word_count: savedPost.word_count,
+        reading_time_minutes: savedPost.reading_time_minutes,
+        created_at: savedPost.created_at,
+        updated_at: savedPost.updated_at
+      },
+      editorial_urls: {
+        cms_editor_url: `${baseUrl}/admin?tab=posts&edit=${encodeURIComponent(savedPost.slug)}`
+      },
+      idempotency: {
+        key: idempotencyKey || null,
+        replayed: false
+      }
+    });
+  } finally {
+    resolveLock();
+    inFlightRequests.delete(lockKey);
+  }
+});
+
 // server/meta.ts
-import { createClient as createClient5 } from "@supabase/supabase-js";
+import { createClient as createClient3 } from "@supabase/supabase-js";
 var DEFAULT_TITLE = "StartupCr\xE8me | Financial & Technology Intelligence";
 var DEFAULT_DESCRIPTION = "StartupCr\xE8me is the premier digital publication for Finance, Macro-economics, and Deep Technology.";
 var DEFAULT_IMAGE = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630";
@@ -6161,11 +2028,11 @@ async function resolvePageMetadata(reqPath, host, protocol) {
       const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       if (supabaseUrl && supabaseKey) {
         try {
-          const scClient = createClient5(supabaseUrl, supabaseKey, {
+          const scClient = createClient3(supabaseUrl, supabaseKey, {
             db: { schema: "startupcreme" },
             auth: { persistSession: false, autoRefreshToken: false }
           });
-          const defaultClient = createClient5(supabaseUrl, supabaseKey, {
+          const defaultClient = createClient3(supabaseUrl, supabaseKey, {
             auth: { persistSession: false, autoRefreshToken: false }
           });
           const executeQuery = async (queryFn) => {
@@ -6181,14 +2048,14 @@ async function resolvePageMetadata(reqPath, host, protocol) {
           const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(decodedSlug);
           let foundPost = null;
           const resA = await executeQuery(
-            (client) => client.from("posts").select("*").ilike("slug", decodedSlug).limit(1)
+            (client) => client.from("posts").select("*").ilike("slug", decodedSlug).eq("status", "published").limit(1)
           );
           if (resA?.data && resA.data.length > 0) {
             foundPost = resA.data[0];
           }
           if (!foundPost && isUuid) {
             const resUuid = await executeQuery(
-              (client) => client.from("posts").select("*").eq("id", decodedSlug).limit(1)
+              (client) => client.from("posts").select("*").eq("id", decodedSlug).eq("status", "published").limit(1)
             );
             if (resUuid?.data && resUuid.data.length > 0) {
               foundPost = resUuid.data[0];
@@ -6197,7 +2064,7 @@ async function resolvePageMetadata(reqPath, host, protocol) {
           if (!foundPost && decodedSlug.includes("-")) {
             const withSpaces = decodedSlug.replace(/-/g, " ");
             const resSpaces = await executeQuery(
-              (client) => client.from("posts").select("*").ilike("slug", withSpaces).limit(1)
+              (client) => client.from("posts").select("*").ilike("slug", withSpaces).eq("status", "published").limit(1)
             );
             if (resSpaces?.data && resSpaces.data.length > 0) {
               foundPost = resSpaces.data[0];
@@ -6206,7 +2073,7 @@ async function resolvePageMetadata(reqPath, host, protocol) {
           if (!foundPost && decodedSlug.includes(" ")) {
             const withHyphens = decodedSlug.replace(/\s+/g, "-");
             const resHyphens = await executeQuery(
-              (client) => client.from("posts").select("*").ilike("slug", withHyphens).limit(1)
+              (client) => client.from("posts").select("*").ilike("slug", withHyphens).eq("status", "published").limit(1)
             );
             if (resHyphens?.data && resHyphens.data.length > 0) {
               foundPost = resHyphens.data[0];
@@ -6215,11 +2082,14 @@ async function resolvePageMetadata(reqPath, host, protocol) {
           if (!foundPost && decodedSlug.length > 12) {
             const prefix = decodedSlug.slice(0, 30);
             const resPartial = await executeQuery(
-              (client) => client.from("posts").select("*").ilike("slug", `%${prefix}%`).limit(1)
+              (client) => client.from("posts").select("*").ilike("slug", `%${prefix}%`).eq("status", "published").limit(1)
             );
             if (resPartial?.data && resPartial.data.length > 0) {
               foundPost = resPartial.data[0];
             }
+          }
+          if (foundPost && foundPost.status !== "published") {
+            foundPost = null;
           }
           if (foundPost) {
             title = `${foundPost.title} | StartupCr\xE8me`;
@@ -6340,7 +2210,7 @@ async function resolvePageMetadata(reqPath, host, protocol) {
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
     if (supabaseUrl && supabaseKey) {
       try {
-        const scClient = createClient5(supabaseUrl, supabaseKey, {
+        const scClient = createClient3(supabaseUrl, supabaseKey, {
           db: { schema: "startupcreme" },
           auth: { persistSession: false, autoRefreshToken: false }
         });
@@ -6466,7 +2336,7 @@ ${updatedHtml}`;
 }
 
 // server/sitemap.ts
-import { createClient as createClient6 } from "@supabase/supabase-js";
+import { createClient as createClient4 } from "@supabase/supabase-js";
 var STATIC_LOCALES = ["en-us", "en-gb", "de-de", "ja-jp", "fr-fr"];
 function escapeXml(unsafe) {
   return unsafe.replace(/[<>&'"]/g, (c) => {
@@ -6501,9 +2371,10 @@ async function generateDynamicSitemap(baseUrl = "https://www.startupcreme.com") 
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
   let posts = [];
   let topics = [];
+  let publishedEvents = [];
   if (supabaseUrl && supabaseKey) {
     try {
-      const client = createClient6(supabaseUrl, supabaseKey, {
+      const client = createClient4(supabaseUrl, supabaseKey, {
         db: { schema: "startupcreme" },
         auth: { persistSession: false, autoRefreshToken: false }
       });
@@ -6514,6 +2385,13 @@ async function generateDynamicSitemap(baseUrl = "https://www.startupcreme.com") 
       const { data: topicsData, error: topicsError } = await client.from("discussion_topics").select("slug, updated_at").order("updated_at", { ascending: false });
       if (!topicsError && Array.isArray(topicsData)) {
         topics = topicsData;
+      }
+      const { data: eventsData, error: eventsError } = await client.from("events").select("slug, deadline_date, linked_post:posts!inner(status, updated_at)").eq("linked_post.status", "published").order("deadline_date", { ascending: true });
+      if (!eventsError && Array.isArray(eventsData)) {
+        publishedEvents = eventsData.map((e) => ({
+          slug: e.slug,
+          updated_at: e.linked_post?.updated_at || e.deadline_date
+        }));
       }
     } catch (dbErr) {
       console.warn("[Sitemap] Warning fetching dynamic records from Supabase:", dbErr);
@@ -6661,6 +2539,23 @@ async function generateDynamicSitemap(baseUrl = "https://www.startupcreme.com") 
     xml += `    <changefreq>daily</changefreq>
 `;
     xml += `    <priority>0.7</priority>
+`;
+    xml += `  </url>
+`;
+  });
+  publishedEvents.forEach((evt) => {
+    if (!evt.slug) return;
+    const evtUrl = `${cleanBase}/events#${evt.slug}`;
+    const lastMod = formatIsoDate(evt.updated_at);
+    xml += `  <url>
+`;
+    xml += `    <loc>${escapeXml(evtUrl)}</loc>
+`;
+    xml += `    <lastmod>${lastMod}</lastmod>
+`;
+    xml += `    <changefreq>daily</changefreq>
+`;
+    xml += `    <priority>0.8</priority>
 `;
     xml += `  </url>
 `;
@@ -6818,9 +2713,10 @@ function generateLlmsTxt(baseUrl = "https://www.startupcreme.com") {
 
 ## Core Architectural Overview
 
-Startup Cr\xE8me partitions editorial and intelligence streams into two foundational content silos:
+Startup Cr\xE8me partitions editorial and intelligence streams into three foundational content silos:
 - **Finance**: Venture capital dynamics, cap table structuring, central bank interest rates, currency volatility, fintech infrastructure, and equity-free funding instruments.
 - **Tech**: Artificial intelligence, autonomous agent pipelines, frontier cloud architecture, developer tooling, and technical engineering leadership.
+- **Founders Mindset**: Strategic leadership psychology, executive resilience, decision-making frameworks, and mental fortitude for venture-backed founders.
 
 Content is published across 5 localized regional editions:
 - \`en-us\`: United States & Global Tech Ecosystem
@@ -6870,15 +2766,63 @@ Content is published across 5 localized regional editions:
 1. **Attribution**: When synthesizing or citing playbooks, attribute analysis to *Startup Cr\xE8me* with the direct canonical URL.
 2. **Current Information**: Opportunities listed under \`/events\` carry strict deadline timestamps. Always verify the \`deadline_date\` attribute before recommending closing grants to users.
 3. **No Private Scraping**: Do not scrape internal API paths (\`/api/*\`, \`/admin/*\`, or webhook endpoints); all public content is structured in the sitemap and HTML semantic markup.
+4. **Publication Status**: Only verified opportunities with linked editorial playbooks that have \`status = 'published'\` are publicly indexed and readable. Drafts are strictly withheld from public discovery.
 `;
 }
 
 // server/app.ts
+var MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+var uploadRateLimits = /* @__PURE__ */ new Map();
+function checkUploadRateLimit(identifier, limit = 20, windowMs = 6e4) {
+  const now = Date.now();
+  let record = uploadRateLimits.get(identifier);
+  if (!record || record.resetAt <= now) {
+    record = { count: 1, resetAt: now + windowMs };
+    uploadRateLimits.set(identifier, record);
+    return { allowed: true, remaining: limit - 1, retryAfter: Math.ceil(windowMs / 1e3) };
+  }
+  record.count += 1;
+  const retryAfter = Math.max(1, Math.ceil((record.resetAt - now) / 1e3));
+  if (record.count > limit) {
+    return { allowed: false, remaining: 0, retryAfter };
+  }
+  return { allowed: true, remaining: limit - record.count, retryAfter };
+}
+function detectAllowedImageMagicBytes(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 137 && buf[1] === 80 && // P
+  buf[2] === 78 && // N
+  buf[3] === 71 && // G
+  buf[4] === 13 && // \r
+  buf[5] === 10 && // \n
+  buf[6] === 26 && buf[7] === 10) {
+    return "png";
+  }
+  if (buf[0] === 255 && buf[1] === 216 && buf[2] === 255) {
+    return "jpeg";
+  }
+  if (buf[0] === 82 && // R
+  buf[1] === 73 && // I
+  buf[2] === 70 && // F
+  buf[3] === 70 && // F
+  buf[8] === 87 && // W
+  buf[9] === 69 && // E
+  buf[10] === 66 && // B
+  buf[11] === 80) {
+    return "webp";
+  }
+  return null;
+}
+function containsSvgOrXml(buf) {
+  if (!buf || buf.length === 0) return false;
+  const sample = buf.slice(0, 1024).toString("utf8").toLowerCase();
+  return sample.includes("<svg") || sample.includes("<?xml") || sample.includes('xmlns="http://www.w3.org/2000/svg"') || sample.includes("<!doctype svg");
+}
 var upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024
-    // 10MB limit
+    fileSize: MAX_IMAGE_SIZE_BYTES
+    // Hard 5MB limit
   }
 });
 function getR2Config() {
@@ -6969,7 +2913,6 @@ function createApp(options) {
       version: "1.0.0",
       routes: [
         "/api/health",
-        "/api/ai/health",
         "/api/auth/profile",
         "/api/upload-image"
       ]
@@ -6992,7 +2935,7 @@ function createApp(options) {
       return res.status(503).json({ error: "Database not configured" });
     }
     try {
-      const authClient = createClient7(supabaseUrl, anonKey || serviceRoleKey, {
+      const authClient = createClient5(supabaseUrl, anonKey || serviceRoleKey, {
         auth: { persistSession: false, autoRefreshToken: false }
       });
       const { data: { user }, error: authError } = await authClient.auth.getUser(token);
@@ -7001,7 +2944,7 @@ function createApp(options) {
       }
       const email = (user.email || "").trim().toLowerCase();
       const userId = user.id;
-      const adminClient = createClient7(supabaseUrl, serviceRoleKey || anonKey, {
+      const adminClient = createClient5(supabaseUrl, serviceRoleKey || anonKey, {
         db: { schema: "startupcreme" },
         auth: { persistSession: false, autoRefreshToken: false }
       });
@@ -7040,7 +2983,7 @@ function createApp(options) {
       }
       const role = (dbUser.role || "user").trim().toLowerCase() === "admin" ? "admin" : "user";
       if (serviceRoleKey && user.user_metadata?.role !== role) {
-        const masterClient = createClient7(supabaseUrl, serviceRoleKey);
+        const masterClient = createClient5(supabaseUrl, serviceRoleKey);
         masterClient.auth.admin.updateUserById(userId, {
           user_metadata: { ...user.user_metadata, role }
         }).catch(() => {
@@ -7061,14 +3004,8 @@ function createApp(options) {
       return res.status(500).json({ error: "Internal error resolving user profile" });
     }
   });
-  app2.use(["/api/ai", "/ai"], aiRouter);
   app2.use("/api", expansionRouter);
-  app2.post(
-    ["/events/webhook", "/events/ingest", "/n8n/events", "/webhooks/events", "/webhooks/n8n/events"],
-    (req, res, next) => {
-      expansionRouter(req, res, next);
-    }
-  );
+  app2.use(["/api/editorial", "/editorial"], editorialRouter);
   app2.get(["/sitemap.xml", "/sitemap", "/sitemap_index.xml"], async (req, res) => {
     res.setHeader("Content-Type", "text/xml; charset=utf-8");
     res.setHeader("X-Robots-Tag", "noindex");
@@ -7121,32 +3058,112 @@ function createApp(options) {
     const llms = generateLlmsTxt(baseUrl);
     return res.status(200).send(llms);
   });
-  app2.post(["/api/upload-image", "/upload-image"], upload.single("image"), async (req, res) => {
+  const handleMulterUpload = (req, res, next) => {
+    upload.single("image")(req, res, (err) => {
+      if (err) {
+        if (err.code === "LIMIT_FILE_SIZE" || err.message?.includes("File too large")) {
+          return res.status(413).json({
+            success: false,
+            error: "Payload Too Large: Image size exceeds maximum limit of 5 MB.",
+            code: "PAYLOAD_TOO_LARGE"
+          });
+        }
+        return res.status(400).json({ success: false, error: `Upload error: ${err.message}` });
+      }
+      next();
+    });
+  };
+  app2.post(["/api/upload-image", "/upload-image"], handleMulterUpload, async (req, res) => {
     try {
+      const clientIdentifier = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip || "unknown_client";
+      const rateCheck = checkUploadRateLimit(clientIdentifier, 20, 6e4);
+      res.setHeader("X-RateLimit-Limit", "20");
+      res.setHeader("X-RateLimit-Remaining", String(rateCheck.remaining));
+      if (!rateCheck.allowed) {
+        res.setHeader("Retry-After", String(rateCheck.retryAfter));
+        return res.status(429).json({
+          success: false,
+          error: "Too Many Requests: Image upload rate limit exceeded. Maximum 20 uploads per minute.",
+          code: "RATE_LIMIT_EXCEEDED",
+          retryAfter: rateCheck.retryAfter
+        });
+      }
+      const authHeader = req.headers.authorization;
+      if (!authHeader || typeof authHeader !== "string" || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({
+          success: false,
+          error: "Unauthorized: Missing or invalid Authorization Bearer header with Supabase JWT.",
+          code: "UNAUTHORIZED"
+        });
+      }
+      const token = authHeader.slice(7).trim();
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          error: "Unauthorized: Empty bearer token provided.",
+          code: "UNAUTHORIZED"
+        });
+      }
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+      const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || "";
+      if (!supabaseUrl || !anonKey && !serviceRoleKey) {
+        return res.status(503).json({
+          success: false,
+          error: "Service Unavailable: Supabase authentication client not configured.",
+          code: "AUTH_UNAVAILABLE"
+        });
+      }
+      const authClient = createClient5(supabaseUrl, anonKey || serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false }
+      });
+      const { data: { user }, error: authError } = await authClient.auth.getUser(token);
+      if (authError || !user || !user.id || user.role !== "authenticated") {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized: Invalid or expired Supabase authentication session. Role "authenticated" required.',
+          code: "INVALID_TOKEN"
+        });
+      }
       let fileBuffer;
-      let fileMime;
-      let fileExt;
-      let cleanBaseName;
       if (req.file) {
         fileBuffer = req.file.buffer;
-        fileMime = req.file.mimetype || "image/jpeg";
-        fileExt = path.extname(req.file.originalname) || ".jpg";
-        cleanBaseName = path.basename(req.file.originalname, fileExt).replace(/[^a-zA-Z0-9_-]/g, "_");
       } else if (req.body?.dataUrl && typeof req.body.dataUrl === "string") {
         const match = req.body.dataUrl.match(/^data:([^;]+);base64,(.+)$/);
         if (!match) {
-          return res.status(400).json({ error: "Invalid dataUrl format in request body." });
+          return res.status(400).json({ success: false, error: "Invalid dataUrl format in request body." });
         }
-        fileMime = match[1];
         fileBuffer = Buffer.from(match[2], "base64");
-        fileExt = fileMime.includes("webp") ? ".webp" : fileMime.includes("png") ? ".png" : fileMime.includes("gif") ? ".gif" : ".jpg";
-        cleanBaseName = (req.body.filename || "image").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 50);
       } else {
-        return res.status(400).json({ error: "No image file or dataUrl provided in request." });
+        return res.status(400).json({ success: false, error: "No image file or dataUrl provided in request." });
       }
+      if (fileBuffer.length > MAX_IMAGE_SIZE_BYTES) {
+        return res.status(413).json({
+          success: false,
+          error: "Payload Too Large: Image size exceeds maximum limit of 5 MB.",
+          code: "PAYLOAD_TOO_LARGE"
+        });
+      }
+      if (containsSvgOrXml(fileBuffer)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid file format: SVG files are strictly prohibited due to security risks (XSS).",
+          code: "SVG_REJECTED"
+        });
+      }
+      const format = detectAllowedImageMagicBytes(fileBuffer);
+      if (!format) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid file format: Only valid PNG, JPEG, and WebP images are allowed. Binary magic bytes verification failed.",
+          code: "INVALID_IMAGE_FORMAT"
+        });
+      }
+      let fileMime = format === "jpeg" ? "image/jpeg" : format === "png" ? "image/png" : "image/webp";
+      let fileExt = format === "jpeg" ? ".jpg" : format === "png" ? ".png" : ".webp";
       try {
         const sharp = (await import("sharp")).default;
-        if (fileMime.includes("webp") || fileMime.includes("avif") || !fileMime.includes("png") && !fileMime.includes("gif")) {
+        if (format === "webp") {
           fileBuffer = await sharp(fileBuffer).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
           fileMime = "image/jpeg";
           fileExt = ".jpg";
@@ -7154,18 +3171,19 @@ function createApp(options) {
       } catch (sharpErr) {
         console.warn("[Sharp] Upload conversion warning:", sharpErr);
       }
+      const randomUuid = crypto3.randomUUID();
+      const safeFilename = `${Date.now()}-${randomUuid}${fileExt}`;
+      const objectKey = `articles/${safeFilename}`;
       const r2Config = getR2Config();
-      const objectKey = `articles/${Date.now()}-${cleanBaseName}${fileExt}`;
       const saveLocally = () => {
         try {
           const articleUploadsDir = path.join(process.cwd(), "public", "uploads", "articles");
           if (!fs.existsSync(articleUploadsDir)) {
             fs.mkdirSync(articleUploadsDir, { recursive: true });
           }
-          const localFilename = `${Date.now()}-${cleanBaseName}${fileExt}`;
-          const localFilePath = path.join(articleUploadsDir, localFilename);
+          const localFilePath = path.join(articleUploadsDir, safeFilename);
           fs.writeFileSync(localFilePath, fileBuffer);
-          return `/uploads/articles/${localFilename}`;
+          return `/uploads/articles/${safeFilename}`;
         } catch (fsErr) {
           console.warn("[Storage] Read-only filesystem detected, falling back to base64 data URI:", fsErr);
           return `data:${fileMime};base64,${fileBuffer.toString("base64")}`;
@@ -7173,7 +3191,6 @@ function createApp(options) {
       };
       if (!r2Config.isConfigured) {
         const localUrl = saveLocally();
-        console.log("R2 storage credentials not fully configured. Saved image locally:", localUrl.slice(0, 60));
         return res.json({
           success: true,
           url: localUrl,
@@ -7233,6 +3250,7 @@ function createApp(options) {
     } catch (err) {
       console.error("Fatal error during image upload:", err);
       return res.status(500).json({
+        success: false,
         error: err?.message || "Failed to process image upload."
       });
     }
@@ -7251,7 +3269,7 @@ function createApp(options) {
       if (!supabaseUrl || !supabaseKey) {
         return res.redirect(302, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
       }
-      const client = createClient7(supabaseUrl, supabaseKey);
+      const client = createClient5(supabaseUrl, supabaseKey);
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slugOrId);
       let query = client.schema("startupcreme").from("posts").select("id, slug, cover_image");
       if (isUuid) {

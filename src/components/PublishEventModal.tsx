@@ -26,12 +26,12 @@ interface PublishEventModalProps {
 
 const OPPORTUNITY_TYPES: { value: OpportunityType; label: string }[] = [
   { value: 'grant', label: 'Non-Dilutive Grant' },
-  { value: 'accelerator', label: 'Accelerator / Incubator' },
+  { value: 'accelerator', label: 'Accelerator' },
+  { value: 'incubator', label: 'Incubator' },
   { value: 'fellowship', label: 'Founder Fellowship' },
-  { value: 'pitch_competition', label: 'Pitch Competition / Hackathon' },
+  { value: 'pitch_competition', label: 'Pitch Competition' },
+  { value: 'hackathon', label: 'Hackathon' },
   { value: 'conference', label: 'Conference / Summit' },
-  { value: 'incubator', label: 'University Incubator' },
-  { value: 'general', label: 'General Opportunity' },
 ];
 
 export const PublishEventModal: React.FC<PublishEventModalProps> = ({

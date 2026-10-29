@@ -19,6 +19,7 @@ import {
 import { Post, PostComment, UserProfile, PostContentNode } from '../types';
 import { updatePageSEO } from '../lib/seo';
 import { normalizeImageUrl, getPostUrl } from '../lib/router';
+import { store } from '../lib/store';
 import { CommentForm } from './CommentForm';
 import { CommentList } from './CommentList';
 
@@ -208,6 +209,21 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
   onSelectPost,
 }) => {
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [currentPost, setCurrentPost] = useState<Post>(post);
+
+  useEffect(() => {
+    setCurrentPost(post);
+  }, [post]);
+
+  const isAdmin = currentUser?.role === 'admin';
+
+  const handleToggleAiDisclosure = async () => {
+    if (!isAdmin) return;
+    const newHide = !currentPost.hide_ai_disclosure;
+    const updated = { ...currentPost, hide_ai_disclosure: newHide };
+    setCurrentPost(updated);
+    await store.savePost(updated);
+  };
 
   useEffect(() => {
     updatePageSEO({
@@ -541,6 +557,52 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
                 <span>{copiedUrl ? 'Link Copied!' : 'Share'}</span>
               </button>
             </div>
+
+            {/* AI-assisted disclosure line (for published posts with ai_generated = true) */}
+            {currentPost.ai_generated && (!currentPost.hide_ai_disclosure || isAdmin) && (
+              <div className="w-full flex flex-wrap items-center justify-between gap-2 mt-4 pt-3 border-t border-slate-100 text-xs">
+                {!currentPost.hide_ai_disclosure ? (
+                  <div className="inline-flex items-center gap-1.5 text-slate-500 font-mono text-[11px]">
+                    <Sparkles className="w-3.5 h-3.5 text-violet-600 shrink-0" />
+                    <span>AI-assisted, editor reviewed</span>
+                  </div>
+                ) : (
+                  <div className="inline-flex items-center gap-1.5 text-slate-400 italic font-mono text-[11px]">
+                    <Sparkles className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span>AI disclosure hidden from readers</span>
+                  </div>
+                )}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleToggleAiDisclosure}
+                    className="text-[11px] font-mono text-cyan-700 hover:text-cyan-900 underline cursor-pointer"
+                  >
+                    {currentPost.hide_ai_disclosure ? 'Show disclosure to readers' : 'Hide disclosure'}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Source Provenance Link */}
+            {(currentPost.source_name || currentPost.source_url) && (
+              <div className="w-full mt-2 text-xs font-mono text-slate-500 flex items-center gap-1.5">
+                <span className="font-semibold text-slate-600">Source:</span>
+                {currentPost.source_url ? (
+                  <a
+                    href={currentPost.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-cyan-700 hover:underline flex items-center gap-1"
+                  >
+                    <span>{currentPost.source_name || currentPost.source_url}</span>
+                    <ArrowUpRight className="w-3 h-3" />
+                  </a>
+                ) : (
+                  <span>{currentPost.source_name}</span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

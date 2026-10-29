@@ -419,7 +419,7 @@ export async function resolvePageMetadata(
 
           // Strategy A: Exact or case-insensitive slug match
           const resA = await executeQuery((client) =>
-            client.from('posts').select('*').ilike('slug', decodedSlug).limit(1)
+            client.from('posts').select('*').ilike('slug', decodedSlug).eq('status', 'published').limit(1)
           );
           if (resA?.data && resA.data.length > 0) {
             foundPost = resA.data[0];
@@ -428,7 +428,7 @@ export async function resolvePageMetadata(
           // Strategy B: If UUID, check by id
           if (!foundPost && isUuid) {
             const resUuid = await executeQuery((client) =>
-              client.from('posts').select('*').eq('id', decodedSlug).limit(1)
+              client.from('posts').select('*').eq('id', decodedSlug).eq('status', 'published').limit(1)
             );
             if (resUuid?.data && resUuid.data.length > 0) {
               foundPost = resUuid.data[0];
@@ -439,7 +439,7 @@ export async function resolvePageMetadata(
           if (!foundPost && decodedSlug.includes('-')) {
             const withSpaces = decodedSlug.replace(/-/g, ' ');
             const resSpaces = await executeQuery((client) =>
-              client.from('posts').select('*').ilike('slug', withSpaces).limit(1)
+              client.from('posts').select('*').ilike('slug', withSpaces).eq('status', 'published').limit(1)
             );
             if (resSpaces?.data && resSpaces.data.length > 0) {
               foundPost = resSpaces.data[0];
@@ -450,7 +450,7 @@ export async function resolvePageMetadata(
           if (!foundPost && decodedSlug.includes(' ')) {
             const withHyphens = decodedSlug.replace(/\s+/g, '-');
             const resHyphens = await executeQuery((client) =>
-              client.from('posts').select('*').ilike('slug', withHyphens).limit(1)
+              client.from('posts').select('*').ilike('slug', withHyphens).eq('status', 'published').limit(1)
             );
             if (resHyphens?.data && resHyphens.data.length > 0) {
               foundPost = resHyphens.data[0];
@@ -461,11 +461,16 @@ export async function resolvePageMetadata(
           if (!foundPost && decodedSlug.length > 12) {
             const prefix = decodedSlug.slice(0, 30);
             const resPartial = await executeQuery((client) =>
-              client.from('posts').select('*').ilike('slug', `%${prefix}%`).limit(1)
+              client.from('posts').select('*').ilike('slug', `%${prefix}%`).eq('status', 'published').limit(1)
             );
             if (resPartial?.data && resPartial.data.length > 0) {
               foundPost = resPartial.data[0];
             }
+          }
+
+          // Security: strictly prevent draft posts from being served or hydrated via public URLs
+          if (foundPost && foundPost.status !== 'published') {
+            foundPost = null;
           }
 
           if (foundPost) {

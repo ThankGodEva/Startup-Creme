@@ -5,13 +5,16 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    envPrefix: ['VITE_PUBLIC_', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'VITE_ENABLE_MARKETS'],
     define: {
-      'process.env.SUPABASE_URL': JSON.stringify(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''),
-      'process.env.SUPABASE_ANON_KEY': JSON.stringify(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''),
-      'process.env.VITE_SUPABASE_URL': JSON.stringify(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''),
-      'process.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''),
-      'process.env.ENABLE_MARKETS': JSON.stringify(process.env.ENABLE_MARKETS || process.env.VITE_ENABLE_MARKETS || 'true'),
+      'process.env.SUPABASE_URL': JSON.stringify(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || ''),
+      'process.env.SUPABASE_ANON_KEY': JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || ''),
+      'process.env.VITE_SUPABASE_URL': JSON.stringify(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || ''),
+      'process.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || ''),
+      'process.env.ENABLE_MARKETS': JSON.stringify(process.env.VITE_ENABLE_MARKETS || process.env.ENABLE_MARKETS || 'true'),
       'process.env.VITE_ENABLE_MARKETS': JSON.stringify(process.env.VITE_ENABLE_MARKETS || process.env.ENABLE_MARKETS || 'true'),
+      'process.env.SUPABASE_SERVICE_ROLE_KEY': JSON.stringify(''),
+      'process.env.SERVICE_ROLE_KEY': JSON.stringify(''),
     },
     plugins: [react(), tailwindcss()],
     resolve: {

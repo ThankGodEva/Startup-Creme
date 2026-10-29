@@ -46,6 +46,10 @@ export interface Post {
   tags: string[];
   reading_time_minutes: number;
   word_count: number;
+  source_url?: string | null;
+  source_name?: string | null;
+  ai_generated?: boolean;
+  hide_ai_disclosure?: boolean;
   created_at: string;
   updated_at: string;
 }

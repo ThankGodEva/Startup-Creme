@@ -91,6 +91,15 @@ export const Footer: React.FC<FooterProps> = ({ currentLocale, onTabChange, onOp
             </li>
             <li>
               <button 
+                onClick={() => onTabChange('founders-mindset')}
+                className="hover:text-violet-400 transition-colors flex items-center gap-1.5"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-violet-500"></span>
+                <span>Founders Mindset</span>
+              </button>
+            </li>
+            <li>
+              <button 
                 onClick={() => onTabChange('discussion')}
                 className="hover:text-teal-300 transition-colors flex items-center gap-1.5 cursor-pointer"
               >

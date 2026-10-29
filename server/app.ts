@@ -1,19 +1,108 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import multer from 'multer';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { createClient } from '@supabase/supabase-js';
-import { aiRouter } from '../src/server/aiRouter';
 import { expansionRouter } from '../src/server/expansionRouter';
 import { editorialRouter } from '../src/server/editorialRouter';
 import { injectDynamicMetaTags } from './meta';
 import { generateDynamicSitemap, generateRobotsTxt, generateLlmsTxt } from './sitemap';
 
+// 5 MB Maximum File Size Cap for All Uploads
+const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+
+// Dedicated Rate Limiter for Image Uploads (20 requests per minute per IP / token)
+interface UploadRateRecord {
+  count: number;
+  resetAt: number;
+}
+const uploadRateLimits = new Map<string, UploadRateRecord>();
+
+function checkUploadRateLimit(identifier: string, limit = 20, windowMs = 60000): { allowed: boolean; remaining: number; retryAfter: number } {
+  const now = Date.now();
+  let record = uploadRateLimits.get(identifier);
+  if (!record || record.resetAt <= now) {
+    record = { count: 1, resetAt: now + windowMs };
+    uploadRateLimits.set(identifier, record);
+    return { allowed: true, remaining: limit - 1, retryAfter: Math.ceil(windowMs / 1000) };
+  }
+  record.count += 1;
+  const retryAfter = Math.max(1, Math.ceil((record.resetAt - now) / 1000));
+  if (record.count > limit) {
+    return { allowed: false, remaining: 0, retryAfter };
+  }
+  return { allowed: true, remaining: limit - record.count, retryAfter };
+}
+
+type AllowedImageFormat = 'png' | 'jpeg' | 'webp';
+
+/**
+ * Validates binary image buffer strictly using magic bytes.
+ * Never trusts caller-supplied Content-Type or file extensions.
+ */
+function detectAllowedImageMagicBytes(buf: Buffer): AllowedImageFormat | null {
+  if (!buf || buf.length < 12) return null;
+
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    buf[0] === 0x89 &&
+    buf[1] === 0x50 && // P
+    buf[2] === 0x4e && // N
+    buf[3] === 0x47 && // G
+    buf[4] === 0x0d && // \r
+    buf[5] === 0x0a && // \n
+    buf[6] === 0x1a &&
+    buf[7] === 0x0a
+  ) {
+    return 'png';
+  }
+
+  // JPEG: FF D8 FF
+  if (
+    buf[0] === 0xff &&
+    buf[1] === 0xd8 &&
+    buf[2] === 0xff
+  ) {
+    return 'jpeg';
+  }
+
+  // WebP: RIFF (bytes 0-3) and WEBP (bytes 8-11)
+  if (
+    buf[0] === 0x52 && // R
+    buf[1] === 0x49 && // I
+    buf[2] === 0x46 && // F
+    buf[3] === 0x46 && // F
+    buf[8] === 0x57 && // W
+    buf[9] === 0x45 && // E
+    buf[10] === 0x42 && // B
+    buf[11] === 0x50    // P
+  ) {
+    return 'webp';
+  }
+
+  return null;
+}
+
+/**
+ * Detects SVG or XML payload signatures to prevent SVG-based XSS attacks.
+ */
+function containsSvgOrXml(buf: Buffer): boolean {
+  if (!buf || buf.length === 0) return false;
+  const sample = buf.slice(0, 1024).toString('utf8').toLowerCase();
+  return (
+    sample.includes('<svg') ||
+    sample.includes('<?xml') ||
+    sample.includes('xmlns="http://www.w3.org/2000/svg"') ||
+    sample.includes('<!doctype svg')
+  );
+}
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: MAX_IMAGE_SIZE_BYTES, // Hard 5MB limit
   },
 });
 
@@ -149,7 +238,6 @@ export function createApp(options?: CreateAppOptions): express.Express {
       version: '1.0.0',
       routes: [
         '/api/health',
-        '/api/ai/health',
         '/api/auth/profile',
         '/api/upload-image'
       ]
@@ -282,22 +370,11 @@ export function createApp(options?: CreateAppOptions): express.Express {
     }
   });
 
-  // 3. AI Subsystem: Autonomous M2M, n8n Orchestration, and Admin Control Plane
-  app.use(['/api/ai', '/ai'], aiRouter);
-
-  // 3b. Growth & Product Expansion Modules API (/api/directory, /api/markets/rates, /api/careers, /api/webhooks/n8n/rates, /api/events)
+  // 3. Growth & Product Expansion Modules API (/api/directory, /api/markets/rates, /api/careers, /api/webhooks/n8n/rates, /api/events/webhook)
   app.use('/api', expansionRouter);
 
-  // 3c. Editorial Draft Ingestion API (/api/editorial/drafts)
+  // 3b. Editorial Draft Ingestion API (/api/editorial/drafts)
   app.use(['/api/editorial', '/editorial'], editorialRouter);
-
-  // Direct root-level n8n webhook routes (/events/webhook, /n8n/events, etc.)
-  app.post(
-    ['/events/webhook', '/events/ingest', '/n8n/events', '/webhooks/events', '/webhooks/n8n/events'],
-    (req, res, next) => {
-      expansionRouter(req, res, next);
-    }
-  );
 
   // 4. Dynamic XML Sitemap for Search Engines & AI Discoverability
   app.get(['/sitemap.xml', '/sitemap', '/sitemap_index.xml'], async (req, res) => {
@@ -364,38 +441,137 @@ export function createApp(options?: CreateAppOptions): express.Express {
   });
 
   // 6. Cloudflare R2 Image Upload (with server local storage fallback)
-  app.post(['/api/upload-image', '/upload-image'], upload.single('image'), async (req, res) => {
-    try {
-      let fileBuffer: Buffer;
-      let fileMime: string;
-      let fileExt: string;
-      let cleanBaseName: string;
+  // Hardened Security: Supabase JWT auth, 5MB cap, magic bytes (PNG/JPEG/WebP), SVG rejection, randomised filenames, rate limiting.
+  const handleMulterUpload = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    upload.single('image')(req, res, (err: any) => {
+      if (err) {
+        if (err.code === 'LIMIT_FILE_SIZE' || err.message?.includes('File too large')) {
+          return res.status(413).json({
+            success: false,
+            error: 'Payload Too Large: Image size exceeds maximum limit of 5 MB.',
+            code: 'PAYLOAD_TOO_LARGE',
+          });
+        }
+        return res.status(400).json({ success: false, error: `Upload error: ${err.message}` });
+      }
+      next();
+    });
+  };
 
+  app.post(['/api/upload-image', '/upload-image'], handleMulterUpload, async (req, res) => {
+    try {
+      // 1. Rate Limiting Check (20 requests per minute)
+      const clientIdentifier = (
+        (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+        req.ip ||
+        'unknown_client'
+      );
+      const rateCheck = checkUploadRateLimit(clientIdentifier, 20, 60000);
+      res.setHeader('X-RateLimit-Limit', '20');
+      res.setHeader('X-RateLimit-Remaining', String(rateCheck.remaining));
+      if (!rateCheck.allowed) {
+        res.setHeader('Retry-After', String(rateCheck.retryAfter));
+        return res.status(429).json({
+          success: false,
+          error: 'Too Many Requests: Image upload rate limit exceeded. Maximum 20 uploads per minute.',
+          code: 'RATE_LIMIT_EXCEEDED',
+          retryAfter: rateCheck.retryAfter,
+        });
+      }
+
+      // 2. Authentication: Require valid Supabase JWT with role 'authenticated'
+      const authHeader = req.headers.authorization;
+      if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized: Missing or invalid Authorization Bearer header with Supabase JWT.',
+          code: 'UNAUTHORIZED',
+        });
+      }
+
+      const token = authHeader.slice(7).trim();
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized: Empty bearer token provided.',
+          code: 'UNAUTHORIZED',
+        });
+      }
+
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+      const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || '';
+
+      if (!supabaseUrl || (!anonKey && !serviceRoleKey)) {
+        return res.status(503).json({
+          success: false,
+          error: 'Service Unavailable: Supabase authentication client not configured.',
+          code: 'AUTH_UNAVAILABLE',
+        });
+      }
+
+      const authClient = createClient(supabaseUrl, anonKey || serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+
+      const { data: { user }, error: authError } = await authClient.auth.getUser(token);
+      if (authError || !user || !user.id || user.role !== 'authenticated') {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized: Invalid or expired Supabase authentication session. Role "authenticated" required.',
+          code: 'INVALID_TOKEN',
+        });
+      }
+
+      // 3. Extract Image Buffer and Validate Format
+      let fileBuffer: Buffer;
       if (req.file) {
         fileBuffer = req.file.buffer;
-        fileMime = req.file.mimetype || 'image/jpeg';
-        fileExt = path.extname(req.file.originalname) || '.jpg';
-        cleanBaseName = path.basename(req.file.originalname, fileExt).replace(/[^a-zA-Z0-9_-]/g, '_');
       } else if (req.body?.dataUrl && typeof req.body.dataUrl === 'string') {
         const match = req.body.dataUrl.match(/^data:([^;]+);base64,(.+)$/);
         if (!match) {
-          return res.status(400).json({ error: 'Invalid dataUrl format in request body.' });
+          return res.status(400).json({ success: false, error: 'Invalid dataUrl format in request body.' });
         }
-        fileMime = match[1];
         fileBuffer = Buffer.from(match[2], 'base64');
-        fileExt = fileMime.includes('webp') ? '.webp' : fileMime.includes('png') ? '.png' : fileMime.includes('gif') ? '.gif' : '.jpg';
-        cleanBaseName = ((req.body.filename as string) || 'image')
-          .replace(/[^a-zA-Z0-9_-]/g, '_')
-          .slice(0, 50);
       } else {
-        return res.status(400).json({ error: 'No image file or dataUrl provided in request.' });
+        return res.status(400).json({ success: false, error: 'No image file or dataUrl provided in request.' });
       }
 
-      // Ensure universal compatibility for social previews (Telegram, WhatsApp, LinkedIn, Meta):
-      // Convert WebP and arbitrary raster types to high-quality JPEG
+      // 4. Hard 5 MB File Size Cap Check
+      if (fileBuffer.length > MAX_IMAGE_SIZE_BYTES) {
+        return res.status(413).json({
+          success: false,
+          error: 'Payload Too Large: Image size exceeds maximum limit of 5 MB.',
+          code: 'PAYLOAD_TOO_LARGE',
+        });
+      }
+
+      // 5. Strict SVG / XML Rejection (Prevent SVG-based XSS attacks)
+      if (containsSvgOrXml(fileBuffer)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid file format: SVG files are strictly prohibited due to security risks (XSS).',
+          code: 'SVG_REJECTED',
+        });
+      }
+
+      // 6. Magic Bytes Verification (PNG / JPEG / WebP only)
+      const format = detectAllowedImageMagicBytes(fileBuffer);
+      if (!format) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid file format: Only valid PNG, JPEG, and WebP images are allowed. Binary magic bytes verification failed.',
+          code: 'INVALID_IMAGE_FORMAT',
+        });
+      }
+
+      let fileMime = format === 'jpeg' ? 'image/jpeg' : format === 'png' ? 'image/png' : 'image/webp';
+      let fileExt = format === 'jpeg' ? '.jpg' : format === 'png' ? '.png' : '.webp';
+
+      // Ensure universal compatibility for social previews by converting WebP to high-quality JPEG
       try {
         const sharp = (await import('sharp')).default;
-        if (fileMime.includes('webp') || fileMime.includes('avif') || (!fileMime.includes('png') && !fileMime.includes('gif'))) {
+        if (format === 'webp') {
           fileBuffer = await sharp(fileBuffer).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
           fileMime = 'image/jpeg';
           fileExt = '.jpg';
@@ -404,8 +580,12 @@ export function createApp(options?: CreateAppOptions): express.Express {
         console.warn('[Sharp] Upload conversion warning:', sharpErr);
       }
 
+      // 7. Randomise stored filenames with cryptographically secure UUID
+      const randomUuid = crypto.randomUUID();
+      const safeFilename = `${Date.now()}-${randomUuid}${fileExt}`;
+      const objectKey = `articles/${safeFilename}`;
+
       const r2Config = getR2Config();
-      const objectKey = `articles/${Date.now()}-${cleanBaseName}${fileExt}`;
 
       const saveLocally = () => {
         try {
@@ -413,10 +593,9 @@ export function createApp(options?: CreateAppOptions): express.Express {
           if (!fs.existsSync(articleUploadsDir)) {
             fs.mkdirSync(articleUploadsDir, { recursive: true });
           }
-          const localFilename = `${Date.now()}-${cleanBaseName}${fileExt}`;
-          const localFilePath = path.join(articleUploadsDir, localFilename);
+          const localFilePath = path.join(articleUploadsDir, safeFilename);
           fs.writeFileSync(localFilePath, fileBuffer);
-          return `/uploads/articles/${localFilename}`;
+          return `/uploads/articles/${safeFilename}`;
         } catch (fsErr) {
           console.warn('[Storage] Read-only filesystem detected, falling back to base64 data URI:', fsErr);
           return `data:${fileMime};base64,${fileBuffer.toString('base64')}`;
@@ -425,7 +604,6 @@ export function createApp(options?: CreateAppOptions): express.Express {
 
       if (!r2Config.isConfigured) {
         const localUrl = saveLocally();
-        console.log('R2 storage credentials not fully configured. Saved image locally:', localUrl.slice(0, 60));
         return res.json({
           success: true,
           url: localUrl,
@@ -491,6 +669,7 @@ export function createApp(options?: CreateAppOptions): express.Express {
     } catch (err: any) {
       console.error('Fatal error during image upload:', err);
       return res.status(500).json({
+        success: false,
         error: err?.message || 'Failed to process image upload.',
       });
     }

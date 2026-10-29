@@ -31,7 +31,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA startupcreme GRANT ALL ON ROUTINES TO anon, a
 
 -- 3. Create Custom Enum Types in 'startupcreme' Schema
 DO $$ BEGIN
-    CREATE TYPE startupcreme.content_vertical AS ENUM ('finance', 'tech');
+    CREATE TYPE startupcreme.content_vertical AS ENUM ('finance', 'tech', 'founders-mindset');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
@@ -170,6 +170,10 @@ CREATE TABLE IF NOT EXISTS startupcreme.posts (
   tags text[] null default '{}'::text[],
   reading_time_minutes integer null default 5,
   word_count integer null default 800,
+  source_url text null,
+  source_name text null,
+  ai_generated boolean not null default false,
+  hide_ai_disclosure boolean not null default false,
   created_at timestamp with time zone not null default timezone ('utc'::text, now()),
   updated_at timestamp with time zone not null default timezone ('utc'::text, now()),
   constraint posts_pkey primary key (id),
@@ -922,9 +926,18 @@ CREATE INDEX IF NOT EXISTS idx_events_opportunity_type on startupcreme.events us
 ALTER TABLE startupcreme.events ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Public can view events" ON startupcreme.events;
-CREATE POLICY "Public can view events"
+DROP POLICY IF EXISTS "Public can view published events" ON startupcreme.events;
+CREATE POLICY "Public can view published events"
   ON startupcreme.events FOR SELECT
-  USING (true);
+  USING (
+    EXISTS (
+      SELECT 1 FROM startupcreme.posts p
+      WHERE p.id = startupcreme.events.linked_post_id
+        AND p.status = 'published'
+    )
+    OR
+    (auth.uid() IS NOT NULL AND startupcreme.is_admin(auth.uid()))
+  );
 
 DROP POLICY IF EXISTS "Authenticated users and service role can insert events" ON startupcreme.events;
 CREATE POLICY "Authenticated users and service role can insert events"

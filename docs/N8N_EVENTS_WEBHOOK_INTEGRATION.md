@@ -18,7 +18,7 @@ The backend securely validates the request and performs an atomic dual-table ups
 │     n8n Workflow / Scraper      │
 └────────────────┬────────────────┘
                  │ POST /api/events/webhook
-                 │ Authorization: Bearer <N8N_WEBHOOK_SECRET>
+                 │ Authorization: Bearer <STARTUPCREME_AUTOMATION_SECRET>
                  ▼
 ┌─────────────────────────────────┐
 │   StartupCrème Ingestion API    │
@@ -37,33 +37,27 @@ The backend securely validates the request and performs an atomic dual-table ups
 
 ---
 
-## 2. API Endpoints
+## 2. API Endpoint
 
-The ingestion endpoint is accessible at:
-- `POST /api/events/webhook` (Recommended)
-- `POST /api/events`
-- `POST /api/n8n/events`
-- `POST /events/webhook` (Direct root path)
-- `POST /n8n/events` (Direct root path)
+The authoritative ingestion endpoint is:
+- `POST /api/events/webhook`
 
 ---
 
 ## 3. Authentication & Security
 
-All incoming requests must include a Bearer token in the `Authorization` header:
+All incoming automation requests must include a Bearer token in the `Authorization` header:
 
 ```http
-Authorization: Bearer <YOUR_N8N_WEBHOOK_SECRET>
+Authorization: Bearer <YOUR_STARTUPCREME_AUTOMATION_SECRET>
 ```
 
-The server verifies this token in constant time using `crypto.timingSafeEqual` against the following environment variables (in priority order):
-1. `N8N_WEBHOOK_SECRET`
-2. `EVENT_WEBHOOK_SECRET`
-3. `N8N_BEARER_TOKEN`
-4. `EVENTS_API_BEARER_TOKEN`
-5. `STARTUPCREME_AUTOMATION_SECRET`
+Alternatively, requests sent from the Admin UI are authorized via an authenticated Supabase admin session.
 
-If the header is missing, improperly formatted, or the token does not match, the endpoint returns **`401 Unauthorized`**:
+The server verifies the automation token in constant time using `crypto.timingSafeEqual` against:
+- `STARTUPCREME_AUTOMATION_SECRET`
+
+If the header is missing, improperly formatted, or the token does not match, the endpoint fails closed and returns **`401 Unauthorized`**:
 
 ```json
 {
@@ -202,7 +196,7 @@ When both tables are successfully upserted, the endpoint responds with HTTP 200:
 
 ```bash
 curl -X POST "https://www.startupcreme.com/api/events/webhook" \
-  -H "Authorization: Bearer YOUR_N8N_WEBHOOK_SECRET" \
+  -H "Authorization: Bearer YOUR_STARTUPCREME_AUTOMATION_SECRET" \
   -H "Content-Type: application/json" \
   -d '{
     "event_title": "Google for Startups Accelerator: AI First",
@@ -242,7 +236,7 @@ curl -X POST "https://www.startupcreme.com/api/events/webhook" \
    - **URL**: `https://www.startupcreme.com/api/events/webhook`
    - **Authentication**: `Generic Credential Type` -> `Header Auth`
      - **Name**: `Authorization`
-     - **Value**: `Bearer {{ $env.N8N_WEBHOOK_SECRET }}`
+     - **Value**: `Bearer {{ $env.STARTUPCREME_AUTOMATION_SECRET }}`
    - **Send Body**: `JSON`
    - **Specify Body**: Map the scraped attributes to the JSON structure above.
 3. Add an **IF** node checking `{{ $json.success }} === true`.

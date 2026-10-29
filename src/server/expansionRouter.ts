@@ -15,6 +15,7 @@ import {
   RateSnapshotPayload,
   EventOpportunity,
 } from '../types';
+import { EventWebhookIngestionSchema } from '../lib/validation';
 
 export const expansionRouter = Router();
 
@@ -442,12 +443,54 @@ expansionRouter.get(['/markets/rates', '/rates', '/markets'], async (req: Reques
 });
 
 // Automated n8n Webhook Receiver for Rate Snapshots
+// Security: Gated by feature flag AND requires Authorization: Bearer matching STARTUPCREME_AUTOMATION_SECRET
 expansionRouter.post(
   ['/webhooks/n8n/rates', '/markets/rates/webhook', '/markets/rates/sync'],
   async (req: Request, res: Response) => {
+    // 1. Feature Flag Gate: Return 404 if markets integration is disabled
     if (!isMarketsFeatureEnabled()) {
       return res.status(404).json({ error: 'Not found' });
     }
+
+    // 2. Authentication Gate: Require Authorization Bearer token matching STARTUPCREME_AUTOMATION_SECRET
+    const authHeader = req.headers.authorization;
+    if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized: Missing or invalid Authorization Bearer header matching STARTUPCREME_AUTOMATION_SECRET.',
+        code: 'UNAUTHORIZED_RATES_WEBHOOK',
+      });
+    }
+
+    const providedToken = authHeader.slice(7).trim();
+    if (!providedToken) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized: Empty Bearer token provided.',
+        code: 'UNAUTHORIZED_RATES_WEBHOOK',
+      });
+    }
+
+    const rawSecret = process.env.STARTUPCREME_AUTOMATION_SECRET?.trim();
+    const configuredSecret = (rawSecret && rawSecret !== 'your_m2m_automation_secret_key') ? rawSecret : '';
+
+    // Fail closed if STARTUPCREME_AUTOMATION_SECRET is unset or blank
+    if (!configuredSecret) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized: Automation secret is not configured on the server. Access denied.',
+        code: 'UNAUTHORIZED_RATES_WEBHOOK',
+      });
+    }
+
+    if (!timingSafeCheck(providedToken, configuredSecret)) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized: Invalid automation secret token.',
+        code: 'UNAUTHORIZED_RATES_WEBHOOK',
+      });
+    }
+
     const {
       source = 'n8n_webhook_job',
       central_bank_rates,
@@ -689,8 +732,8 @@ expansionRouter.delete(['/careers/:id', '/jobs/:id'], async (req: Request, res: 
 });
 
 // ====================================================================
-// MODULE 5: Events, Grants, Accelerators & n8n Scraper Ingestion
-// Endpoints: /api/events, /api/events/webhook, /api/n8n/events
+// MODULE 5: Events, Grants, Accelerators & External Ingestion
+// Endpoint: /api/events/webhook
 // ====================================================================
 
 function timingSafeCheck(provided: string, secret: string): boolean {
@@ -709,417 +752,458 @@ function isAuthorizedWebhookToken(req: Request): boolean {
   const token = authHeader.slice(7).trim();
   if (!token) return false;
 
-  const validSecrets = [
-    process.env.N8N_WEBHOOK_SECRET,
-    process.env.EVENT_WEBHOOK_SECRET,
-    process.env.N8N_BEARER_TOKEN,
-    process.env.EVENTS_API_BEARER_TOKEN,
-    process.env.STARTUPCREME_AUTOMATION_SECRET,
-  ]
-    .map((s) => s?.trim())
-    .filter((s): s is string => typeof s === 'string' && s.length > 0 && s !== 'your_m2m_automation_secret_key');
-
-  if (validSecrets.length === 0) {
-    // Fail closed: Webhook authorization is strictly rejected if no secret is configured
+  const rawSecret = process.env.STARTUPCREME_AUTOMATION_SECRET?.trim();
+  if (!rawSecret || rawSecret === 'your_m2m_automation_secret_key') {
+    // Fail closed: Webhook authorization is strictly rejected if secret is unset or blank
     return false;
   }
 
-  return validSecrets.some((secret) => timingSafeCheck(token, secret));
+  return timingSafeCheck(token, rawSecret);
 }
 
+// Ingestion webhook for automation workflows, scrapers, and external data pipelines
+expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
+  // 1. Authentication / Security: Check for Webhook Bearer token OR verified Admin session
+  const isWebhookAuthorized = isAuthorizedWebhookToken(req);
+  let isAdminAuthorized = false;
 
-// Ingestion webhook for n8n scrapers and external data pipelines
-expansionRouter.post(
-  ['/events', '/events/webhook', '/events/ingest', '/n8n/events', '/webhooks/events', '/webhooks/n8n/events'],
-  async (req: Request, res: Response) => {
-    // 1. Authentication / Security: Check for Webhook Bearer token OR verified Admin session
-    const isWebhookAuthorized = isAuthorizedWebhookToken(req);
-    let isAdminAuthorized = false;
-
-    if (!isWebhookAuthorized) {
-      const reqUser = await resolveRequestUser(req);
-      if (reqUser && reqUser.role === 'admin') {
-        isAdminAuthorized = true;
-      }
+  if (!isWebhookAuthorized) {
+    const reqUser = await resolveRequestUser(req);
+    if (reqUser && reqUser.role === 'admin') {
+      isAdminAuthorized = true;
     }
+  }
 
-    if (!isWebhookAuthorized && !isAdminAuthorized) {
-      return res.status(401).json({
-        success: false,
-        error:
-          'Unauthorized: Missing or invalid Bearer token. Please provide a valid Authorization: Bearer <token> header matching N8N_WEBHOOK_SECRET or EVENT_WEBHOOK_SECRET, or authenticate with an admin session.',
-      });
-    }
+  if (!isWebhookAuthorized && !isAdminAuthorized) {
+    return res.status(401).json({
+      success: false,
+      error:
+        'Unauthorized: Missing or invalid Bearer token. Please provide a valid Authorization: Bearer <token> matching STARTUPCREME_AUTOMATION_SECRET, or authenticate with an admin session.',
+    });
+  }
 
-    // 2. Payload Validation & Normalization: Support both n8n webhook and manual admin submissions
-    const rawBody = req.body || {};
-    const normTitle = String(rawBody.title || rawBody.event_title || '').trim();
-    const normEventTitle = String(rawBody.event_title || rawBody.title || '').trim();
-    const generatedSlug = (normTitle || normEventTitle)
+  // 2. Pre-normalize input fields for Zod validation
+  const rawBody = req.body || {};
+  const rawTitle = String(rawBody.title || rawBody.event_title || '').trim();
+  const rawEventTitle = String(rawBody.event_title || rawBody.title || '').trim();
+  let candidateSlug = String(rawBody.slug || '').trim();
+  if (!candidateSlug && (rawTitle || rawEventTitle)) {
+    candidateSlug = (rawTitle || rawEventTitle)
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
-    const normSlug = String(rawBody.slug || generatedSlug).trim();
-    const normVertical = String(rawBody.vertical || 'tech').trim().toLowerCase() as 'finance' | 'tech' | 'founders-mindset';
-    const normLocale = String(rawBody.locale || 'en-us').trim().toLowerCase();
-    const normDescription = String(rawBody.description || rawBody.excerpt || normTitle).trim();
-    const normContent = rawBody.content || normDescription;
-    const cleanAppUrl = String(rawBody.application_url || '').trim();
-    const description = normDescription;
+  }
 
-    const {
-      excerpt,
-      meta_description,
-      opportunity_type = 'grant',
-      funding_amount,
-      location = 'Global (Remote)',
-      deadline_date,
-      author_name,
-      author_role,
-      author_avatar,
-      cover_image,
-      canonical_url,
-      status = 'published',
-      tags = [],
-      reading_time_minutes,
-      word_count,
-    } = rawBody;
+  const candidatePayload = {
+    ...rawBody,
+    title: rawTitle || undefined,
+    event_title: rawEventTitle || undefined,
+    slug: candidateSlug || undefined,
+  };
 
-    const resolvedPayload = {
-      event_title: normEventTitle,
-      application_url: cleanAppUrl,
-      slug: normSlug,
-      vertical: normVertical,
-      locale: normLocale,
-      title: normTitle,
-      content: normContent,
-    };
-
-    const requiredFields = [
-      'event_title',
-      'application_url',
-      'slug',
-      'vertical',
-      'locale',
-      'title',
-      'content',
-    ];
-
-    const missingFields = requiredFields.filter((field) => {
-      const val = (resolvedPayload as any)?.[field];
-      return (
-        val === undefined ||
-        val === null ||
-        (typeof val === 'string' && val.trim() === '') ||
-        (typeof val === 'object' && Object.keys(val).length === 0)
-      );
+  // 3. Zod Schema Validation
+  const validationResult = EventWebhookIngestionSchema.safeParse(candidatePayload);
+  if (!validationResult.success) {
+    return res.status(400).json({
+      success: false,
+      error: 'Payload validation failed',
+      issues: validationResult.error.issues,
+      message: validationResult.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
     });
+  }
 
-    if (missingFields.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: `Payload validation failed: Missing required fields: ${missingFields.join(', ')}`,
-        missing_fields: missingFields,
+  const validated = validationResult.data;
+  const effectiveTitle = (validated.title || validated.event_title)!.trim();
+  const effectiveEventTitle = (validated.event_title || validated.title)!.trim();
+  const normSlug = validated.slug || candidateSlug;
+  const normVertical = validated.vertical;
+  const normLocale = validated.locale;
+  const cleanAppUrl = validated.application_url;
+  const rawContent = validated.content || validated.description || effectiveTitle;
+  const description = (validated.description || validated.excerpt || effectiveTitle).trim();
+
+  // 4. Status Resolution:
+  // Default status must be "draft", not "published".
+  // Only an explicit "published" from a Bearer-authenticated call or an admin session may publish.
+  const resolvedStatus: 'draft' | 'published' = rawBody.status === 'published' ? 'published' : 'draft';
+
+  // Format content as Tiptap JSONB for Postgres
+  let jsonbContent: any;
+  if (typeof rawContent === 'string') {
+    try {
+      jsonbContent = JSON.parse(rawContent);
+    } catch {
+      jsonbContent = {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', text: rawContent }],
+          },
+        ],
+      };
+    }
+  } else if (rawContent && typeof rawContent === 'object') {
+    jsonbContent = rawContent;
+  } else {
+    jsonbContent = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: effectiveTitle }],
+        },
+      ],
+    };
+  }
+
+  const client = getSupabaseAdminClient();
+  let existingPost: any = null;
+  let existingEvent: any = null;
+
+  try {
+    if (client) {
+      const postsTable = client.schema ? client.schema('startupcreme').from('posts') : client.from('posts');
+      const eventsTable = client.schema ? client.schema('startupcreme').from('events') : client.from('events');
+
+      // Check existing post by (locale, vertical, slug)
+      const { data: foundPost } = await postsTable
+        .select('id, title, excerpt, content, status, locale, vertical, slug')
+        .eq('locale', normLocale)
+        .eq('vertical', normVertical)
+        .eq('slug', normSlug)
+        .maybeSingle();
+      if (foundPost) existingPost = foundPost;
+
+      // Check existing event by application_url or slug
+      const { data: foundEvent } = await eventsTable
+        .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id')
+        .or(`application_url.eq.${cleanAppUrl},slug.eq.${normSlug}`)
+        .maybeSingle();
+      if (foundEvent) existingEvent = foundEvent;
+
+      if (!existingPost && existingEvent?.linked_post_id) {
+        const { data: linkedP } = await postsTable
+          .select('id, title, excerpt, content, status, locale, vertical, slug')
+          .eq('id', existingEvent.linked_post_id)
+          .maybeSingle();
+        if (linkedP) existingPost = linkedP;
+      }
+    } else {
+      // In-memory fallback
+      existingEvent = runtimeEvents.find(
+        (e) => e.application_url === cleanAppUrl || e.slug === normSlug
+      );
+      if (existingEvent?.linked_post) {
+        existingPost = existingEvent.linked_post;
+      }
+    }
+
+    // 5. Immutability & Deduplication Rules:
+    // If the target post or event already exists and the post is published,
+    // change nothing and return 200 {"success":true,"deduplicated":true}.
+    if (existingPost && existingPost.status === 'published') {
+      return res.status(200).json({
+        success: true,
+        deduplicated: true,
+        message: 'Target post is already published. No mutations applied.',
+        data: {
+          post_id: existingPost.id,
+          event_id: existingEvent?.id || null,
+          status: existingPost.status,
+        },
       });
     }
 
-    try {
-      const cleanEventTitle = normEventTitle;
-      const cleanPostTitle = normTitle;
+    if (existingEvent && existingEvent.linked_post?.status === 'published') {
+      return res.status(200).json({
+        success: true,
+        deduplicated: true,
+        message: 'Target event and linked post are already published. No mutations applied.',
+        data: {
+          post_id: existingEvent.linked_post_id || existingEvent.linked_post?.id,
+          event_id: existingEvent.id,
+          status: 'published',
+        },
+      });
+    }
 
-      // Ensure JSONB content format for Postgres
-      let jsonbContent: any;
-      if (typeof normContent === 'string') {
-        try {
-          jsonbContent = JSON.parse(normContent);
-        } catch {
-          jsonbContent = {
-            type: 'doc',
-            content: [
-              {
-                type: 'paragraph',
-                content: [{ type: 'text', text: normContent }],
-              },
-            ],
-          };
-        }
-      } else if (normContent && typeof normContent === 'object') {
-        jsonbContent = normContent;
-      } else {
-        jsonbContent = {
-          type: 'doc',
-          content: [
-            {
-              type: 'paragraph',
-              content: [{ type: 'text', text: cleanPostTitle }],
-            },
-          ],
-        };
-      }
+    let linkedPostId: string;
 
+    if (existingPost) {
+      // "Do not update title, content, excerpt or status of an existing post in any case via this route."
+      // Keep existing post untouched!
+      linkedPostId = existingPost.id;
+    } else {
+      // Create new post with resolved status (draft by default)
       const postRow = {
         locale: normLocale,
         vertical: normVertical,
         slug: normSlug,
-        title: cleanPostTitle,
-        excerpt: excerpt ? String(excerpt).trim() : String(description || cleanPostTitle).slice(0, 240),
+        title: effectiveTitle,
+        excerpt: validated.excerpt ? validated.excerpt.trim() : description.slice(0, 240),
         content: jsonbContent,
-        status: status || 'published',
-        meta_description: meta_description
-          ? String(meta_description).trim()
-          : String(excerpt || description || cleanPostTitle).slice(0, 160),
-        canonical_url: canonical_url ? String(canonical_url).trim() : null,
-        cover_image: cover_image ? String(cover_image).trim() : null,
-        author_name: author_name ? String(author_name).trim() : 'Startup Crème Editorial',
-        author_role: author_role ? String(author_role).trim() : 'Principal Editor',
-        author_avatar: author_avatar ? String(author_avatar).trim() : null,
-        dual_silo: normVertical === 'founders-mindset' ? false : Boolean(req.body.dual_silo || false),
-        silo_badge: req.body.silo_badge || null,
-        tags: Array.isArray(tags) ? tags : [],
-        reading_time_minutes: Number(reading_time_minutes) || 5,
-        word_count: Number(word_count) || 800,
+        status: resolvedStatus,
+        meta_description: validated.meta_description
+          ? validated.meta_description.trim()
+          : (validated.excerpt || description).slice(0, 160),
+        canonical_url: validated.canonical_url ? validated.canonical_url.trim() : null,
+        cover_image: validated.cover_image ? validated.cover_image.trim() : null,
+        source_url: validated.source_url ? validated.source_url.trim() : null,
+        source_name: validated.source_name ? validated.source_name.trim() : null,
+        ai_generated: Boolean(validated.ai_generated),
+        hide_ai_disclosure: Boolean(validated.hide_ai_disclosure),
+        author_name: validated.author_name || 'Startup Crème Editorial',
+        author_role: validated.author_role || 'Principal Editor',
+        author_avatar: validated.author_avatar || null,
+        dual_silo: normVertical === 'founders-mindset' ? false : Boolean(validated.dual_silo),
+        silo_badge: validated.silo_badge || null,
+        tags: validated.tags || [],
+        reading_time_minutes: validated.reading_time_minutes || 5,
+        word_count: validated.word_count || 800,
+        created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
 
-      const client = getSupabaseAdminClient();
-      let linkedPostId: string | null = null;
-      let eventId: string | null = null;
-
       if (client) {
-        // 3a. Database Upserts: startupcreme.posts matching on (locale, vertical, slug)
-        // If it exists, update the title, excerpt, content (jsonb), and meta_description, returning the post id.
         const postsTable = client.schema ? client.schema('startupcreme').from('posts') : client.from('posts');
-        
-        const { data: upsertedPost, error: postUpsertError } = await postsTable
-          .upsert(postRow, { onConflict: 'locale,vertical,slug' })
-          .select('id')
-          .maybeSingle();
+        let insertPostRes = await postsTable
+          .insert(postRow)
+          .select('id, status')
+          .single();
 
-        if (!postUpsertError && upsertedPost?.id) {
-          linkedPostId = upsertedPost.id;
-        } else {
-          // Fallback query to find existing post
-          const { data: existingPost } = await postsTable
-            .select('id')
-            .eq('locale', normLocale)
-            .eq('vertical', normVertical)
-            .eq('slug', normSlug)
-            .maybeSingle();
-
-          if (existingPost?.id) {
-            const { data: updatedPost, error: updatePostErr } = await postsTable
-              .update({
-                title: postRow.title,
-                excerpt: postRow.excerpt,
-                content: postRow.content,
-                meta_description: postRow.meta_description,
-                status: postRow.status,
-                cover_image: postRow.cover_image,
-                canonical_url: postRow.canonical_url,
-                tags: postRow.tags,
-                updated_at: postRow.updated_at,
-              })
-              .eq('id', existingPost.id)
-              .select('id')
-              .single();
-
-            if (updatePostErr) throw updatePostErr;
-            linkedPostId = updatedPost.id;
-          } else {
-            const { data: newPost, error: insertPostErr } = await postsTable
-              .insert(postRow)
-              .select('id')
-              .single();
-
-            if (insertPostErr) throw insertPostErr;
-            linkedPostId = newPost.id;
-          }
+        if (insertPostRes.error && (insertPostRes.error.code === 'PGRST204' || String(insertPostRes.error.message || '').includes('column'))) {
+          // Schema migration not yet applied on remote Supabase; strip new columns for insert
+          const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
+          insertPostRes = await postsTable
+            .insert(legacyPostRow)
+            .select('id, status')
+            .single();
         }
 
-        // 3b. Database Upserts: startupcreme.events matching on (application_url)
-        // Link it to the post via a foreign key reference (linked_post_id) using the returned post ID.
-        const normOppType = String(opportunity_type || 'grant').toLowerCase().replace(/\s+/g, '_');
-        const validOppTypes = [
-          'grant',
-          'accelerator',
-          'fellowship',
-          'incubator',
-          'pitch_competition',
-          'hackathon',
-          'conference',
-          'general',
-        ];
-        const finalOppType = validOppTypes.includes(normOppType) ? normOppType : 'grant';
-
-        let parsedDeadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-        if (deadline_date) {
-          const d = new Date(deadline_date);
-          if (!isNaN(d.getTime())) {
-            parsedDeadline = d.toISOString();
-          }
+        if (insertPostRes.error && insertPostRes.error.code === '22P02' && String(insertPostRes.error.message || '').includes('vertical')) {
+          // Enum value 'founders-mindset' not yet added on remote DB; fallback to 'tech'
+          const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
+          insertPostRes = await postsTable
+            .insert({ ...legacyPostRow, vertical: 'tech' })
+            .select('id, status')
+            .single();
         }
 
-        const eventRow = {
-          title: cleanEventTitle,
-          slug: normSlug,
-          description: String(description || excerpt || cleanPostTitle).trim(),
-          opportunity_type: finalOppType,
-          funding_amount: funding_amount ? String(funding_amount).trim() : null,
-          location: String(location || 'Global (Remote)').trim(),
-          deadline_date: parsedDeadline,
-          application_url: cleanAppUrl,
-          linked_post_id: linkedPostId,
-        };
+        if (insertPostRes.error) throw insertPostRes.error;
+        linkedPostId = insertPostRes.data.id;
+      } else {
+        linkedPostId = `post-${Date.now()}`;
+      }
+    }
 
-        const eventsTable = client.schema ? client.schema('startupcreme').from('events') : client.from('events');
+    // Now process event row
+    let eventId: string;
+    const eventRow = {
+      title: effectiveEventTitle,
+      slug: normSlug,
+      description,
+      opportunity_type: validated.opportunity_type,
+      funding_amount: validated.funding_amount ? validated.funding_amount.trim() : null,
+      location: (validated.location || 'Global (Remote)').trim(),
+      deadline_date: new Date(validated.deadline_date).toISOString(),
+      application_url: cleanAppUrl,
+      linked_post_id: linkedPostId,
+    };
 
-        const { data: upsertedEvent, error: eventUpsertError } = await eventsTable
-          .upsert(eventRow, { onConflict: 'application_url' })
+    if (client) {
+      const eventsTable = client.schema ? client.schema('startupcreme').from('events') : client.from('events');
+
+      if (existingEvent) {
+        eventId = existingEvent.id;
+        if (!existingEvent.linked_post_id) {
+          await eventsTable.update({ linked_post_id: linkedPostId }).eq('id', existingEvent.id);
+        }
+      } else {
+        let insertRes = await eventsTable
+          .insert(eventRow)
           .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
           .maybeSingle();
 
-        if (!eventUpsertError && upsertedEvent?.id) {
-          eventId = upsertedEvent.id;
-        } else {
-          // Fallback query to find existing event by application_url
-          const { data: existingEvent } = await eventsTable
-            .select('id')
-            .eq('application_url', cleanAppUrl)
+        // Fallback if remote database has not yet applied enum additions for fellowship/incubator
+        if (insertRes.error && insertRes.error.code === '22P02' && String(insertRes.error.message || '').includes('opportunity_type')) {
+          const fallbackOpp = validated.opportunity_type === 'fellowship' ? 'grant' : 'accelerator';
+          insertRes = await eventsTable
+            .insert({ ...eventRow, opportunity_type: fallbackOpp })
+            .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
             .maybeSingle();
-
-          if (existingEvent?.id) {
-            const { data: updatedEvent, error: updateEvtErr } = await eventsTable
-              .update({
-                title: eventRow.title,
-                slug: eventRow.slug,
-                description: eventRow.description,
-                opportunity_type: eventRow.opportunity_type,
-                funding_amount: eventRow.funding_amount,
-                location: eventRow.location,
-                deadline_date: eventRow.deadline_date,
-                linked_post_id: linkedPostId,
-              })
-              .eq('id', existingEvent.id)
-              .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
-              .single();
-
-            if (updateEvtErr) throw updateEvtErr;
-            eventId = updatedEvent.id;
-          } else {
-            // If slug already exists on a different URL, avoid unique constraint conflict on slug
-            let insertRes = await eventsTable
-              .insert(eventRow)
-              .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
-              .maybeSingle();
-
-            if (insertRes.error && String(insertRes.error.message || '').includes('events_slug_key')) {
-              const fallbackRow = { ...eventRow, slug: `${normSlug}-${Date.now().toString(36)}` };
-              insertRes = await eventsTable
-                .insert(fallbackRow)
-                .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
-                .single();
-            }
-
-            if (insertRes.error) throw insertRes.error;
-            eventId = insertRes.data?.id || null;
-          }
         }
-      } else {
-        linkedPostId = `post-${Date.now()}`;
-        eventId = `event-${Date.now()}`;
+
+        if (insertRes.error && String(insertRes.error.message || '').includes('events_slug_key')) {
+          const fallbackRow = { ...eventRow, slug: `${normSlug}-${Date.now().toString(36)}` };
+          insertRes = await eventsTable
+            .insert(fallbackRow)
+            .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
+            .single();
+        }
+
+        if (insertRes.error) throw insertRes.error;
+        eventId = insertRes.data?.id || `event-${Date.now()}`;
       }
-
-      // Keep in-memory cache synchronized
-      const memoryEvent: EventOpportunity = {
-        id: eventId || `event-${Date.now()}`,
-        title: cleanEventTitle,
-        slug: normSlug,
-        description: String(description || excerpt || cleanPostTitle).trim(),
-        opportunity_type: String(opportunity_type || 'grant'),
-        funding_amount: funding_amount ? String(funding_amount).trim() : null,
-        location: String(location || 'Global (Remote)').trim(),
-        deadline_date: deadline_date ? new Date(deadline_date).toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        application_url: cleanAppUrl,
-        linked_post_id: linkedPostId,
-        created_at: new Date().toISOString(),
-      };
-
-      runtimeEvents = [
-        memoryEvent,
-        ...runtimeEvents.filter((e) => e.application_url !== cleanAppUrl),
-      ];
-
-      // 4. Return clean JSON response with status 200
-      return res.status(200).json({
-        success: true,
-        message: 'Event and post successfully upserted into startupcreme schema',
-        data: {
-          post_id: linkedPostId,
-          event_id: eventId,
-          event_title: cleanEventTitle,
-          application_url: cleanAppUrl,
-          opportunity_type: memoryEvent.opportunity_type,
-          funding_amount: memoryEvent.funding_amount,
-          deadline_date: memoryEvent.deadline_date,
-          linked_post_id: linkedPostId,
-          post: {
-            id: linkedPostId,
-            locale: normLocale,
-            vertical: normVertical,
-            slug: normSlug,
-            title: cleanPostTitle,
-          },
-        },
-      });
-    } catch (err: any) {
-      console.error('[Events Webhook Upsert Error]:', err);
-      return res.status(500).json({
-        success: false,
-        error: 'Database operation failed during event and post upsert',
-        message: err.message || 'Unknown database error',
-        details: err.details || err.hint || null,
-      });
+    } else {
+      eventId = existingEvent?.id || `event-${Date.now()}`;
     }
-  }
-);
 
-// Public GET events listing
+    const linkedPostSnapshot = {
+      id: linkedPostId,
+      locale: normLocale,
+      vertical: normVertical,
+      slug: normSlug,
+      title: effectiveTitle,
+      status: (existingPost?.status || resolvedStatus) as 'draft' | 'published',
+      canonical_url: existingPost?.canonical_url || (validated.canonical_url ? validated.canonical_url.trim() : null),
+      source_name: existingPost?.source_name || (validated.source_name ? validated.source_name.trim() : null),
+      source_url: existingPost?.source_url || (validated.source_url ? validated.source_url.trim() : null),
+      ai_generated: existingPost?.ai_generated !== undefined ? Boolean(existingPost.ai_generated) : Boolean(validated.ai_generated),
+      hide_ai_disclosure: existingPost?.hide_ai_disclosure !== undefined ? Boolean(existingPost.hide_ai_disclosure) : Boolean(validated.hide_ai_disclosure),
+    };
+
+    const memoryEvent: EventOpportunity = {
+      id: eventId,
+      title: effectiveEventTitle,
+      slug: normSlug,
+      description,
+      opportunity_type: validated.opportunity_type,
+      funding_amount: validated.funding_amount || null,
+      location: validated.location || 'Global (Remote)',
+      deadline_date: new Date(validated.deadline_date).toISOString(),
+      application_url: cleanAppUrl,
+      linked_post_id: linkedPostId,
+      linked_post: linkedPostSnapshot as any,
+      created_at: new Date().toISOString(),
+    };
+
+    runtimeEvents = [
+      memoryEvent,
+      ...runtimeEvents.filter((e) => e.application_url !== cleanAppUrl && e.slug !== normSlug),
+    ];
+
+    return res.status(200).json({
+      success: true,
+      message: 'Event and post successfully processed',
+      post: linkedPostSnapshot,
+      data: {
+        post_id: linkedPostId,
+        event_id: eventId,
+        status: linkedPostSnapshot.status,
+        event_title: effectiveEventTitle,
+        application_url: cleanAppUrl,
+        opportunity_type: validated.opportunity_type,
+        funding_amount: memoryEvent.funding_amount,
+        deadline_date: memoryEvent.deadline_date,
+        linked_post_id: linkedPostId,
+        post: linkedPostSnapshot,
+      },
+    });
+  } catch (err: any) {
+    console.error('[Events Webhook Error]:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'Database operation failed during event ingestion',
+      message: err.message || 'Unknown database error',
+      details: err.details || err.hint || null,
+    });
+  }
+});
+
+// Public GET events listing: only returns rows whose linked post has status = 'published'
 expansionRouter.get('/events', async (req: Request, res: Response) => {
   const typeFilter = (req.query.type as string) || '';
   const searchFilter = (req.query.search as string) || '';
 
+  const mapOpportunityTypes = (raw: string): string[] => {
+    const tokens = raw.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean);
+    const result: string[] = [];
+    for (const token of tokens) {
+      if (token === 'accelerator') {
+        result.push('accelerator', 'incubator');
+      } else if (token === 'pitch_competition') {
+        result.push('pitch_competition', 'hackathon');
+      } else {
+        result.push(token);
+      }
+    }
+    return Array.from(new Set(result));
+  };
+
   const client = getSupabaseAdminClient();
+  const types = typeFilter && typeFilter !== 'all' ? mapOpportunityTypes(typeFilter) : [];
+
   if (client) {
     await purgeLegacyMockRowsIfNeeded(client);
     try {
       let query = client
         .from('events')
-        .select('*, linked_post:posts(*)')
+        .select('*, linked_post:posts!inner(*)')
+        .eq('linked_post.status', 'published')
         .order('deadline_date', { ascending: true });
 
-      if (typeFilter && typeFilter !== 'all') {
-        query = query.ilike('opportunity_type', `%${typeFilter}%`);
+      if (types.length === 1) {
+        query = query.eq('opportunity_type', types[0]);
+      } else if (types.length > 1) {
+        query = query.in('opportunity_type', types);
       }
+
       if (searchFilter) {
         query = query.or(
           `title.ilike.%${searchFilter}%,description.ilike.%${searchFilter}%,location.ilike.%${searchFilter}%`
         );
       }
 
-      const { data, error } = await query;
+      let { data, error } = await query;
+
+      // Handle 22P02 enum mismatch if remote DB hasn't applied latest enum additions
+      if (error && error.code === '22P02' && types.length > 0) {
+        const baseline = types.filter((t) =>
+          ['grant', 'accelerator', 'pitch_competition', 'conference'].includes(t)
+        );
+        if (baseline.length > 0) {
+          let retryQ = client
+            .from('events')
+            .select('*, linked_post:posts!inner(*)')
+            .eq('linked_post.status', 'published')
+            .order('deadline_date', { ascending: true });
+          if (baseline.length === 1) {
+            retryQ = retryQ.eq('opportunity_type', baseline[0]);
+          } else {
+            retryQ = retryQ.in('opportunity_type', baseline);
+          }
+          const retryRes = await retryQ;
+          if (!retryRes.error && Array.isArray(retryRes.data)) {
+            data = retryRes.data;
+            error = null;
+          }
+        }
+      }
+
       if (!error && Array.isArray(data)) {
-        runtimeEvents = data;
-        return res.json({ success: true, count: data.length, events: data });
+        const dbSlugs = new Set(data.map((d: any) => d.slug));
+        const matchingMemory = runtimeEvents.filter((m) => {
+          if (dbSlugs.has(m.slug)) return false;
+          if (m.linked_post?.status !== 'published') return false;
+          if (types.length > 0) {
+            return types.includes(String(m.opportunity_type || '').toLowerCase());
+          }
+          return true;
+        });
+        const combined = [...data, ...matchingMemory];
+        return res.json({ success: true, count: combined.length, events: combined });
       }
     } catch {
       // fallback to runtime cache
     }
   }
 
-  let filtered = [...runtimeEvents];
-  if (typeFilter && typeFilter !== 'all') {
-    filtered = filtered.filter(
-      (e) => String(e.opportunity_type).toLowerCase() === typeFilter.toLowerCase()
+  // In-memory fallback: strictly enforce that only events with published linked posts are returned
+  let filtered = runtimeEvents.filter((e) => e.linked_post?.status === 'published');
+  if (types.length > 0) {
+    filtered = filtered.filter((e) =>
+      types.includes(String(e.opportunity_type || '').toLowerCase())
     );
   }
   if (searchFilter) {
@@ -1135,7 +1219,7 @@ expansionRouter.get('/events', async (req: Request, res: Response) => {
   return res.json({ success: true, count: filtered.length, events: filtered });
 });
 
-// Single event by slug
+// Single event by slug: strictly require linked post status = 'published'
 expansionRouter.get('/events/:slug', async (req: Request, res: Response) => {
   const { slug } = req.params;
   const client = getSupabaseAdminClient();
@@ -1143,8 +1227,9 @@ expansionRouter.get('/events/:slug', async (req: Request, res: Response) => {
     try {
       const { data, error } = await client
         .from('events')
-        .select('*, linked_post:posts(*)')
+        .select('*, linked_post:posts!inner(*)')
         .eq('slug', slug)
+        .eq('linked_post.status', 'published')
         .maybeSingle();
 
       if (!error && data) {
@@ -1155,7 +1240,9 @@ expansionRouter.get('/events/:slug', async (req: Request, res: Response) => {
     }
   }
 
-  const found = runtimeEvents.find((e) => e.slug === slug);
+  const found = runtimeEvents.find(
+    (e) => e.slug === slug && e.linked_post?.status === 'published'
+  );
   if (found) {
     return res.json({ success: true, event: found });
   }

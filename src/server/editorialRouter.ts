@@ -358,11 +358,15 @@ editorialRouter.post('/drafts', requireEditorialAuth, async (req: Request, res: 
       meta_description: payload.meta_description || payload.excerpt || payload.title.slice(0, 160),
       canonical_url: payload.canonical_url || null,
       cover_image: payload.cover_image || null,
+      source_url: payload.source_url || null,
+      source_name: payload.source_name || null,
+      ai_generated: Boolean(payload.ai_generated),
+      hide_ai_disclosure: Boolean(payload.hide_ai_disclosure),
       author_name: payload.author_name || 'Startup Crème Editorial',
       author_role: payload.author_role || 'Senior Analyst',
       author_avatar: payload.author_avatar || null,
-      dual_silo: payload.dual_silo || false,
-      silo_badge: payload.dual_silo ? 'Dual Silo Analysis' : null,
+      dual_silo: payload.vertical === 'founders-mindset' ? false : (payload.dual_silo || false),
+      silo_badge: payload.vertical === 'founders-mindset' ? null : (payload.dual_silo ? 'Dual Silo Analysis' : null),
       tags: payload.tags && payload.tags.length > 0 ? payload.tags : ['Editorial'],
       reading_time_minutes: calculatedReadingTime,
       word_count: calculatedWordCount,
@@ -375,11 +379,35 @@ editorialRouter.post('/drafts', requireEditorialAuth, async (req: Request, res: 
 
     if (supabase) {
       try {
-        const { data: insertedPost, error: insertError } = await supabase
+        let { data: insertedPost, error: insertError } = await supabase
           .from('posts')
           .insert(postRow)
           .select('id, slug, vertical, locale, title, status, word_count, reading_time_minutes, created_at, updated_at')
           .single();
+
+        if (insertError && (insertError.code === 'PGRST204' || String(insertError.message || '').includes('column'))) {
+          // Fallback if remote database hasn't yet updated schema cache
+          const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
+          const retryRes = await supabase
+            .from('posts')
+            .insert(legacyPostRow)
+            .select('id, slug, vertical, locale, title, status, word_count, reading_time_minutes, created_at, updated_at')
+            .single();
+          insertedPost = retryRes.data;
+          insertError = retryRes.error;
+        }
+
+        if (insertError && insertError.code === '22P02' && String(insertError.message || '').includes('vertical')) {
+          // Enum 'founders-mindset' fallback if remote DB enum not yet expanded
+          const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
+          const retryRes = await supabase
+            .from('posts')
+            .insert({ ...legacyPostRow, vertical: 'tech' })
+            .select('id, slug, vertical, locale, title, status, word_count, reading_time_minutes, created_at, updated_at')
+            .single();
+          insertedPost = retryRes.data;
+          insertError = retryRes.error;
+        }
 
         if (insertError) {
           console.error('[EditorialRouter] Supabase insert error:', insertError.message);
@@ -398,7 +426,7 @@ editorialRouter.post('/drafts', requireEditorialAuth, async (req: Request, res: 
         }
 
         if (insertedPost) {
-          savedPost = insertedPost as any;
+          savedPost = { ...postRow, ...insertedPost } as any;
           persistedInDb = true;
         }
       } catch (err: any) {
@@ -457,6 +485,11 @@ editorialRouter.post('/drafts', requireEditorialAuth, async (req: Request, res: 
         locale: savedPost.locale,
         title: savedPost.title,
         status: 'draft',
+        canonical_url: savedPost.canonical_url || null,
+        source_url: savedPost.source_url || null,
+        source_name: savedPost.source_name || null,
+        ai_generated: Boolean(savedPost.ai_generated),
+        hide_ai_disclosure: Boolean(savedPost.hide_ai_disclosure),
         word_count: savedPost.word_count,
         reading_time_minutes: savedPost.reading_time_minutes,
         created_at: savedPost.created_at,

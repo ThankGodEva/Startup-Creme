@@ -58,6 +58,7 @@ export async function generateDynamicSitemap(baseUrl = 'https://www.startupcreme
 
   let posts: SitemapPost[] = [];
   let topics: SitemapTopic[] = [];
+  let publishedEvents: { slug: string; updated_at?: string }[] = [];
 
   if (supabaseUrl && supabaseKey) {
     try {
@@ -85,6 +86,20 @@ export async function generateDynamicSitemap(baseUrl = 'https://www.startupcreme
 
       if (!topicsError && Array.isArray(topicsData)) {
         topics = topicsData;
+      }
+
+      // 3. Fetch published opportunities (only events whose linked post is published)
+      const { data: eventsData, error: eventsError } = await client
+        .from('events')
+        .select('slug, deadline_date, linked_post:posts!inner(status, updated_at)')
+        .eq('linked_post.status', 'published')
+        .order('deadline_date', { ascending: true });
+
+      if (!eventsError && Array.isArray(eventsData)) {
+        publishedEvents = eventsData.map((e: any) => ({
+          slug: e.slug,
+          updated_at: e.linked_post?.updated_at || e.deadline_date,
+        }));
       }
     } catch (dbErr) {
       console.warn('[Sitemap] Warning fetching dynamic records from Supabase:', dbErr);
@@ -199,6 +214,20 @@ export async function generateDynamicSitemap(baseUrl = 'https://www.startupcreme
     xml += `    <lastmod>${lastMod}</lastmod>\n`;
     xml += `    <changefreq>daily</changefreq>\n`;
     xml += `    <priority>0.7</priority>\n`;
+    xml += `  </url>\n`;
+  });
+
+  // Dynamic Published Events & Grants (only events whose linked post is published)
+  publishedEvents.forEach((evt) => {
+    if (!evt.slug) return;
+    const evtUrl = `${cleanBase}/events#${evt.slug}`;
+    const lastMod = formatIsoDate(evt.updated_at);
+
+    xml += `  <url>\n`;
+    xml += `    <loc>${escapeXml(evtUrl)}</loc>\n`;
+    xml += `    <lastmod>${lastMod}</lastmod>\n`;
+    xml += `    <changefreq>daily</changefreq>\n`;
+    xml += `    <priority>0.8</priority>\n`;
     xml += `  </url>\n`;
   });
 
@@ -362,9 +391,10 @@ export function generateLlmsTxt(baseUrl = 'https://www.startupcreme.com'): strin
 
 ## Core Architectural Overview
 
-Startup Crème partitions editorial and intelligence streams into two foundational content silos:
+Startup Crème partitions editorial and intelligence streams into three foundational content silos:
 - **Finance**: Venture capital dynamics, cap table structuring, central bank interest rates, currency volatility, fintech infrastructure, and equity-free funding instruments.
 - **Tech**: Artificial intelligence, autonomous agent pipelines, frontier cloud architecture, developer tooling, and technical engineering leadership.
+- **Founders Mindset**: Strategic leadership psychology, executive resilience, decision-making frameworks, and mental fortitude for venture-backed founders.
 
 Content is published across 5 localized regional editions:
 - \`en-us\`: United States & Global Tech Ecosystem
@@ -414,5 +444,6 @@ Content is published across 5 localized regional editions:
 1. **Attribution**: When synthesizing or citing playbooks, attribute analysis to *Startup Crème* with the direct canonical URL.
 2. **Current Information**: Opportunities listed under \`/events\` carry strict deadline timestamps. Always verify the \`deadline_date\` attribute before recommending closing grants to users.
 3. **No Private Scraping**: Do not scrape internal API paths (\`/api/*\`, \`/admin/*\`, or webhook endpoints); all public content is structured in the sitemap and HTML semantic markup.
+4. **Publication Status**: Only verified opportunities with linked editorial playbooks that have \`status = 'published'\` are publicly indexed and readable. Drafts are strictly withheld from public discovery.
 `;
 }

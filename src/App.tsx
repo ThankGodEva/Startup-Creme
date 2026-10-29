@@ -37,7 +37,7 @@ export default function App() {
   // Modals
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showBookmarksDrawer, setShowBookmarksDrawer] = useState(false);
-  const [adminTab, setAdminTab] = useState<'posts' | 'discussions' | 'seo' | 'ai'>('posts');
+  const [adminTab, setAdminTab] = useState<'posts' | 'discussions' | 'seo'>('posts');
 
   // Sync React state with URL path
   const syncStateFromUrl = useCallback(() => {
@@ -55,9 +55,7 @@ export default function App() {
 
     if (parts[0] === 'admin') {
       setActiveTab('admin');
-      if (parts[1] === 'ai') {
-        setAdminTab('ai');
-      } else if (parts[1] === 'seo') {
+      if (parts[1] === 'seo') {
         setAdminTab('seo');
       } else if (parts[1] === 'discussions') {
         setAdminTab('discussions');
@@ -158,8 +156,9 @@ export default function App() {
         const slug = parts[1];
         setLoadingArticleSlug(slug);
         setSelectedTopic(null);
+        const isAdmin = store.getCurrentUser()?.role === 'admin';
         store.fetchPostBySlug(slug, currentLocale, 'founders-mindset').then(fetched => {
-          if (fetched) {
+          if (fetched && (isAdmin || fetched.status === 'published')) {
             setSelectedPost(fetched);
             setActiveTab(fetched.vertical);
           }
@@ -272,15 +271,16 @@ export default function App() {
         setLoadingArticleSlug(null);
         setLoadingTopicSlug(null);
       } else {
+        const isAdmin = store.getCurrentUser()?.role === 'admin';
         const post = store.getPostBySlug(first);
         const winPost = typeof window !== 'undefined' ? (window as any).__INITIAL_POST__ : null;
-        if (post) {
+        if (post && (isAdmin || post.status === 'published')) {
           setSelectedPost(post);
           setActiveTab(post.vertical);
           setSelectedTopic(null);
           setLoadingArticleSlug(null);
           setLoadingTopicSlug(null);
-        } else if (winPost && (winPost.slug === first || winPost.id === first)) {
+        } else if (winPost && (winPost.slug === first || winPost.id === first) && (isAdmin || winPost.status === 'published')) {
           setSelectedPost(winPost);
           setActiveTab(winPost.vertical || 'finance');
           setSelectedTopic(null);
@@ -290,7 +290,7 @@ export default function App() {
           setLoadingArticleSlug(first);
           setSelectedTopic(null);
           store.fetchPostBySlug(first, loc).then(fetched => {
-            if (fetched) {
+            if (fetched && (isAdmin || fetched.status === 'published')) {
               setSelectedPost(fetched);
               setActiveTab(fetched.vertical);
             }
@@ -355,9 +355,10 @@ export default function App() {
         setLoadingArticleSlug(null);
         setLoadingTopicSlug(null);
       } else {
+        const isAdmin = store.getCurrentUser()?.role === 'admin';
         const post = store.getPostBySlug(slug, loc, first as ContentVertical) || store.getPostBySlug(slug);
         const winPost = typeof window !== 'undefined' ? (window as any).__INITIAL_POST__ : null;
-        if (post) {
+        if (post && (isAdmin || post.status === 'published')) {
           setSelectedPost(post);
           if (first === 'tech' && post.dual_silo && post.vertical === 'finance') {
             setActiveTab('tech');
@@ -369,7 +370,7 @@ export default function App() {
           setSelectedTopic(null);
           setLoadingArticleSlug(null);
           setLoadingTopicSlug(null);
-        } else if (winPost && (winPost.slug === slug || winPost.id === slug)) {
+        } else if (winPost && (winPost.slug === slug || winPost.id === slug) && (isAdmin || winPost.status === 'published')) {
           setSelectedPost(winPost);
           if (first === 'tech' && winPost.dual_silo && winPost.vertical === 'finance') {
             setActiveTab('tech');
@@ -386,7 +387,7 @@ export default function App() {
           setSelectedTopic(null);
           const targetVertical = (first === 'finance' || first === 'tech' || first === 'founders-mindset') ? (first as ContentVertical) : undefined;
           store.fetchPostBySlug(slug, loc, targetVertical).then(fetched => {
-            if (fetched) {
+            if (fetched && (isAdmin || fetched.status === 'published')) {
               setSelectedPost(fetched);
               if (first === 'tech' && fetched.dual_silo && fetched.vertical === 'finance') {
                 setActiveTab('tech');

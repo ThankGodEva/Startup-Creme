@@ -44,14 +44,13 @@ import {
 import { generateSitemapXML, generateRobotsTxt, generateLlmsTxt } from '../lib/seo';
 import { store } from '../lib/store';
 import { ArticleEditorPage } from './ArticleEditorPage';
-import { AiCommandCenter } from './AiCommandCenter';
 import { PublishEventModal } from './PublishEventModal';
 
 interface AdminDashboardProps {
   currentUser: UserProfile | null;
   posts: Post[];
   topics: DiscussionTopic[];
-  initialTab?: 'posts' | 'discussions' | 'directory_jobs' | 'events' | 'seo' | 'ai';
+  initialTab?: 'posts' | 'discussions' | 'directory_jobs' | 'events' | 'seo';
   onSavePost: (post: Partial<Post>) => Promise<{ success: boolean; post: Post; error?: string }>;
   onDeletePost: (id: string) => void;
   onTogglePostStatus: (id: string) => void;
@@ -70,7 +69,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onDeleteTopic,
   onSwitchRole,
 }) => {
-  const [activeTab, setActiveTab] = useState<'posts' | 'discussions' | 'directory_jobs' | 'events' | 'seo' | 'ai'>(initialTab || 'posts');
+  const [activeTab, setActiveTab] = useState<'posts' | 'discussions' | 'directory_jobs' | 'events' | 'seo'>(initialTab || 'posts');
   const [editingPost, setEditingPost] = useState<Partial<Post> | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [verticalFilter, setVerticalFilter] = useState<'all' | ContentVertical>('all');
@@ -350,27 +349,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <Globe className="w-4 h-4 text-emerald-600" />
             <span>SEO Sitemap & Robots.txt</span>
           </button>
-
-          <button
-            onClick={() => setActiveTab('ai')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'ai'
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Bot className="w-4 h-4 text-amber-400" />
-            <span>AI Command Center</span>
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-              Autonomous
-            </span>
-          </button>
         </div>
-
-        {/* AI COMMAND CENTER TAB */}
-        {activeTab === 'ai' && (
-          <AiCommandCenter onNavigateToEditor={(draft) => setEditingPost(draft)} />
-        )}
 
         {/* POSTS TAB */}
         {activeTab === 'posts' && (
@@ -430,8 +409,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     {filteredPosts.map(post => (
                       <tr key={post.id} className="hover:bg-slate-50 transition-colors">
                         <td className="p-4">
-                          <div className="font-bold text-slate-900 text-sm max-w-xs truncate">{post.title}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-900 text-sm max-w-xs truncate">{post.title}</span>
+                            {post.ai_generated && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 text-violet-800 border border-violet-300">
+                                <Sparkles className="w-2.5 h-2.5 text-violet-600" />
+                                <span>AI-assisted</span>
+                              </span>
+                            )}
+                          </div>
                           <div className="font-mono text-[11px] text-slate-500">/{post.slug}</div>
+                          {(post.source_name || post.source_url) && (
+                            <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                              <span className="font-semibold text-slate-600">Source:</span>
+                              {post.source_url ? (
+                                <a
+                                  href={post.source_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-cyan-700 hover:underline truncate max-w-[200px]"
+                                >
+                                  {post.source_name || post.source_url}
+                                </a>
+                              ) : (
+                                <span>{post.source_name}</span>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="p-4 font-mono">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase mr-1.5 ${
@@ -973,11 +977,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
                   <div className="font-bold text-slate-800 uppercase font-mono text-[10px]">
-                    Authoritative Endpoints
+                    Authoritative Endpoint
                   </div>
                   <div className="font-mono text-slate-900 space-y-1">
                     <div><span className="text-amber-700 font-bold">POST</span> /api/events/webhook</div>
-                    <div><span className="text-amber-700 font-bold">POST</span> /api/events</div>
                   </div>
                 </div>
 
@@ -985,9 +988,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div className="font-bold text-slate-800 uppercase font-mono text-[10px]">
                     Authentication
                   </div>
-                  <p>Send standard HTTP Bearer token in the request header:</p>
+                  <p>Send standard HTTP Bearer token in the request header (or authenticate with an active Supabase admin session):</p>
                   <pre className="p-2 bg-slate-900 text-amber-300 rounded-lg font-mono text-[11px]">
-Authorization: Bearer &lt;N8N_WEBHOOK_SECRET&gt;
+Authorization: Bearer &lt;STARTUPCREME_AUTOMATION_SECRET&gt;
                   </pre>
                 </div>
 
