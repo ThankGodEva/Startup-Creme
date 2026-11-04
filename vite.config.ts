@@ -17,10 +17,45 @@ export default defineConfig(() => {
       'process.env.SERVICE_ROLE_KEY': JSON.stringify(''),
     },
     plugins: [react(), tailwindcss()],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-tiptap': [
+              '@tiptap/react',
+              '@tiptap/starter-kit',
+              '@tiptap/extension-link',
+              '@tiptap/extension-image',
+              '@tiptap/extension-table',
+              '@tiptap/extension-table-row',
+              '@tiptap/extension-table-header',
+              '@tiptap/extension-table-cell',
+              '@tiptap/extension-placeholder',
+            ],
+            'vendor-icons': ['lucide-react'],
+            'vendor-motion': ['motion'],
+            'vendor-supabase': ['@supabase/supabase-js'],
+          },
+        },
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        react: path.resolve(__dirname, 'node_modules/react'),
+        'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
       },
+      dedupe: ['react', 'react-dom'],
+    },
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
+        'lucide-react',
+      ],
     },
     server: {
       allowedHosts: true as true,

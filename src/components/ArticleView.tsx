@@ -611,11 +611,16 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
       <div className="max-w-4xl mx-auto px-4 py-10">
         {/* Cover Image */}
         {post.cover_image && (
-          <div className="mb-10 rounded-2xl overflow-hidden border border-slate-200 shadow-md">
+          <div className="mb-10 rounded-2xl overflow-hidden border border-slate-200 shadow-md aspect-[16/9] w-full bg-slate-100">
             <img
               src={normalizeImageUrl(post.cover_image)}
               alt={post.title}
-              className="w-full max-h-[460px] object-cover"
+              width={1200}
+              height={675}
+              fetchPriority="high"
+              loading="eager"
+              decoding="async"
+              className="w-full h-full object-cover"
               onError={(e) => {
                 const target = e.currentTarget;
                 if (!target.src.includes('unsplash.com')) {

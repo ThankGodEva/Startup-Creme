@@ -13,6 +13,8 @@ export interface PageMetadata {
   tags?: string[];
   ssrPayloadScript?: string;
   jsonLdScript?: string;
+  ssrHtml?: string;
+  updatedAt?: string;
 }
 
 const DEFAULT_TITLE = 'StartupCrème | Financial & Technology Intelligence';
@@ -210,6 +212,157 @@ export function resolveArticleDescription(post: any): string {
 }
 
 /**
+ * Converts Tiptap JSON or Markdown/text into clean, semantic HTML markup
+ * for server-side bot rendering, web crawlers, and AI agents.
+ */
+export function convertContentToSemanticHtml(content: any): string {
+  if (!content) return '';
+
+  if (typeof content === 'object' && Array.isArray(content.content)) {
+    const renderInline = (node: any): string => {
+      if (!node) return '';
+      if (node.type === 'text') {
+        let text = escapeHtml(node.text || '');
+        if (node.marks && Array.isArray(node.marks)) {
+          for (const mark of node.marks) {
+            if (mark.type === 'bold') text = `<strong>${text}</strong>`;
+            else if (mark.type === 'italic') text = `<em>${text}</em>`;
+            else if (mark.type === 'code') text = `<code class="bg-slate-100 px-1.5 py-0.5 rounded text-sm font-mono text-cyan-800">${text}</code>`;
+            else if (mark.type === 'strike') text = `<del>${text}</del>`;
+            else if (mark.type === 'link' && mark.attrs?.href) {
+              const safeHref = escapeHtml(mark.attrs.href);
+              text = `<a href="${safeHref}" target="_blank" rel="noopener noreferrer" class="text-cyan-700 hover:underline">${text}</a>`;
+            }
+          }
+        }
+        return text;
+      }
+      return '';
+    };
+
+    const renderNode = (node: any): string => {
+      if (!node) return '';
+
+      const children = (node.content || []).map((c: any) => {
+        if (c.type === 'text') return renderInline(c);
+        return renderNode(c);
+      }).join('');
+
+      switch (node.type) {
+        case 'heading': {
+          const level = Math.min(Math.max(node.attrs?.level || 2, 1), 6);
+          const sizeClasses = level === 1
+            ? 'text-3xl font-extrabold mt-10 mb-4'
+            : level === 2
+            ? 'text-2xl font-bold mt-8 mb-3 pb-2 border-b border-slate-200'
+            : 'text-xl font-bold mt-6 mb-2';
+          return `<h${level} class="font-serif text-slate-900 ${sizeClasses}">${children}</h${level}>`;
+        }
+        case 'paragraph': {
+          if (!children.trim()) return '';
+          return `<p class="font-serif text-slate-800 text-lg leading-relaxed mb-5">${children}</p>`;
+        }
+        case 'blockquote':
+          return `<blockquote class="border-l-4 border-cyan-600 pl-4 py-1 italic text-slate-700 my-6 font-serif text-lg bg-slate-50/50 rounded-r-lg">${children}</blockquote>`;
+        case 'codeBlock': {
+          const lang = escapeHtml(node.attrs?.language || '');
+          return `<pre class="bg-slate-900 text-slate-100 p-4 rounded-xl overflow-x-auto my-6 text-sm font-mono leading-normal"><code>${children}</code></pre>`;
+        }
+        case 'bulletList':
+          return `<ul class="list-disc list-outside pl-6 my-4 space-y-2 text-slate-800 font-serif text-lg">${(node.content || []).map((li: any) => `<li class="leading-relaxed pl-1">${(li.content || []).map(renderNode).join('')}</li>`).join('')}</ul>`;
+        case 'orderedList':
+          return `<ol class="list-decimal list-outside pl-6 my-4 space-y-2 text-slate-800 font-serif text-lg">${(node.content || []).map((li: any) => `<li class="leading-relaxed pl-1">${(li.content || []).map(renderNode).join('')}</li>`).join('')}</ol>`;
+        case 'horizontalRule':
+          return '<hr class="my-8 border-slate-200" />';
+        case 'image': {
+          const src = escapeHtml(node.attrs?.src || '');
+          const alt = escapeHtml(node.attrs?.alt || 'article illustration');
+          return `<figure class="my-8 rounded-xl overflow-hidden aspect-[16/9] w-full bg-slate-100 border border-slate-200"><img src="${src}" alt="${alt}" loading="lazy" decoding="async" class="w-full h-full object-cover" /></figure>`;
+        }
+        case 'table': {
+          const rows = (node.content || []).map((row: any) => {
+            const cells = (row.content || []).map((cell: any) => {
+              const isHeader = cell.type === 'tableHeader';
+              const tag = isHeader ? 'th' : 'td';
+              const cellContent = (cell.content || []).map(renderNode).join('');
+              const cellClasses = isHeader
+                ? 'p-3.5 text-left font-bold text-xs uppercase tracking-wider text-slate-900 bg-slate-100 border border-slate-200 font-sans'
+                : 'p-3.5 text-sm sm:text-base text-slate-800 border border-slate-200 font-sans';
+              return `<${tag} class="${cellClasses}">${cellContent}</${tag}>`;
+            }).join('');
+            return `<tr class="hover:bg-slate-50/50">${cells}</tr>`;
+          }).join('');
+          return `<div class="overflow-x-auto my-8 rounded-xl border border-slate-200 shadow-2xs"><table class="min-w-full divide-y divide-slate-200 border-collapse">${rows}</table></div>`;
+        }
+        default:
+          return children;
+      }
+    };
+
+    return content.content.map(renderNode).join('\n');
+  }
+
+  // Markdown fallback string parser
+  if (typeof content === 'string') {
+    const raw = content.trim();
+    const lines = raw.split('\n');
+    const htmlChunks: string[] = [];
+    let inList = false;
+    let listType: 'ul' | 'ol' = 'ul';
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) {
+        if (inList) {
+          htmlChunks.push(`</${listType}>`);
+          inList = false;
+        }
+        continue;
+      }
+
+      if (line.startsWith('# ')) {
+        if (inList) { htmlChunks.push(`</${listType}>`); inList = false; }
+        htmlChunks.push(`<h1 class="font-serif font-extrabold text-3xl text-slate-900 mt-10 mb-4">${escapeHtml(line.slice(2))}</h1>`);
+      } else if (line.startsWith('## ')) {
+        if (inList) { htmlChunks.push(`</${listType}>`); inList = false; }
+        htmlChunks.push(`<h2 class="font-serif font-bold text-2xl text-slate-900 mt-8 mb-3 pb-2 border-b border-slate-200">${escapeHtml(line.slice(3))}</h2>`);
+      } else if (line.startsWith('### ')) {
+        if (inList) { htmlChunks.push(`</${listType}>`); inList = false; }
+        htmlChunks.push(`<h3 class="font-serif font-bold text-xl text-slate-900 mt-6 mb-2">${escapeHtml(line.slice(4))}</h3>`);
+      } else if (line.startsWith('> ')) {
+        if (inList) { htmlChunks.push(`</${listType}>`); inList = false; }
+        htmlChunks.push(`<blockquote class="border-l-4 border-cyan-600 pl-4 py-1 italic text-slate-700 my-6 font-serif text-lg bg-slate-50/50 rounded-r-lg">${escapeHtml(line.slice(2))}</blockquote>`);
+      } else if (line.startsWith('- ') || line.startsWith('* ')) {
+        if (!inList || listType !== 'ul') {
+          if (inList) htmlChunks.push(`</${listType}>`);
+          htmlChunks.push('<ul class="list-disc list-outside pl-6 my-4 space-y-2 text-slate-800 font-serif text-lg">');
+          inList = true;
+          listType = 'ul';
+        }
+        htmlChunks.push(`<li class="leading-relaxed pl-1">${escapeHtml(line.slice(2))}</li>`);
+      } else if (/^\d+\.\s/.test(line)) {
+        if (!inList || listType !== 'ol') {
+          if (inList) htmlChunks.push(`</${listType}>`);
+          htmlChunks.push('<ol class="list-decimal list-outside pl-6 my-4 space-y-2 text-slate-800 font-serif text-lg">');
+          inList = true;
+          listType = 'ol';
+        }
+        htmlChunks.push(`<li class="leading-relaxed pl-1">${escapeHtml(line.replace(/^\d+\.\s/, ''))}</li>`);
+      } else {
+        if (inList) { htmlChunks.push(`</${listType}>`); inList = false; }
+        htmlChunks.push(`<p class="font-serif text-slate-800 text-lg leading-relaxed mb-5">${escapeHtml(line)}</p>`);
+      }
+    }
+    if (inList) {
+      htmlChunks.push(`</${listType}>`);
+    }
+    return htmlChunks.join('\n');
+  }
+
+  return `<p class="font-serif text-slate-800 text-lg leading-relaxed mb-5">${escapeHtml(String(content))}</p>`;
+}
+
+/**
  * Resolves metadata for any StartupCrème URL route, querying Supabase when applicable.
  */
 export async function resolvePageMetadata(
@@ -250,6 +403,7 @@ export async function resolvePageMetadata(
   let tags: string[] | undefined;
   let ssrPayloadScript = '';
   let jsonLdScript = '';
+  let ssrHtml: string | undefined;
 
   const excluded = [
     'finance',
@@ -308,7 +462,7 @@ export async function resolvePageMetadata(
       description = 'Curated directory of early-stage and growth startups across FinTech, AI, Cloud Infrastructure, and EdTech.';
       section = 'Directory';
     } else if (
-      (lowerSlug === 'rates' || cleanPath.includes('/markets/rates')) &&
+      (lowerSlug === 'rates' || lowerSlug === 'markets' || lowerSlug === 'inflation' || lowerSlug === 'inflation-rates' || cleanPath.includes('/markets/rates') || cleanPath.includes('/markets/inflation') || cleanPath.includes('/markets')) &&
       !['false', '0', 'no', 'off'].includes(
         String(process.env.ENABLE_MARKETS ?? process.env.VITE_ENABLE_MARKETS ?? 'true')
           .trim()
@@ -316,9 +470,53 @@ export async function resolvePageMetadata(
           .replace(/^["']|["']$/g, '')
       )
     ) {
-      title = 'Macro Central Bank & Cloud Rate Trackers | StartupCrème';
-      description = 'Live benchmark central bank interest rates and developer cloud infrastructure pricing index across AWS, Supabase, Vercel, and Cloudflare.';
+      title = 'Macro Central Bank Interest Rates & 10-Year Inflation Rates Tracker | StartupCrème';
+      description = 'Live institutional tracking of sovereign central bank policy rates and 10-year historical inflation rate trajectories (2017–2026), monetary easing cycles, and real yield curves across global economies.';
       section = 'Markets';
+      coverImage = 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&q=80&w=1200&h=630';
+
+      const marketsJsonLd = {
+        '@context': 'https://schema.org',
+        '@graph': [
+          {
+            '@type': 'Dataset',
+            '@id': `${baseUrl}/markets/rates#inflation-dataset`,
+            name: '10-Year Sovereign Inflation Rate Trajectory (2017–2026)',
+            description: 'Annual headline consumer price index (CPI YoY %) historical dataset covering 8 benchmark economies from 2017 to 2026.',
+            url: `${baseUrl}/markets/rates#inflation-rates`,
+            temporalCoverage: '2017/2026',
+            spatialCoverage: [
+              'United States',
+              'Eurozone',
+              'Nigeria',
+              'United Kingdom',
+              'Japan',
+              'South Africa',
+              'Kenya',
+              'India',
+            ],
+            variableMeasured: 'Annual Headline Consumer Price Index Inflation (YoY %)',
+            creator: {
+              '@type': 'Organization',
+              name: 'StartupCrème Financial & Technology Intelligence',
+              url: baseUrl,
+            },
+          },
+          {
+            '@type': 'FinancialService',
+            '@id': `${baseUrl}/markets/rates#interest-rates`,
+            name: 'Global Central Bank Interest Rates Tracker',
+            description: 'Real-time benchmark monetary policy rates and decision dates from US Fed, ECB, CBN, BoE, BoJ, SARB, CBK, and RBI.',
+            url: `${baseUrl}/markets/rates#central-bank-rates`,
+            provider: {
+              '@type': 'Organization',
+              name: 'StartupCrème',
+              url: baseUrl,
+            },
+          },
+        ],
+      };
+      jsonLdScript = `<script type="application/ld+json">${JSON.stringify(marketsJsonLd)}</script>`;
     } else if (lowerSlug === 'careers') {
       title = 'Remote Startup Job & Fractional Talent Board | StartupCrème';
       description = 'Curated remote software engineering, FinOps, financial modeling, and fractional CTO/CFO leadership roles.';
@@ -508,6 +706,58 @@ export async function resolvePageMetadata(
             const sanitizedPost = JSON.stringify(foundPost).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
             ssrPayloadScript = `<script id="__STARTUPCREME_SSR_DATA__">window.__INITIAL_POST__ = ${sanitizedPost};</script>`;
 
+            // Pre-rendered Semantic HTML for Search Bots & AI Crawlers
+            const bodyHtml = convertContentToSemanticHtml(foundPost.content);
+            const articleCover = ensureAbsoluteUrl(coverImage, baseUrl, foundPost.id || foundPost.slug);
+
+            ssrHtml = `
+<div class="ssr-article-wrapper max-w-4xl mx-auto px-4 py-10 font-sans">
+  <nav class="ssr-breadcrumbs mb-6 text-xs font-mono text-slate-500 flex items-center gap-2">
+    <a href="${baseUrl}/" class="text-slate-600 hover:text-slate-900">Home</a>
+    <span>/</span>
+    <a href="${baseUrl}/${foundPost.locale || 'en-us'}/${foundPost.vertical || 'tech'}" class="text-slate-600 hover:text-slate-900 uppercase">${escapeHtml(foundPost.vertical || 'Tech')}</a>
+    <span>/</span>
+    <span class="text-slate-900 font-medium truncate max-w-xs">${escapeHtml(foundPost.title)}</span>
+  </nav>
+
+  <header class="ssr-header mb-8">
+    <div class="flex items-center gap-2 mb-4">
+      <span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold uppercase bg-slate-100 border border-slate-300 text-slate-800">
+        ${escapeHtml(foundPost.vertical || 'Intelligence')}
+      </span>
+      ${foundPost.dual_silo ? '<span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold uppercase bg-purple-100 border border-purple-300 text-purple-900">Dual Silo</span>' : ''}
+    </div>
+    <h1 class="font-serif text-3xl sm:text-5xl font-extrabold text-slate-900 mb-4 leading-tight">
+      ${escapeHtml(foundPost.title)}
+    </h1>
+    <p class="text-lg text-slate-600 leading-relaxed mb-6 font-sans">
+      ${escapeHtml(foundPost.excerpt || '')}
+    </p>
+    <div class="flex flex-wrap items-center justify-between gap-4 border-t border-b border-slate-200 py-4 text-xs font-sans text-slate-600">
+      <div class="flex items-center gap-3">
+        <span class="font-bold text-slate-900">${escapeHtml(foundPost.author_name || 'Startup Crème Editorial')}</span>
+        <span>•</span>
+        <span>${escapeHtml(foundPost.author_role || 'Principal Editor')}</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span>${foundPost.reading_time_minutes || 5} min read</span>
+        <span>•</span>
+        <time datetime="${foundPost.created_at}">${new Date(foundPost.created_at).toLocaleDateString()}</time>
+      </div>
+    </div>
+  </header>
+
+  ${foundPost.cover_image ? `
+  <figure class="ssr-cover mb-10 rounded-2xl overflow-hidden aspect-[16/9] w-full bg-slate-100 border border-slate-200 shadow-sm">
+    <img src="${escapeHtml(articleCover)}" alt="${escapeHtml(foundPost.title)}" width="1200" height="675" fetchpriority="high" loading="eager" decoding="async" class="w-full h-full object-cover" />
+  </figure>` : ''}
+
+  <section class="ssr-article-body text-slate-800 leading-relaxed font-serif text-lg space-y-6">
+    ${bodyHtml}
+  </section>
+</div>
+`;
+
             // Rich Schema.org NewsArticle JSON-LD
             const articleJsonLd = {
               '@context': 'https://schema.org',
@@ -567,6 +817,32 @@ export async function resolvePageMetadata(
 
               const sanitizedTopic = JSON.stringify(foundTopic).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
               ssrPayloadScript = `<script id="__STARTUPCREME_SSR_DATA__">window.__INITIAL_TOPIC__ = ${sanitizedTopic};</script>`;
+
+              ssrHtml = `
+<div class="ssr-topic-wrapper max-w-4xl mx-auto px-4 py-10 font-sans">
+  <nav class="ssr-breadcrumbs mb-6 text-xs font-mono text-slate-500 flex items-center gap-2">
+    <a href="${baseUrl}/" class="text-slate-600 hover:text-slate-900">Home</a>
+    <span>/</span>
+    <a href="${baseUrl}/discussion" class="text-slate-600 hover:text-slate-900">Discussion Forum</a>
+    <span>/</span>
+    <span class="text-slate-900 font-medium truncate max-w-xs">${escapeHtml(foundTopic.title)}</span>
+  </nav>
+  <header class="ssr-header mb-8">
+    <span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold uppercase bg-cyan-100 border border-cyan-300 text-cyan-900">
+      ${escapeHtml(foundTopic.category || 'General')}
+    </span>
+    <h1 class="font-serif text-3xl font-extrabold text-slate-900 mt-4 mb-3">
+      ${escapeHtml(foundTopic.title)}
+    </h1>
+    <div class="text-xs text-slate-500 mb-6 font-mono">
+      By ${escapeHtml(foundTopic.author_name || 'Community Member')} • ${new Date(foundTopic.created_at).toLocaleDateString()}
+    </div>
+  </header>
+  <div class="font-serif text-lg text-slate-800 leading-relaxed space-y-4">
+    <p>${escapeHtml(foundTopic.content || '')}</p>
+  </div>
+</div>
+`;
 
               const topicJsonLd = {
                 '@context': 'https://schema.org',
@@ -634,6 +910,57 @@ export async function resolvePageMetadata(
     }
   }
 
+  // Provide SSR HTML shells for primary hub routes & homepage
+  if (!ssrHtml) {
+    if (segments.length === 0 || (segments.length === 1 && (segments[0] === 'en-us' || segments[0] === 'en-gb' || segments[0] === 'de-de' || segments[0] === 'fr-fr' || segments[0] === 'es-es' || segments[0] === 'zh-cn' || segments[0] === 'ja-jp'))) {
+      ssrHtml = `
+<div class="ssr-home-wrapper font-sans bg-slate-50 text-slate-800">
+  <div class="relative overflow-hidden bg-slate-50 border-b border-slate-200 text-slate-900 py-12 px-4">
+    <div class="max-w-7xl mx-auto text-center max-w-3xl">
+      <h1 class="font-serif text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900 mb-4 leading-tight">
+        Where High-Value Capital Meets <br class="hidden sm:inline" />
+        <span class="text-teal-700 block sm:inline mt-1 sm:mt-0">Deep Technology Engineering</span>
+      </h1>
+      <p class="text-slate-600 text-base sm:text-lg leading-relaxed">
+        StartupCrème provides rigorous, non-sponsored editorial intelligence and institutional analysis for founders, venture capital partners, and software architects.
+      </p>
+    </div>
+  </div>
+</div>
+`;
+    } else if (segments[0] === 'events') {
+      ssrHtml = `
+<div class="ssr-events-wrapper max-w-7xl mx-auto px-4 py-12 font-sans">
+  <header class="mb-10 text-center max-w-3xl mx-auto">
+    <span class="inline-block px-3 py-1 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-mono font-bold mb-3">Global Opportunity Engine</span>
+    <h1 class="font-serif text-3xl sm:text-5xl font-extrabold text-slate-900 mb-4">Non-Dilutive Grants, Accelerators & Fellowships</h1>
+    <p class="text-slate-600 text-lg leading-relaxed">Verified institutional funding pipelines, pitch competitions, and developer hackathons for high-growth tech founders.</p>
+  </header>
+</div>
+`;
+    } else if (segments[0] === 'markets') {
+      ssrHtml = `
+<div class="ssr-markets-wrapper max-w-7xl mx-auto px-4 py-12 font-sans">
+  <header class="mb-10 text-center max-w-3xl mx-auto">
+    <span class="inline-block px-3 py-1 rounded-full bg-cyan-100 border border-cyan-300 text-cyan-900 text-xs font-mono font-bold mb-3">Macro Rates & Cloud Benchmark</span>
+    <h1 class="font-serif text-3xl sm:text-5xl font-extrabold text-slate-900 mb-4">Central Bank Policy & Cloud Pricing Intelligence</h1>
+    <p class="text-slate-600 text-lg leading-relaxed">Authoritative rate tracking for the US Federal Reserve, ECB, Bank of England, and Bank of Japan, alongside unit compute costs for AWS, GCP, Cloudflare, and Supabase.</p>
+  </header>
+</div>
+`;
+    } else if (segments[0] === 'directory') {
+      ssrHtml = `
+<div class="ssr-directory-wrapper max-w-7xl mx-auto px-4 py-12 font-sans">
+  <header class="mb-10 text-center max-w-3xl mx-auto">
+    <span class="inline-block px-3 py-1 rounded-full bg-purple-100 border border-purple-300 text-purple-900 text-xs font-mono font-bold mb-3">Scaleup Directory</span>
+    <h1 class="font-serif text-3xl sm:text-5xl font-extrabold text-slate-900 mb-4">Verified Technology & Fintech Companies</h1>
+    <p class="text-slate-600 text-lg leading-relaxed">Discover high-growth startups, funding histories, and active architectures across global ecosystems.</p>
+  </header>
+</div>
+`;
+    }
+  }
+
   // Fallback organization schema for website pages
   if (!jsonLdScript) {
     const websiteJsonLd = {
@@ -663,7 +990,9 @@ export async function resolvePageMetadata(
     section,
     tags,
     ssrPayloadScript,
-    jsonLdScript
+    jsonLdScript,
+    ssrHtml,
+    updatedAt: modifiedTime || publishedTime
   };
 }
 
@@ -752,8 +1081,18 @@ export async function injectDynamicMetaTags(
   updatedHtml = updatedHtml.replace(/<script\s+id=["']__STARTUPCREME_SSR_DATA__["'].*?<\/script>/gis, '');
 
   if (updatedHtml.includes('</head>')) {
-    return updatedHtml.replace('</head>', `${dynamicMetaBlock}\n  </head>`);
+    updatedHtml = updatedHtml.replace('</head>', `${dynamicMetaBlock}\n  </head>`);
+  } else {
+    updatedHtml = `${dynamicMetaBlock}\n${updatedHtml}`;
   }
 
-  return `${dynamicMetaBlock}\n${updatedHtml}`;
+  // Inject Pre-rendered Semantic HTML directly into <div id="root">
+  if (meta.ssrHtml) {
+    updatedHtml = updatedHtml.replace(
+      /<div id=["']root["']>\s*<\/div>/gis,
+      `<div id="root">${meta.ssrHtml}</div>`
+    );
+  }
+
+  return updatedHtml;
 }

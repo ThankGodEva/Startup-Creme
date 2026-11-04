@@ -805,6 +805,10 @@ CREATE POLICY "Admins can manage startups"
   USING (true)
   WITH CHECK (true);
 
+-- --------------------------------------------------------------------
+-- MODULE 3A: Central Bank Interest Rate Snapshots (startupcreme.rate_snapshots)
+-- Dedicated table for sovereign central bank interest rates & monetary policy
+-- --------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS startupcreme.rate_snapshots (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   snapshot_type text NOT NULL CHECK (snapshot_type IN ('central_bank', 'cloud_pricing', 'combined')),
@@ -830,6 +834,49 @@ CREATE POLICY "Service and webhooks can insert rate snapshots"
   ON startupcreme.rate_snapshots FOR INSERT
   TO anon, authenticated, service_role
   WITH CHECK (true);
+
+-- --------------------------------------------------------------------
+-- MODULE 3B: Sovereign 10-Year Inflation Rates Table (startupcreme.inflation_rates)
+-- Dedicated table for 10-year historical inflation rate trajectories (2017–2026)
+-- --------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS startupcreme.inflation_rates (
+  id text PRIMARY KEY, -- e.g., 'inf-us', 'inf-eu', 'inf-ng', 'inf-gb', 'inf-jp', 'inf-za', 'inf-ke', 'inf-in'
+  country text NOT NULL,
+  country_code text NOT NULL UNIQUE,
+  flag_emoji text NOT NULL,
+  currency text NOT NULL,
+  benchmark_index text NOT NULL,
+  statistical_agency text NOT NULL,
+  official_source_url text NOT NULL,
+  history_10y jsonb NOT NULL DEFAULT '[]'::jsonb, -- Array of { year: number, rate: number } for 2017 to 2026
+  current_rate numeric(6,2) NOT NULL,
+  ten_year_avg numeric(6,2) NOT NULL,
+  ten_year_high jsonb NOT NULL DEFAULT '{"year": 2022, "rate": 0}'::jsonb,
+  ten_year_low jsonb NOT NULL DEFAULT '{"year": 2020, "rate": 0}'::jsonb,
+  trend_label text NOT NULL DEFAULT 'Anchored' CHECK (trend_label IN ('Disinflating', 'Accelerating', 'Anchored', 'Volatile')),
+  target_band text NOT NULL,
+  notes text NULL,
+  updated_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL,
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sc_inflation_rates_country_code ON startupcreme.inflation_rates (country_code);
+
+ALTER TABLE startupcreme.inflation_rates ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public can read inflation rates" ON startupcreme.inflation_rates;
+CREATE POLICY "Public can read inflation rates"
+  ON startupcreme.inflation_rates FOR SELECT
+  USING (true);
+
+DROP POLICY IF EXISTS "Authenticated users and service role can insert or update inflation rates" ON startupcreme.inflation_rates;
+CREATE POLICY "Authenticated users and service role can insert or update inflation rates"
+  ON startupcreme.inflation_rates FOR ALL
+  TO authenticated, service_role
+  USING (true)
+  WITH CHECK (true);
+
+GRANT ALL ON TABLE startupcreme.inflation_rates TO anon, authenticated, service_role, postgres;
 
 CREATE TABLE IF NOT EXISTS startupcreme.jobs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

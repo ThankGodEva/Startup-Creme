@@ -45,6 +45,7 @@ import { generateSitemapXML, generateRobotsTxt, generateLlmsTxt } from '../lib/s
 import { store } from '../lib/store';
 import { ArticleEditorPage } from './ArticleEditorPage';
 import { PublishEventModal } from './PublishEventModal';
+import { StartupLogo } from './StartupLogo';
 
 interface AdminDashboardProps {
   currentUser: UserProfile | null;
@@ -548,23 +549,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
                     >
                       <div className="flex items-start gap-4">
-                        {s.logo_url ? (
-                          <div className="h-12 min-w-12 max-w-[130px] rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0 shadow-2xs">
-                            <img
-                              src={s.logo_url}
-                              alt={`${s.name} logo`}
-                              className="max-h-9 max-w-full w-auto h-auto object-contain"
-                              loading="lazy"
-                              onError={(e) => {
-                                (e.currentTarget as HTMLElement).style.display = 'none';
-                              }}
-                            />
-                          </div>
-                        ) : (
-                          <div className="w-12 h-12 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 font-serif font-bold text-lg shrink-0">
-                            {s.name.charAt(0).toUpperCase()}
-                          </div>
-                        )}
+                        <StartupLogo startup={s} />
                         <div>
                           <div className="flex items-center gap-2 text-xs mb-1 flex-wrap">
                             {s.is_approved ? (

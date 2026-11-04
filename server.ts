@@ -27,12 +27,13 @@ async function startServer() {
       const p = req.path.toLowerCase();
       if (
         req.originalUrl.startsWith('/api') ||
+        p.startsWith('/@') ||
         p === '/sitemap.xml' ||
         p === '/sitemap' ||
         p === '/sitemap_index.xml' ||
         p === '/robots.txt' ||
         p === '/llms.txt' ||
-        /\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot)$/i.test(p)
+        /\.(js|jsx|ts|tsx|mjs|cjs|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot|json|map|wasm)$/i.test(p)
       ) {
         return next();
       }
@@ -49,7 +50,12 @@ async function startServer() {
         const targetUrl = req.originalUrl || req.url;
         template = await injectDynamicMetaTags(template, targetUrl, host, protocol);
 
-        res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(template);
+        res.status(200).set({
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+        }).end(template);
       } catch (e) {
         vite.ssrFixStacktrace(e as Error);
         next(e);

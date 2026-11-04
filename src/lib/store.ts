@@ -14,6 +14,7 @@ import {
   StartupEntry,
   CreateStartupPayload,
   RateSnapshotPayload,
+  CountryInflationRecord,
   JobListing,
   CreateJobPayload,
   EventOpportunity,
@@ -22,6 +23,7 @@ import {
 import {
   INITIAL_STARTUPS,
   INITIAL_RATE_SNAPSHOT,
+  INITIAL_INFLATION_RATES,
   INITIAL_JOBS,
   INITIAL_EVENTS,
 } from './expansionData';
@@ -110,7 +112,7 @@ class StartupCremeStore {
   private topics: DiscussionTopic[] = [];
   private discussionComments: Record<string, DiscussionComment[]> = {};
   private postComments: Record<string, PostComment[]> = {};
-  private currentUser: UserProfile | null = null;
+  public currentUser: UserProfile | null = null;
   private topicUserVotes: Record<string, 'up' | 'down' | null> = {};
   private commentUserVotes: Record<string, 'up' | 'down' | null> = {};
   private pollUserVotes: Record<string, string> = {};
@@ -895,7 +897,8 @@ class StartupCremeStore {
 
   public getPosts(locale = 'en-us', vertical?: ContentVertical, statusOnly: PublicationStatus = 'published'): Post[] {
     return this.posts.filter(p => {
-      const matchesLocale = p.locale.toLowerCase() === locale.toLowerCase() || p.locale === 'en-us';
+      const pLocale = (p.locale || 'en-us').toLowerCase();
+      const matchesLocale = pLocale === locale.toLowerCase() || pLocale === 'en-us';
       const matchesVertical = !vertical
         ? true
         : vertical === 'founders-mindset'
@@ -2244,10 +2247,18 @@ class StartupCremeStore {
   }
 
   // --------------------------------------------------------------------
-  // MODULE 3: Macro & Cloud Rate Trackers (startupcreme.rate_snapshots)
+  // MODULE 3: Macro & Inflation Rate Trackers (startupcreme.rate_snapshots)
   // --------------------------------------------------------------------
   public getRateSnapshot(): RateSnapshotPayload {
     return this.rateSnapshot;
+  }
+
+  public getInflationRates(): CountryInflationRecord[] {
+    return (
+      (this.rateSnapshot.inflation_rates && this.rateSnapshot.inflation_rates.length > 0)
+        ? this.rateSnapshot.inflation_rates
+        : INITIAL_INFLATION_RATES
+    );
   }
 
   public async fetchRateSnapshot(): Promise<RateSnapshotPayload> {
@@ -2256,7 +2267,13 @@ class StartupCremeStore {
       if (resp.ok) {
         const snapshot = await resp.json();
         if (snapshot && Array.isArray(snapshot.central_bank_rates)) {
-          this.rateSnapshot = snapshot;
+          this.rateSnapshot = {
+            ...snapshot,
+            inflation_rates:
+              Array.isArray(snapshot.inflation_rates) && snapshot.inflation_rates.length > 0
+                ? snapshot.inflation_rates
+                : (this.rateSnapshot.inflation_rates || INITIAL_INFLATION_RATES),
+          };
           this.notify();
           return this.rateSnapshot;
         }
@@ -2281,12 +2298,123 @@ class StartupCremeStore {
           recorded_at: data.recorded_at || data.created_at,
           central_bank_rates: data.central_bank_rates,
           cloud_pricing_index: data.cloud_pricing_index || this.rateSnapshot.cloud_pricing_index,
+          inflation_rates: this.rateSnapshot.inflation_rates || INITIAL_INFLATION_RATES,
+        };
+        this.notify();
+      }
+
+      const { data: infData, error: infError } = await supabaseExecute<CountryInflationRecord[]>((client) =>
+        client.from('inflation_rates').select('*').order('country', { ascending: true })
+      );
+      if (!infError && Array.isArray(infData) && infData.length > 0) {
+        this.rateSnapshot = {
+          ...this.rateSnapshot,
+          inflation_rates: infData,
         };
         this.notify();
       }
     }
 
     return this.rateSnapshot;
+  }
+
+  public async fetchInflationRates(): Promise<CountryInflationRecord[]> {
+    try {
+      const resp = await fetch('/api/markets/inflation');
+      if (resp.ok) {
+        const body = await resp.json();
+        if (body.success && Array.isArray(body.inflation_rates)) {
+          this.rateSnapshot = {
+            ...this.rateSnapshot,
+            inflation_rates: body.inflation_rates,
+          };
+          this.notify();
+          return body.inflation_rates;
+        }
+      }
+    } catch {
+      // fallback
+    }
+
+    if (isSupabaseConfigured()) {
+      const { data, error } = await supabaseExecute<CountryInflationRecord[]>((client) =>
+        client.from('inflation_rates').select('*').order('country', { ascending: true })
+      );
+      if (!error && Array.isArray(data) && data.length > 0) {
+        this.rateSnapshot = {
+          ...this.rateSnapshot,
+          inflation_rates: data,
+        };
+        this.notify();
+        return data;
+      }
+    }
+
+    return this.getInflationRates();
+  }
+
+  public async updateInflationRecord(
+    record: Partial<CountryInflationRecord> & { id: string }
+  ): Promise<{ success: boolean; inflation_rates?: CountryInflationRecord[]; error?: string }> {
+    if (!this.currentUser || this.currentUser.role !== 'admin') {
+      return { success: false, error: 'Admin privileges required to update inflation data.' };
+    }
+
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      const resp = await fetch('/api/markets/inflation', {
+        method: 'PUT',
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(record),
+      });
+
+      if (resp.ok) {
+        const body = await resp.json();
+        if (body.success && Array.isArray(body.inflation_rates)) {
+          this.rateSnapshot = {
+            ...this.rateSnapshot,
+            inflation_rates: body.inflation_rates,
+            recorded_at: body.recorded_at || new Date().toISOString(),
+          };
+          this.notify();
+          return { success: true, inflation_rates: body.inflation_rates };
+        }
+      }
+    } catch (err: any) {
+      console.warn('Backend update failed:', err);
+    }
+
+    // Direct in-memory / Supabase fallback
+    const currentList = [...this.getInflationRates()];
+    const index = currentList.findIndex((c) => c.id === record.id || c.country_code === record.country_code);
+    if (index >= 0) {
+      const merged = { ...currentList[index], ...record };
+      // recalculate simple avg
+      const rates = merged.history_10y || [];
+      if (rates.length > 0) {
+        const sum = rates.reduce((acc, h) => acc + h.rate, 0);
+        merged.ten_year_avg = parseFloat((sum / rates.length).toFixed(2));
+        merged.current_rate = rates[rates.length - 1].rate;
+      }
+      currentList[index] = merged;
+      this.rateSnapshot = {
+        ...this.rateSnapshot,
+        inflation_rates: currentList,
+      };
+      this.notify();
+
+      if (isSupabaseConfigured()) {
+        await supabaseExecute((client) =>
+          client.from('inflation_rates').upsert(merged, { onConflict: 'country_code' })
+        ).catch(() => {});
+      }
+      return { success: true, inflation_rates: currentList };
+    }
+
+    return { success: false, error: 'Country inflation record not found.' };
   }
 
   public async triggerRateWebhookSync(): Promise<RateSnapshotPayload> {
@@ -2298,6 +2426,7 @@ class StartupCremeStore {
           source: 'n8n_scheduled_webhook_sync',
           central_bank_rates: this.rateSnapshot.central_bank_rates,
           cloud_pricing_index: this.rateSnapshot.cloud_pricing_index,
+          inflation_rates: this.rateSnapshot.inflation_rates,
         }),
       });
       if (resp.ok) {

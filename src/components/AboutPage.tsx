@@ -648,7 +648,7 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                 onClick={() => onNavigateTab?.('rates', '#central-bank-rates')}
                 className="px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 text-slate-900 border border-slate-200 text-xs font-semibold transition-colors cursor-pointer"
               >
-                View Macro & Cloud Rates
+                View Central Bank Rates
               </button>
             )}
           </div>

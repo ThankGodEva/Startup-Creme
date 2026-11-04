@@ -132,7 +132,7 @@ export const Footer: React.FC<FooterProps> = ({ currentLocale, onTabChange, onOp
                   className="hover:text-emerald-400 transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                  <span>Macro & Cloud Rate Trackers</span>
+                  <span>Macro Central Bank Rates</span>
                 </button>
               </li>
             )}

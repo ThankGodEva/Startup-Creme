@@ -401,7 +401,7 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               <Landmark className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Macro & Cloud Rates</span>
+              <span>Macro Rates</span>
             </a>
           )}
 

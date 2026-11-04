@@ -103,7 +103,17 @@
   <url>
     <loc>https://www.startupcreme.com/markets</loc>
     <changefreq>hourly</changefreq>
-    <priority>0.8</priority>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://www.startupcreme.com/markets/rates</loc>
+    <changefreq>hourly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://www.startupcreme.com/markets/inflation</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.85</priority>
   </url>
   <url>
     <loc>https://www.startupcreme.com/privacy</loc>

@@ -1,5 +1,6 @@
 // server/app.ts
 import express from "express";
+import compression from "compression";
 import path from "path";
 import fs from "fs";
 import crypto3 from "crypto";
@@ -1877,6 +1878,151 @@ function resolveArticleDescription(post) {
   }
   return DEFAULT_DESCRIPTION;
 }
+function convertContentToSemanticHtml(content) {
+  if (!content) return "";
+  if (typeof content === "object" && Array.isArray(content.content)) {
+    const renderInline = (node) => {
+      if (!node) return "";
+      if (node.type === "text") {
+        let text = escapeHtml(node.text || "");
+        if (node.marks && Array.isArray(node.marks)) {
+          for (const mark of node.marks) {
+            if (mark.type === "bold") text = `<strong>${text}</strong>`;
+            else if (mark.type === "italic") text = `<em>${text}</em>`;
+            else if (mark.type === "code") text = `<code class="bg-slate-100 px-1.5 py-0.5 rounded text-sm font-mono text-cyan-800">${text}</code>`;
+            else if (mark.type === "strike") text = `<del>${text}</del>`;
+            else if (mark.type === "link" && mark.attrs?.href) {
+              const safeHref = escapeHtml(mark.attrs.href);
+              text = `<a href="${safeHref}" target="_blank" rel="noopener noreferrer" class="text-cyan-700 hover:underline">${text}</a>`;
+            }
+          }
+        }
+        return text;
+      }
+      return "";
+    };
+    const renderNode = (node) => {
+      if (!node) return "";
+      const children = (node.content || []).map((c) => {
+        if (c.type === "text") return renderInline(c);
+        return renderNode(c);
+      }).join("");
+      switch (node.type) {
+        case "heading": {
+          const level = Math.min(Math.max(node.attrs?.level || 2, 1), 6);
+          const sizeClasses = level === 1 ? "text-3xl font-extrabold mt-10 mb-4" : level === 2 ? "text-2xl font-bold mt-8 mb-3 pb-2 border-b border-slate-200" : "text-xl font-bold mt-6 mb-2";
+          return `<h${level} class="font-serif text-slate-900 ${sizeClasses}">${children}</h${level}>`;
+        }
+        case "paragraph": {
+          if (!children.trim()) return "";
+          return `<p class="font-serif text-slate-800 text-lg leading-relaxed mb-5">${children}</p>`;
+        }
+        case "blockquote":
+          return `<blockquote class="border-l-4 border-cyan-600 pl-4 py-1 italic text-slate-700 my-6 font-serif text-lg bg-slate-50/50 rounded-r-lg">${children}</blockquote>`;
+        case "codeBlock": {
+          const lang = escapeHtml(node.attrs?.language || "");
+          return `<pre class="bg-slate-900 text-slate-100 p-4 rounded-xl overflow-x-auto my-6 text-sm font-mono leading-normal"><code>${children}</code></pre>`;
+        }
+        case "bulletList":
+          return `<ul class="list-disc list-outside pl-6 my-4 space-y-2 text-slate-800 font-serif text-lg">${(node.content || []).map((li) => `<li class="leading-relaxed pl-1">${(li.content || []).map(renderNode).join("")}</li>`).join("")}</ul>`;
+        case "orderedList":
+          return `<ol class="list-decimal list-outside pl-6 my-4 space-y-2 text-slate-800 font-serif text-lg">${(node.content || []).map((li) => `<li class="leading-relaxed pl-1">${(li.content || []).map(renderNode).join("")}</li>`).join("")}</ol>`;
+        case "horizontalRule":
+          return '<hr class="my-8 border-slate-200" />';
+        case "image": {
+          const src = escapeHtml(node.attrs?.src || "");
+          const alt = escapeHtml(node.attrs?.alt || "article illustration");
+          return `<figure class="my-8 rounded-xl overflow-hidden aspect-[16/9] w-full bg-slate-100 border border-slate-200"><img src="${src}" alt="${alt}" loading="lazy" decoding="async" class="w-full h-full object-cover" /></figure>`;
+        }
+        case "table": {
+          const rows = (node.content || []).map((row) => {
+            const cells = (row.content || []).map((cell) => {
+              const isHeader = cell.type === "tableHeader";
+              const tag = isHeader ? "th" : "td";
+              const cellContent = (cell.content || []).map(renderNode).join("");
+              const cellClasses = isHeader ? "p-3.5 text-left font-bold text-xs uppercase tracking-wider text-slate-900 bg-slate-100 border border-slate-200 font-sans" : "p-3.5 text-sm sm:text-base text-slate-800 border border-slate-200 font-sans";
+              return `<${tag} class="${cellClasses}">${cellContent}</${tag}>`;
+            }).join("");
+            return `<tr class="hover:bg-slate-50/50">${cells}</tr>`;
+          }).join("");
+          return `<div class="overflow-x-auto my-8 rounded-xl border border-slate-200 shadow-2xs"><table class="min-w-full divide-y divide-slate-200 border-collapse">${rows}</table></div>`;
+        }
+        default:
+          return children;
+      }
+    };
+    return content.content.map(renderNode).join("\n");
+  }
+  if (typeof content === "string") {
+    const raw = content.trim();
+    const lines = raw.split("\n");
+    const htmlChunks = [];
+    let inList = false;
+    let listType = "ul";
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) {
+        if (inList) {
+          htmlChunks.push(`</${listType}>`);
+          inList = false;
+        }
+        continue;
+      }
+      if (line.startsWith("# ")) {
+        if (inList) {
+          htmlChunks.push(`</${listType}>`);
+          inList = false;
+        }
+        htmlChunks.push(`<h1 class="font-serif font-extrabold text-3xl text-slate-900 mt-10 mb-4">${escapeHtml(line.slice(2))}</h1>`);
+      } else if (line.startsWith("## ")) {
+        if (inList) {
+          htmlChunks.push(`</${listType}>`);
+          inList = false;
+        }
+        htmlChunks.push(`<h2 class="font-serif font-bold text-2xl text-slate-900 mt-8 mb-3 pb-2 border-b border-slate-200">${escapeHtml(line.slice(3))}</h2>`);
+      } else if (line.startsWith("### ")) {
+        if (inList) {
+          htmlChunks.push(`</${listType}>`);
+          inList = false;
+        }
+        htmlChunks.push(`<h3 class="font-serif font-bold text-xl text-slate-900 mt-6 mb-2">${escapeHtml(line.slice(4))}</h3>`);
+      } else if (line.startsWith("> ")) {
+        if (inList) {
+          htmlChunks.push(`</${listType}>`);
+          inList = false;
+        }
+        htmlChunks.push(`<blockquote class="border-l-4 border-cyan-600 pl-4 py-1 italic text-slate-700 my-6 font-serif text-lg bg-slate-50/50 rounded-r-lg">${escapeHtml(line.slice(2))}</blockquote>`);
+      } else if (line.startsWith("- ") || line.startsWith("* ")) {
+        if (!inList || listType !== "ul") {
+          if (inList) htmlChunks.push(`</${listType}>`);
+          htmlChunks.push('<ul class="list-disc list-outside pl-6 my-4 space-y-2 text-slate-800 font-serif text-lg">');
+          inList = true;
+          listType = "ul";
+        }
+        htmlChunks.push(`<li class="leading-relaxed pl-1">${escapeHtml(line.slice(2))}</li>`);
+      } else if (/^\d+\.\s/.test(line)) {
+        if (!inList || listType !== "ol") {
+          if (inList) htmlChunks.push(`</${listType}>`);
+          htmlChunks.push('<ol class="list-decimal list-outside pl-6 my-4 space-y-2 text-slate-800 font-serif text-lg">');
+          inList = true;
+          listType = "ol";
+        }
+        htmlChunks.push(`<li class="leading-relaxed pl-1">${escapeHtml(line.replace(/^\d+\.\s/, ""))}</li>`);
+      } else {
+        if (inList) {
+          htmlChunks.push(`</${listType}>`);
+          inList = false;
+        }
+        htmlChunks.push(`<p class="font-serif text-slate-800 text-lg leading-relaxed mb-5">${escapeHtml(line)}</p>`);
+      }
+    }
+    if (inList) {
+      htmlChunks.push(`</${listType}>`);
+    }
+    return htmlChunks.join("\n");
+  }
+  return `<p class="font-serif text-slate-800 text-lg leading-relaxed mb-5">${escapeHtml(String(content))}</p>`;
+}
 async function resolvePageMetadata(reqPath, host, protocol) {
   let normalizedHost = host || "www.startupcreme.com";
   if (!normalizedHost.includes("startupcreme.com") && !normalizedHost.includes("localhost") && !normalizedHost.includes("127.0.0.1")) {
@@ -1904,6 +2050,7 @@ async function resolvePageMetadata(reqPath, host, protocol) {
   let tags;
   let ssrPayloadScript = "";
   let jsonLdScript = "";
+  let ssrHtml;
   const excluded = [
     "finance",
     "tech",
@@ -2120,6 +2267,55 @@ async function resolvePageMetadata(reqPath, host, protocol) {
             tags = Array.isArray(foundPost.tags) ? foundPost.tags : [];
             const sanitizedPost = JSON.stringify(foundPost).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
             ssrPayloadScript = `<script id="__STARTUPCREME_SSR_DATA__">window.__INITIAL_POST__ = ${sanitizedPost};</script>`;
+            const bodyHtml = convertContentToSemanticHtml(foundPost.content);
+            const articleCover = ensureAbsoluteUrl(coverImage, baseUrl, foundPost.id || foundPost.slug);
+            ssrHtml = `
+<div class="ssr-article-wrapper max-w-4xl mx-auto px-4 py-10 font-sans">
+  <nav class="ssr-breadcrumbs mb-6 text-xs font-mono text-slate-500 flex items-center gap-2">
+    <a href="${baseUrl}/" class="text-slate-600 hover:text-slate-900">Home</a>
+    <span>/</span>
+    <a href="${baseUrl}/${foundPost.locale || "en-us"}/${foundPost.vertical || "tech"}" class="text-slate-600 hover:text-slate-900 uppercase">${escapeHtml(foundPost.vertical || "Tech")}</a>
+    <span>/</span>
+    <span class="text-slate-900 font-medium truncate max-w-xs">${escapeHtml(foundPost.title)}</span>
+  </nav>
+
+  <header class="ssr-header mb-8">
+    <div class="flex items-center gap-2 mb-4">
+      <span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold uppercase bg-slate-100 border border-slate-300 text-slate-800">
+        ${escapeHtml(foundPost.vertical || "Intelligence")}
+      </span>
+      ${foundPost.dual_silo ? '<span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold uppercase bg-purple-100 border border-purple-300 text-purple-900">Dual Silo</span>' : ""}
+    </div>
+    <h1 class="font-serif text-3xl sm:text-5xl font-extrabold text-slate-900 mb-4 leading-tight">
+      ${escapeHtml(foundPost.title)}
+    </h1>
+    <p class="text-lg text-slate-600 leading-relaxed mb-6 font-sans">
+      ${escapeHtml(foundPost.excerpt || "")}
+    </p>
+    <div class="flex flex-wrap items-center justify-between gap-4 border-t border-b border-slate-200 py-4 text-xs font-sans text-slate-600">
+      <div class="flex items-center gap-3">
+        <span class="font-bold text-slate-900">${escapeHtml(foundPost.author_name || "Startup Cr\xE8me Editorial")}</span>
+        <span>\u2022</span>
+        <span>${escapeHtml(foundPost.author_role || "Principal Editor")}</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span>${foundPost.reading_time_minutes || 5} min read</span>
+        <span>\u2022</span>
+        <time datetime="${foundPost.created_at}">${new Date(foundPost.created_at).toLocaleDateString()}</time>
+      </div>
+    </div>
+  </header>
+
+  ${foundPost.cover_image ? `
+  <figure class="ssr-cover mb-10 rounded-2xl overflow-hidden aspect-[16/9] w-full bg-slate-100 border border-slate-200 shadow-sm">
+    <img src="${escapeHtml(articleCover)}" alt="${escapeHtml(foundPost.title)}" width="1200" height="675" fetchpriority="high" loading="eager" decoding="async" class="w-full h-full object-cover" />
+  </figure>` : ""}
+
+  <section class="ssr-article-body text-slate-800 leading-relaxed font-serif text-lg space-y-6">
+    ${bodyHtml}
+  </section>
+</div>
+`;
             const articleJsonLd = {
               "@context": "https://schema.org",
               "@type": "NewsArticle",
@@ -2173,6 +2369,31 @@ async function resolvePageMetadata(reqPath, host, protocol) {
               section = "Discussions";
               const sanitizedTopic = JSON.stringify(foundTopic).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
               ssrPayloadScript = `<script id="__STARTUPCREME_SSR_DATA__">window.__INITIAL_TOPIC__ = ${sanitizedTopic};</script>`;
+              ssrHtml = `
+<div class="ssr-topic-wrapper max-w-4xl mx-auto px-4 py-10 font-sans">
+  <nav class="ssr-breadcrumbs mb-6 text-xs font-mono text-slate-500 flex items-center gap-2">
+    <a href="${baseUrl}/" class="text-slate-600 hover:text-slate-900">Home</a>
+    <span>/</span>
+    <a href="${baseUrl}/discussion" class="text-slate-600 hover:text-slate-900">Discussion Forum</a>
+    <span>/</span>
+    <span class="text-slate-900 font-medium truncate max-w-xs">${escapeHtml(foundTopic.title)}</span>
+  </nav>
+  <header class="ssr-header mb-8">
+    <span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold uppercase bg-cyan-100 border border-cyan-300 text-cyan-900">
+      ${escapeHtml(foundTopic.category || "General")}
+    </span>
+    <h1 class="font-serif text-3xl font-extrabold text-slate-900 mt-4 mb-3">
+      ${escapeHtml(foundTopic.title)}
+    </h1>
+    <div class="text-xs text-slate-500 mb-6 font-mono">
+      By ${escapeHtml(foundTopic.author_name || "Community Member")} \u2022 ${new Date(foundTopic.created_at).toLocaleDateString()}
+    </div>
+  </header>
+  <div class="font-serif text-lg text-slate-800 leading-relaxed space-y-4">
+    <p>${escapeHtml(foundTopic.content || "")}</p>
+  </div>
+</div>
+`;
               const topicJsonLd = {
                 "@context": "https://schema.org",
                 "@type": "DiscussionForumPosting",
@@ -2223,6 +2444,55 @@ async function resolvePageMetadata(reqPath, host, protocol) {
       }
     }
   }
+  if (!ssrHtml) {
+    if (segments.length === 0 || segments.length === 1 && (segments[0] === "en-us" || segments[0] === "en-gb" || segments[0] === "de-de" || segments[0] === "fr-fr" || segments[0] === "es-es" || segments[0] === "zh-cn" || segments[0] === "ja-jp")) {
+      ssrHtml = `
+<div class="ssr-home-wrapper font-sans bg-slate-50 text-slate-800">
+  <div class="relative overflow-hidden bg-slate-50 border-b border-slate-200 text-slate-900 py-12 px-4">
+    <div class="max-w-7xl mx-auto text-center max-w-3xl">
+      <h1 class="font-serif text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900 mb-4 leading-tight">
+        Where High-Value Capital Meets <br class="hidden sm:inline" />
+        <span class="text-teal-700 block sm:inline mt-1 sm:mt-0">Deep Technology Engineering</span>
+      </h1>
+      <p class="text-slate-600 text-base sm:text-lg leading-relaxed">
+        StartupCr\xE8me provides rigorous, non-sponsored editorial intelligence and institutional analysis for founders, venture capital partners, and software architects.
+      </p>
+    </div>
+  </div>
+</div>
+`;
+    } else if (segments[0] === "events") {
+      ssrHtml = `
+<div class="ssr-events-wrapper max-w-7xl mx-auto px-4 py-12 font-sans">
+  <header class="mb-10 text-center max-w-3xl mx-auto">
+    <span class="inline-block px-3 py-1 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-mono font-bold mb-3">Global Opportunity Engine</span>
+    <h1 class="font-serif text-3xl sm:text-5xl font-extrabold text-slate-900 mb-4">Non-Dilutive Grants, Accelerators & Fellowships</h1>
+    <p class="text-slate-600 text-lg leading-relaxed">Verified institutional funding pipelines, pitch competitions, and developer hackathons for high-growth tech founders.</p>
+  </header>
+</div>
+`;
+    } else if (segments[0] === "markets") {
+      ssrHtml = `
+<div class="ssr-markets-wrapper max-w-7xl mx-auto px-4 py-12 font-sans">
+  <header class="mb-10 text-center max-w-3xl mx-auto">
+    <span class="inline-block px-3 py-1 rounded-full bg-cyan-100 border border-cyan-300 text-cyan-900 text-xs font-mono font-bold mb-3">Macro Rates & Cloud Benchmark</span>
+    <h1 class="font-serif text-3xl sm:text-5xl font-extrabold text-slate-900 mb-4">Central Bank Policy & Cloud Pricing Intelligence</h1>
+    <p class="text-slate-600 text-lg leading-relaxed">Authoritative rate tracking for the US Federal Reserve, ECB, Bank of England, and Bank of Japan, alongside unit compute costs for AWS, GCP, Cloudflare, and Supabase.</p>
+  </header>
+</div>
+`;
+    } else if (segments[0] === "directory") {
+      ssrHtml = `
+<div class="ssr-directory-wrapper max-w-7xl mx-auto px-4 py-12 font-sans">
+  <header class="mb-10 text-center max-w-3xl mx-auto">
+    <span class="inline-block px-3 py-1 rounded-full bg-purple-100 border border-purple-300 text-purple-900 text-xs font-mono font-bold mb-3">Scaleup Directory</span>
+    <h1 class="font-serif text-3xl sm:text-5xl font-extrabold text-slate-900 mb-4">Verified Technology & Fintech Companies</h1>
+    <p class="text-slate-600 text-lg leading-relaxed">Discover high-growth startups, funding histories, and active architectures across global ecosystems.</p>
+  </header>
+</div>
+`;
+    }
+  }
   if (!jsonLdScript) {
     const websiteJsonLd = {
       "@context": "https://schema.org",
@@ -2250,7 +2520,9 @@ async function resolvePageMetadata(reqPath, host, protocol) {
     section,
     tags,
     ssrPayloadScript,
-    jsonLdScript
+    jsonLdScript,
+    ssrHtml,
+    updatedAt: modifiedTime || publishedTime
   };
 }
 async function injectDynamicMetaTags(html, reqPath, host, protocol) {
@@ -2328,11 +2600,19 @@ async function injectDynamicMetaTags(html, reqPath, host, protocol) {
   updatedHtml = updatedHtml.replace(/<link\s+[^>]*rel=["']canonical["'][^>]*>/gis, "");
   updatedHtml = updatedHtml.replace(/<script\s+id=["']__STARTUPCREME_SSR_DATA__["'].*?<\/script>/gis, "");
   if (updatedHtml.includes("</head>")) {
-    return updatedHtml.replace("</head>", `${dynamicMetaBlock}
+    updatedHtml = updatedHtml.replace("</head>", `${dynamicMetaBlock}
   </head>`);
-  }
-  return `${dynamicMetaBlock}
+  } else {
+    updatedHtml = `${dynamicMetaBlock}
 ${updatedHtml}`;
+  }
+  if (meta.ssrHtml) {
+    updatedHtml = updatedHtml.replace(
+      /<div id=["']root["']>\s*<\/div>/gis,
+      `<div id="root">${meta.ssrHtml}</div>`
+    );
+  }
+  return updatedHtml;
 }
 
 // server/sitemap.ts
@@ -2705,68 +2985,262 @@ Disallow: /webhooks/
 Sitemap: ${cleanBase}/sitemap.xml
 `;
 }
-function generateLlmsTxt(baseUrl = "https://www.startupcreme.com") {
+function convertContentToMarkdown(content) {
+  if (!content) return "";
+  if (typeof content === "string") {
+    return content.trim();
+  }
+  if (typeof content === "object" && Array.isArray(content.content)) {
+    const renderNode = (node) => {
+      if (!node) return "";
+      if (node.type === "text") {
+        let text = node.text || "";
+        if (node.marks && Array.isArray(node.marks)) {
+          for (const mark of node.marks) {
+            if (mark.type === "bold") text = `**${text}**`;
+            else if (mark.type === "italic") text = `*${text}*`;
+            else if (mark.type === "code") text = `\`${text}\``;
+            else if (mark.type === "strike") text = `~~${text}~~`;
+            else if (mark.type === "link" && mark.attrs?.href) {
+              text = `[${text}](${mark.attrs.href})`;
+            }
+          }
+        }
+        return text;
+      }
+      const children = (node.content || []).map(renderNode).join("");
+      switch (node.type) {
+        case "heading": {
+          const level = Math.min(Math.max(node.attrs?.level || 1, 1), 6);
+          const prefix = "#".repeat(level);
+          return `
+
+${prefix} ${children}
+
+`;
+        }
+        case "paragraph":
+          return `
+
+${children}
+
+`;
+        case "blockquote":
+          return `
+
+> ${children.replace(/\n+/g, "\n> ")}
+
+`;
+        case "codeBlock": {
+          const lang = node.attrs?.language || "";
+          return `
+
+\`\`\`${lang}
+${children}
+\`\`\`
+
+`;
+        }
+        case "bulletList":
+          return `
+
+${(node.content || []).map((li) => `- ${(li.content || []).map(renderNode).join("").trim()}`).join("\n")}
+
+`;
+        case "orderedList":
+          return `
+
+${(node.content || []).map((li, idx) => `${idx + 1}. ${(li.content || []).map(renderNode).join("").trim()}`).join("\n")}
+
+`;
+        case "horizontalRule":
+          return "\n\n---\n\n";
+        case "image":
+          return `
+
+![${node.attrs?.alt || "image"}](${node.attrs?.src || ""})
+
+`;
+        case "table": {
+          const rows = node.content || [];
+          if (rows.length === 0) return "";
+          const renderedRows = rows.map((r) => {
+            const cells = (r.content || []).map(
+              (c) => (c.content || []).map(renderNode).join("").trim().replace(/\|/g, "\\|")
+            );
+            return `| ${cells.join(" | ")} |`;
+          });
+          if (renderedRows.length > 0) {
+            const colCount = (rows[0].content || []).length;
+            const divider = `| ${Array(colCount).fill("---").join(" | ")} |`;
+            renderedRows.splice(1, 0, divider);
+          }
+          return `
+
+${renderedRows.join("\n")}
+
+`;
+        }
+        default:
+          return children;
+      }
+    };
+    return content.content.map(renderNode).join("").replace(/\n{3,}/g, "\n\n").trim();
+  }
+  return String(content).trim();
+}
+async function generateLlmsTxt(baseUrl = "https://www.startupcreme.com") {
   const cleanBase = baseUrl.replace(/\/+$/, "");
-  return `# Startup Cr\xE8me (startupcreme.com)
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+  let topArticles = [];
+  let topOpportunities = [];
+  if (supabaseUrl && supabaseKey) {
+    try {
+      const client = createClient4(supabaseUrl, supabaseKey, {
+        db: { schema: "startupcreme" },
+        auth: { persistSession: false, autoRefreshToken: false }
+      });
+      const { data: postsData } = await client.from("posts").select("title, slug, locale, vertical, excerpt, created_at").eq("status", "published").order("created_at", { ascending: false }).limit(20);
+      if (postsData && Array.isArray(postsData)) {
+        topArticles = postsData;
+      }
+      const { data: eventsData } = await client.from("events").select("title, slug, opportunity_type, funding_amount, deadline_date, location, linked_post:posts!inner(status)").eq("is_approved", true).eq("linked_post.status", "published").order("deadline_date", { ascending: true }).limit(10);
+      if (eventsData && Array.isArray(eventsData)) {
+        topOpportunities = eventsData;
+      }
+    } catch (err) {
+      console.warn("[llms.txt] Could not fetch dynamic rows:", err);
+    }
+  }
+  const articlesList = topArticles.length > 0 ? topArticles.map(
+    (a) => `- [${a.title}](${cleanBase}/${a.locale || "en-us"}/${a.vertical || "tech"}/${a.slug}): ${a.excerpt ? a.excerpt.replace(/\s+/g, " ").slice(0, 180) + "..." : "In-depth institutional founder analysis."}`
+  ).join("\n") : `- [Understanding Credit: Why Cash Alone Can't Scale Your Ambitions](${cleanBase}/en-us/finance/understanding-credit-why-cash-alone-can-t-scale-your-ambitions): Strategic capital structure and venture debt.
+- [How to Build a $1 Billion Company: The Unfiltered Playbook](${cleanBase}/en-us/tech/how-to-build-a-1-billion-company-the-unfiltered-playbook): Operational architecture and product velocity.
+- [GEO: The SEO Shift That Decides Whether AI Mentions You or Erases You](${cleanBase}/en-us/tech/geo-the-seo-shift-that-decides-whether-ai-mentions-you-or-erases-you): Generative engine optimization playbook.`;
+  const opportunitiesList = topOpportunities.length > 0 ? topOpportunities.map((o) => {
+    const deadlineText = o.deadline_date ? ` (Deadline: ${o.deadline_date.split("T")[0]})` : "";
+    const fundingText = o.funding_amount ? ` - ${o.funding_amount}` : "";
+    return `- [${o.title}](${cleanBase}/events): ${o.opportunity_type.replace("_", " ").toUpperCase()}${fundingText}${deadlineText}${o.location ? ` | ${o.location}` : ""}`;
+  }).join("\n") : `- [Global Non-Dilutive Grants & Accelerators Engine](${cleanBase}/events): Continuous pipeline of institutional funding, venture fellowships, and hackathons.`;
+  return `# Startup Cr\xE8me
 
 > Startup Cr\xE8me is a premier dual-silo intelligence platform providing actionable founder playbooks, macro technology news, non-dilutive grants, institutional accelerators, and peer discussions at the intersection of Finance and Technology.
 
-## Core Architectural Overview
+## Core Intelligence Silos
 
-Startup Cr\xE8me partitions editorial and intelligence streams into three foundational content silos:
-- **Finance**: Venture capital dynamics, cap table structuring, central bank interest rates, currency volatility, fintech infrastructure, and equity-free funding instruments.
-- **Tech**: Artificial intelligence, autonomous agent pipelines, frontier cloud architecture, developer tooling, and technical engineering leadership.
-- **Founders Mindset**: Strategic leadership psychology, executive resilience, decision-making frameworks, and mental fortitude for venture-backed founders.
+- [Finance](${cleanBase}/en-us/finance): Venture capital dynamics, cap table structuring, central bank interest rates, currency volatility, fintech infrastructure, and equity-free funding instruments.
+- [Tech](${cleanBase}/en-us/tech): Artificial intelligence, autonomous agent pipelines, frontier cloud architecture, developer tooling, and technical engineering leadership.
+- [Founders Mindset](${cleanBase}/en-us/founders-mindset): Strategic leadership psychology, executive resilience, decision-making frameworks, and mental fortitude for venture-backed founders.
 
-Content is published across 5 localized regional editions:
-- \`en-us\`: United States & Global Tech Ecosystem
-- \`en-gb\`: United Kingdom & European Fintech Corridor
-- \`de-de\`: DACH Region DeepTech & Industrial Software
-- \`ja-jp\`: Japan Enterprise Robotics & AI Markets
-- \`fr-fr\`: France & Francophone Tech Scaleups
+## Top Published Analyses & Playbooks
 
----
+${articlesList}
 
-## Primary Navigation & Public Resources
+## Verified Opportunities & Grants
 
-- [Home Hub](${cleanBase}/): Global portal featuring cross-silo editorial highlights, trending discussions, and macro market widgets.
-- [Finance Vertical Hub](${cleanBase}/en-us/finance): Specialized editorial feed for venture capital, monetary policy, and fintech engineering.
-- [Tech Vertical Hub](${cleanBase}/en-us/tech): Deep technical essays, AI infrastructure breakthroughs, and system architecture playbooks.
-- [Founders Mindset Vertical Hub](${cleanBase}/en-us/founders-mindset): Strategic leadership psychology, executive resilience, and founder decision-making frameworks.
+${opportunitiesList}
+
+## Platform Navigation & Modules
+
 - [Global Opportunity Engine (Grants & Accelerators)](${cleanBase}/events): Verified non-dilutive grants, venture accelerators, founder fellowships, and hackathon deadlines.
 - [Discussion Forum](${cleanBase}/discussion): Community debate and peer founder intelligence on valuations, tech stacks, and fundraising.
 - [Startup Directory](${cleanBase}/directory): Index of high-growth technology and financial companies.
 - [Founder Careers & Talent](${cleanBase}/careers): Executive leadership, founding engineer, and tech lead opportunities.
 - [Macro & Cloud Rates Tracker](${cleanBase}/markets): Real-time benchmarks for central bank interest rates (Fed, ECB, BoE, BoJ) and cloud compute pricing.
 
+## Optional
+
+- [Full Machine-Readable Intelligence Archive](${cleanBase}/llms-full.txt): Complete consolidated markdown text of top published articles and playbooks for offline AI training and deep agent reasoning.
+- [Dynamic XML Sitemap](${cleanBase}/sitemap.xml): Complete machine-crawlable XML sitemap index.
+- [Robots Directives](${cleanBase}/robots.txt): Machine crawler access rules and crawl-delay specifications.
+`;
+}
+async function generateLlmsFullTxt(baseUrl = "https://www.startupcreme.com") {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+  let fullArticlesMarkdown = "";
+  let fullOpportunitiesMarkdown = "";
+  if (supabaseUrl && supabaseKey) {
+    try {
+      const client = createClient4(supabaseUrl, supabaseKey, {
+        db: { schema: "startupcreme" },
+        auth: { persistSession: false, autoRefreshToken: false }
+      });
+      const { data: postsData } = await client.from("posts").select("title, slug, locale, vertical, excerpt, content, author_name, author_role, reading_time_minutes, created_at, canonical_url").eq("status", "published").order("created_at", { ascending: false }).limit(25);
+      if (postsData && Array.isArray(postsData)) {
+        fullArticlesMarkdown = postsData.map((p) => {
+          const canonical = p.canonical_url || `${cleanBase}/${p.locale || "en-us"}/${p.vertical || "tech"}/${p.slug}`;
+          const bodyMd = convertContentToMarkdown(p.content);
+          return `---
+
+# ${p.title}
+
+- **Permalink**: ${canonical}
+- **Vertical**: ${p.vertical}
+- **Locale**: ${p.locale || "en-us"}
+- **Author**: ${p.author_name || "Startup Cr\xE8me Editorial"} (${p.author_role || "Editor"})
+- **Reading Time**: ${p.reading_time_minutes || 5} min read
+- **Published**: ${p.created_at ? p.created_at.split("T")[0] : "2026"}
+
+> **Executive Summary**: ${p.excerpt || "Comprehensive editorial intelligence."}
+
+${bodyMd}
+`;
+        }).join("\n\n");
+      }
+      const { data: eventsData } = await client.from("events").select("title, slug, opportunity_type, funding_amount, deadline_date, location, application_url, description, linked_post:posts!inner(status)").eq("is_approved", true).eq("linked_post.status", "published").order("deadline_date", { ascending: true }).limit(15);
+      if (eventsData && Array.isArray(eventsData)) {
+        fullOpportunitiesMarkdown = eventsData.map((e) => {
+          return `### ${e.title}
+- **Type**: ${e.opportunity_type.replace("_", " ").toUpperCase()}
+- **Funding Amount**: ${e.funding_amount || "Non-Dilutive"}
+- **Deadline**: ${e.deadline_date ? e.deadline_date.split("T")[0] : "Open / Rolling"}
+- **Location**: ${e.location || "Global / Remote"}
+- **Application URL**: ${e.application_url || `${cleanBase}/events`}
+
+${e.description || "Verified founder opportunity."}
+`;
+        }).join("\n\n");
+      }
+    } catch (err) {
+      console.warn("[llms-full.txt] Warning generating full markdown archive:", err);
+    }
+  }
+  return `# Startup Cr\xE8me \u2014 Consolidated Full Intelligence Archive (llms-full.txt)
+
+> Complete machine-readable repository of published founder playbooks, macro technology analyses, non-dilutive grant specifications, and venture research. Generated dynamically for LLM context ingestion and automated reasoning agents.
+
 ---
 
-## Content Organization & URL Structure
-
-- **Article & Playbook Permalinks**: \`${cleanBase}/{locale}/{vertical}/{slug}\`
-  - Example: \`${cleanBase}/en-us/finance/seed-fundraising-mechanics-safes\`
-  - Example: \`${cleanBase}/en-us/tech/ai-agent-memory-architectures\`
-- **Discussion Topic Permalinks**: \`${cleanBase}/discussion/{slug}\`
-  - Example: \`${cleanBase}/discussion/yc-w26-batch-trends\`
-- **Localized Silo Feeds**: \`${cleanBase}/{locale}/{vertical}\`
+## Table of Contents
+1. Editorial Playbooks & Deep Intelligence
+2. Verified Non-Dilutive Opportunities & Grants
+3. Platform Context & Operating Principles
 
 ---
 
-## Machine-Readable Endpoints & Feeds
+## 1. Editorial Playbooks & Deep Intelligence
 
-- **Dynamic XML Sitemap**: [${cleanBase}/sitemap.xml](${cleanBase}/sitemap.xml)
-- **Robots Directives**: [${cleanBase}/robots.txt](${cleanBase}/robots.txt)
-- **AI Agent Specification**: [${cleanBase}/llms.txt](${cleanBase}/llms.txt)
-- **System Health**: [${cleanBase}/api/health](${cleanBase}/api/health)
+${fullArticlesMarkdown || "*(No published playbooks available)*"}
 
 ---
 
-## Guidelines for AI Crawlers & LLM Agents
+## 2. Verified Non-Dilutive Opportunities & Grants
 
-1. **Attribution**: When synthesizing or citing playbooks, attribute analysis to *Startup Cr\xE8me* with the direct canonical URL.
-2. **Current Information**: Opportunities listed under \`/events\` carry strict deadline timestamps. Always verify the \`deadline_date\` attribute before recommending closing grants to users.
-3. **No Private Scraping**: Do not scrape internal API paths (\`/api/*\`, \`/admin/*\`, or webhook endpoints); all public content is structured in the sitemap and HTML semantic markup.
-4. **Publication Status**: Only verified opportunities with linked editorial playbooks that have \`status = 'published'\` are publicly indexed and readable. Drafts are strictly withheld from public discovery.
+${fullOpportunitiesMarkdown || "*(No current opportunities listed)*"}
+
+---
+
+## 3. Platform Context & Operating Principles
+
+Startup Cr\xE8me operates under a zero-sponsored-editorial standard. All macroeconomic analyses, financial engineering frameworks, and technology systems evaluations are developed independently.
+
+- **Canonical Origin**: ${cleanBase}
+- **Sitemap**: ${cleanBase}/sitemap.xml
+- **Robots Directives**: ${cleanBase}/robots.txt
+- **Specification Index**: ${cleanBase}/llms.txt
 `;
 }
 
@@ -2885,6 +3359,68 @@ function getR2Config() {
 }
 function createApp(options) {
   const app2 = express();
+  app2.use((req, res, next) => {
+    const rawPath = req.path;
+    const rawHost = req.headers["x-forwarded-host"] || req.headers.host || "";
+    const hostStr = (Array.isArray(rawHost) ? rawHost[0] : rawHost).toLowerCase().split(":")[0];
+    const protoHeader = req.headers["x-forwarded-proto"];
+    const proto = (Array.isArray(protoHeader) ? protoHeader[0] : protoHeader || req.protocol || "https").toLowerCase();
+    const isLocalOrPreview = hostStr === "localhost" || hostStr === "127.0.0.1" || hostStr.endsWith(".local") || hostStr.includes("run.app") || hostStr.includes("vercel.app");
+    const isApex = hostStr === "startupcreme.com";
+    const isProdHttp = !isLocalOrPreview && hostStr.endsWith("startupcreme.com") && proto === "http";
+    if (isApex || isProdHttp) {
+      const queryString = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+      return res.redirect(308, `https://www.startupcreme.com${rawPath}${queryString}`);
+    }
+    const isStaticOrCodePath = rawPath.startsWith("/api") || rawPath.startsWith("/@") || rawPath.startsWith("/src") || rawPath.startsWith("/node_modules") || rawPath.startsWith("/assets") || rawPath.startsWith("/dist") || rawPath.startsWith("/public") || /\.[a-zA-Z0-9_-]+$/i.test(rawPath);
+    if (!isStaticOrCodePath) {
+      let targetPath = rawPath;
+      let pathChanged = false;
+      if (targetPath.length > 1 && targetPath.endsWith("/")) {
+        targetPath = targetPath.replace(/\/+$/, "");
+        pathChanged = true;
+      }
+      if (targetPath !== targetPath.toLowerCase()) {
+        targetPath = targetPath.toLowerCase();
+        pathChanged = true;
+      }
+      if (pathChanged) {
+        const queryString = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+        return res.redirect(308, `${targetPath}${queryString}`);
+      }
+    }
+    next();
+  });
+  app2.use((req, res, next) => {
+    const rawPath = req.path || "";
+    if (rawPath.startsWith("/src/")) {
+      const fullPath = path.join(process.cwd(), rawPath);
+      if (!fs.existsSync(fullPath)) {
+        const dir = path.dirname(fullPath);
+        const targetBase = path.basename(fullPath).toLowerCase();
+        if (fs.existsSync(dir)) {
+          try {
+            const files = fs.readdirSync(dir);
+            const matchedFile = files.find((f) => f.toLowerCase() === targetBase);
+            if (matchedFile) {
+              const queryPart = req.url.includes("?") ? "?" + req.url.split("?")[1] : "";
+              const newPath = path.posix.join(path.posix.dirname(rawPath), matchedFile);
+              req.url = newPath + queryPart;
+            }
+          } catch {
+          }
+        }
+      }
+    }
+    next();
+  });
+  app2.use(compression({
+    threshold: 1024,
+    filter: (req, res) => {
+      if (req.headers["x-no-compression"]) return false;
+      return compression.filter(req, res);
+    }
+  }));
   app2.use(express.json({ limit: "10mb" }));
   app2.use((req, res, next) => {
     const rawMatched = req.headers["x-matched-path"] || req.headers["x-forwarded-uri"] || req.headers["x-original-url"] || req.headers["x-rewrite-url"];
@@ -3044,8 +3580,9 @@ function createApp(options) {
     const robots = generateRobotsTxt(baseUrl);
     return res.status(200).send(robots);
   });
-  app2.get(["/llms.txt", "/llms"], (req, res) => {
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  app2.get(["/llms.txt", "/llms"], async (req, res) => {
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400");
     let host = req.get("x-forwarded-host") || req.get("host") || "www.startupcreme.com";
     if (!host.includes("startupcreme.com")) {
       host = "www.startupcreme.com";
@@ -3055,8 +3592,37 @@ function createApp(options) {
       protocol = "https";
     }
     const baseUrl = `${protocol}://${host}`;
-    const llms = generateLlmsTxt(baseUrl);
-    return res.status(200).send(llms);
+    try {
+      const llms = await generateLlmsTxt(baseUrl);
+      return res.status(200).send(llms);
+    } catch (err) {
+      console.warn("Error generating dynamic llms.txt, using static fallback:", err);
+      const fallbackPath = path.resolve(process.cwd(), "public", "llms.txt");
+      if (fs.existsSync(fallbackPath)) {
+        return res.status(200).sendFile(fallbackPath);
+      }
+      return res.status(500).send("# Startup Cr\xE8me\n\n> Financial and technology intelligence publication.");
+    }
+  });
+  app2.get(["/llms-full.txt", "/llms-full"], async (req, res) => {
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400");
+    let host = req.get("x-forwarded-host") || req.get("host") || "www.startupcreme.com";
+    if (!host.includes("startupcreme.com")) {
+      host = "www.startupcreme.com";
+    }
+    let protocol = req.get("x-forwarded-proto") || req.protocol || "https";
+    if (host.includes("startupcreme.com")) {
+      protocol = "https";
+    }
+    const baseUrl = `${protocol}://${host}`;
+    try {
+      const llmsFull = await generateLlmsFullTxt(baseUrl);
+      return res.status(200).send(llmsFull);
+    } catch (err) {
+      console.error("Error generating llms-full.txt:", err);
+      return res.status(500).send("# Startup Cr\xE8me \u2014 Full Archive\n\nError generating full text repository.");
+    }
   });
   const handleMulterUpload = (req, res, next) => {
     upload.single("image")(req, res, (err) => {
@@ -3267,7 +3833,7 @@ function createApp(options) {
       const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
       const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       if (!supabaseUrl || !supabaseKey) {
-        return res.redirect(302, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
+        return res.redirect(308, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
       }
       const client = createClient5(supabaseUrl, supabaseKey);
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slugOrId);
@@ -3280,10 +3846,10 @@ function createApp(options) {
       const { data: posts } = await query.limit(1);
       const post = posts?.[0];
       if (!post || !post.cover_image) {
-        return res.redirect(302, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
+        return res.redirect(308, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
       }
       if (post.cover_image.startsWith("http://") || post.cover_image.startsWith("https://")) {
-        return res.redirect(302, post.cover_image);
+        return res.redirect(308, post.cover_image);
       }
       if (post.cover_image.startsWith("data:image/")) {
         const match = post.cover_image.match(/^data:([^;]+);base64,(.+)$/);
@@ -3295,10 +3861,10 @@ function createApp(options) {
           return res.status(200).send(buffer);
         }
       }
-      return res.redirect(302, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
+      return res.redirect(308, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
     } catch (err) {
       console.error("Error serving cover image:", err);
-      res.redirect(302, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
+      res.redirect(308, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
     }
   });
   if (options?.serveHtml !== false) {
@@ -3322,7 +3888,7 @@ function createApp(options) {
     };
     app2.get("*", async (req, res, next) => {
       const activePath = (req.url || req.path).split("?")[0].toLowerCase();
-      if (activePath.startsWith("/api") || activePath === "/sitemap.xml" || activePath === "/sitemap" || activePath === "/sitemap_index.xml" || activePath === "/robots.txt" || activePath === "/llms.txt" || /\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot)$/i.test(activePath)) {
+      if (activePath.startsWith("/api") || activePath.startsWith("/@") || activePath.startsWith("/src") || activePath.startsWith("/node_modules") || activePath === "/sitemap.xml" || activePath === "/sitemap" || activePath === "/sitemap_index.xml" || activePath === "/robots.txt" || activePath === "/llms.txt" || activePath === "/llms" || activePath === "/llms-full.txt" || activePath === "/llms-full" || /\.(js|mjs|cjs|ts|tsx|jsx|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot|map|json|xml|txt)$/i.test(activePath)) {
         return next();
       }
       try {
@@ -3333,10 +3899,14 @@ function createApp(options) {
         if (Array.isArray(protocol)) protocol = protocol[0];
         const targetUrl = req.url || req.originalUrl;
         const dynamicHtml = await injectDynamicMetaTags(template, targetUrl, host, protocol);
-        res.status(200).set({
-          "Content-Type": "text/html; charset=utf-8",
-          "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=600"
-        }).send(dynamicHtml);
+        const etag = `W/"${crypto3.createHash("md5").update(dynamicHtml).digest("hex")}"`;
+        res.setHeader("ETag", etag);
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=86400");
+        if (req.headers["if-none-match"] === etag) {
+          return res.status(304).end();
+        }
+        res.status(200).send(dynamicHtml);
       } catch (err) {
         console.error("[SEO Render] Error rendering dynamic metadata:", err);
         next(err);

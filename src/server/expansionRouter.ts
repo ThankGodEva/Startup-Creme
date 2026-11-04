@@ -5,6 +5,7 @@ import {
   INITIAL_STARTUPS,
   INITIAL_CENTRAL_BANK_RATES,
   INITIAL_CLOUD_PRICING_INDEX,
+  INITIAL_INFLATION_RATES,
   INITIAL_RATE_SNAPSHOT,
   INITIAL_JOBS,
   INITIAL_EVENTS,
@@ -13,6 +14,7 @@ import {
   StartupEntry,
   JobListing,
   RateSnapshotPayload,
+  CountryInflationRecord,
   EventOpportunity,
 } from '../types';
 import { EventWebhookIngestionSchema } from '../lib/validation';
@@ -199,6 +201,132 @@ async function requireRouteAdminAuth(
 // --------------------------------------------------------------------
 // MODULE 2: Startup & FinTech Directory Endpoints (/api/directory)
 // --------------------------------------------------------------------
+interface CachedLogoItem {
+  buffer: Buffer;
+  contentType: string;
+  expiresAt: number;
+}
+const logoProxyCache = new Map<string, CachedLogoItem>();
+
+function isSafeExternalUrl(targetUrl: string): boolean {
+  try {
+    const parsed = new URL(targetUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '0.0.0.0' ||
+      host === '::1' ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal') ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) ||
+      /^169\.254\./.test(host)
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+expansionRouter.get(['/directory/logo-proxy', '/startups/logo-proxy'], async (req: Request, res: Response) => {
+  const rawUrl = typeof req.query.url === 'string' ? req.query.url.trim() : '';
+  const domain = typeof req.query.domain === 'string' ? req.query.domain.trim() : '';
+  const name = typeof req.query.name === 'string' ? req.query.name.trim() : 'Company';
+
+  const cacheKey = rawUrl || domain || name;
+  const cached = logoProxyCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    res.set({
+      'Content-Type': cached.contentType,
+      'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+      'Access-Control-Allow-Origin': '*',
+    });
+    return res.end(cached.buffer);
+  }
+
+  const urlsToTry: string[] = [];
+  if (rawUrl && isSafeExternalUrl(rawUrl)) {
+    urlsToTry.push(rawUrl);
+  }
+  if (domain) {
+    const cleanDomain = domain.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0];
+    if (cleanDomain && isSafeExternalUrl(`https://${cleanDomain}`)) {
+      urlsToTry.push(`https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://${cleanDomain}&size=128`);
+      urlsToTry.push(`https://icons.duckduckgo.com/ip3/${cleanDomain}.ico`);
+    }
+  }
+
+  for (const targetUrl of urlsToTry) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const upstream = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        },
+        signal: controller.signal,
+        redirect: 'follow',
+      });
+      clearTimeout(timeoutId);
+
+      if (upstream.ok) {
+        const contentType = upstream.headers.get('content-type') || 'image/png';
+        if (contentType.startsWith('image/') || contentType.includes('octet-stream')) {
+          const arrayBuf = await upstream.arrayBuffer();
+          const buf = Buffer.from(arrayBuf);
+          if (buf.length > 0 && buf.length <= 5 * 1024 * 1024) {
+            const finalType = contentType.includes('octet-stream') ? 'image/png' : contentType;
+            logoProxyCache.set(cacheKey, {
+              buffer: buf,
+              contentType: finalType,
+              expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+            });
+            if (logoProxyCache.size > 1000) {
+              const firstKey = logoProxyCache.keys().next().value;
+              if (firstKey) logoProxyCache.delete(firstKey);
+            }
+            res.set({
+              'Content-Type': finalType,
+              'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+              'Access-Control-Allow-Origin': '*',
+            });
+            return res.end(buf);
+          }
+        }
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+
+  // Fallback to high-quality SVG badge
+  const initial = (name.trim().charAt(0) || 'S').toUpperCase();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+    <defs>
+      <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#0f172a"/>
+        <stop offset="100%" stop-color="#1e293b"/>
+      </linearGradient>
+    </defs>
+    <rect width="128" height="128" rx="28" fill="url(#bgGrad)" />
+    <rect x="2" y="2" width="124" height="124" rx="26" fill="none" stroke="#334155" stroke-width="2" />
+    <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#38bdf8" font-family="system-ui, -apple-system, sans-serif" font-size="56" font-weight="700">${initial}</text>
+  </svg>`;
+  const svgBuf = Buffer.from(svg, 'utf-8');
+  res.set({
+    'Content-Type': 'image/svg+xml; charset=utf-8',
+    'Cache-Control': 'public, max-age=86400',
+    'Access-Control-Allow-Origin': '*',
+  });
+  return res.end(svgBuf);
+});
+
 expansionRouter.get(['/directory', '/startups'], async (req: Request, res: Response) => {
   const stageFilter = (req.query.stage as string) || '';
   const verticalFilter = (req.query.vertical as string) || '';
@@ -412,6 +540,7 @@ expansionRouter.get(['/markets/rates', '/rates', '/markets'], async (req: Reques
   const client = getSupabaseAdminClient();
   if (client) {
     try {
+      // 1. Fetch interest rates strictly from startupcreme.rate_snapshots
       const { data, error } = await client
         .from('rate_snapshots')
         .select('*')
@@ -432,14 +561,193 @@ expansionRouter.get(['/markets/rates', '/rates', '/markets'], async (req: Reques
             Array.isArray(data.cloud_pricing_index) && data.cloud_pricing_index.length > 0
               ? data.cloud_pricing_index
               : INITIAL_CLOUD_PRICING_INDEX,
+          inflation_rates: runtimeRateSnapshot.inflation_rates || INITIAL_INFLATION_RATES,
         };
+      }
+
+      // 2. Fetch inflation rates from dedicated startupcreme.inflation_rates table
+      const { data: infData, error: infError } = await client
+        .from('inflation_rates')
+        .select('*')
+        .order('country', { ascending: true });
+
+      if (!infError && Array.isArray(infData) && infData.length > 0) {
+        runtimeRateSnapshot.inflation_rates = infData;
       }
     } catch {
       // fallback to runtimeRateSnapshot
     }
   }
 
+  if (!runtimeRateSnapshot.inflation_rates || runtimeRateSnapshot.inflation_rates.length === 0) {
+    runtimeRateSnapshot.inflation_rates = INITIAL_INFLATION_RATES;
+  }
+
   return res.json(runtimeRateSnapshot);
+});
+
+// Dedicated GET /api/markets/inflation endpoint querying startupcreme.inflation_rates
+expansionRouter.get(['/markets/inflation', '/inflation-rates', '/rates/inflation'], async (req: Request, res: Response) => {
+  if (!isMarketsFeatureEnabled()) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      // Query dedicated startupcreme.inflation_rates table
+      const { data, error } = await client
+        .from('inflation_rates')
+        .select('*')
+        .order('country', { ascending: true });
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        runtimeRateSnapshot.inflation_rates = data;
+      } else if (!error && Array.isArray(data) && data.length === 0) {
+        // Auto-seed initial inflation rates into startupcreme.inflation_rates table
+        await client.from('inflation_rates').upsert(INITIAL_INFLATION_RATES, { onConflict: 'country_code' });
+      }
+    } catch {
+      // fallback
+    }
+  }
+
+  const rates = (runtimeRateSnapshot.inflation_rates && runtimeRateSnapshot.inflation_rates.length > 0)
+    ? runtimeRateSnapshot.inflation_rates
+    : INITIAL_INFLATION_RATES;
+
+  return res.json({
+    success: true,
+    inflation_rates: rates,
+    recorded_at: runtimeRateSnapshot.recorded_at,
+  });
+});
+
+// Helper to recalculate 10-year inflation stats
+function recalculateInflationStats(record: CountryInflationRecord): CountryInflationRecord {
+  const history = Array.isArray(record.history_10y) && record.history_10y.length > 0
+    ? [...record.history_10y].sort((a, b) => a.year - b.year)
+    : [];
+
+  if (history.length === 0) {
+    return record;
+  }
+
+  const sum = history.reduce((acc, h) => acc + h.rate, 0);
+  const avg = parseFloat((sum / history.length).toFixed(2));
+  
+  let high = history[0];
+  let low = history[0];
+  for (const h of history) {
+    if (h.rate > high.rate) high = h;
+    if (h.rate < low.rate) low = h;
+  }
+
+  const latest = history[history.length - 1];
+  const previous = history.length > 1 ? history[history.length - 2] : latest;
+
+  let trendLabel: 'Disinflating' | 'Accelerating' | 'Anchored' | 'Volatile' = record.trend_label || 'Anchored';
+  if (latest.rate < previous.rate - 0.2) {
+    trendLabel = 'Disinflating';
+  } else if (latest.rate > previous.rate + 0.2) {
+    trendLabel = 'Accelerating';
+  } else {
+    trendLabel = 'Anchored';
+  }
+
+  return {
+    ...record,
+    history_10y: history,
+    current_rate: latest.rate,
+    ten_year_avg: avg,
+    ten_year_high: { year: high.year, rate: high.rate },
+    ten_year_low: { year: low.year, rate: low.rate },
+    trend_label: trendLabel,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+// Admin PUT/PATCH /api/markets/inflation endpoint
+expansionRouter.put(['/markets/inflation', '/rates/inflation'], async (req: Request, res: Response) => {
+  const adminUser = await requireRouteAdminAuth(req, res);
+  if (!adminUser) return;
+
+  const currentRates: CountryInflationRecord[] = [
+    ...(runtimeRateSnapshot.inflation_rates && runtimeRateSnapshot.inflation_rates.length > 0
+      ? runtimeRateSnapshot.inflation_rates
+      : INITIAL_INFLATION_RATES),
+  ];
+
+  const payload = req.body;
+  if (!payload) {
+    return res.status(400).json({ error: 'Missing request payload' });
+  }
+
+  let updatedList: CountryInflationRecord[] = [];
+
+  if (Array.isArray(payload.inflation_rates)) {
+    // Bulk update entire list
+    updatedList = payload.inflation_rates.map((item: CountryInflationRecord) => recalculateInflationStats(item));
+  } else if (payload.country_code || payload.id) {
+    // Single country update
+    const targetKey = (payload.country_code || payload.id).toString().toLowerCase();
+    const existingIndex = currentRates.findIndex(
+      (c) => c.id.toLowerCase() === targetKey || c.country_code.toLowerCase() === targetKey
+    );
+
+    const mergedRecord = recalculateInflationStats({
+      ...(existingIndex >= 0 ? currentRates[existingIndex] : (payload as CountryInflationRecord)),
+      ...payload,
+    });
+
+    if (existingIndex >= 0) {
+      currentRates[existingIndex] = mergedRecord;
+      updatedList = currentRates;
+    } else {
+      updatedList = [...currentRates, mergedRecord];
+    }
+  } else {
+    return res.status(400).json({ error: 'Invalid payload: provide country_code/id or inflation_rates array' });
+  }
+
+  runtimeRateSnapshot.inflation_rates = updatedList;
+  const nowIso = new Date().toISOString();
+  runtimeRateSnapshot.recorded_at = nowIso;
+
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      // Upsert directly into dedicated startupcreme.inflation_rates table
+      const rowsToUpsert = updatedList.map((item) => ({
+        id: item.id,
+        country: item.country,
+        country_code: item.country_code,
+        flag_emoji: item.flag_emoji,
+        currency: item.currency,
+        benchmark_index: item.benchmark_index,
+        statistical_agency: item.statistical_agency,
+        official_source_url: item.official_source_url,
+        history_10y: item.history_10y,
+        current_rate: item.current_rate,
+        ten_year_avg: item.ten_year_avg,
+        ten_year_high: item.ten_year_high,
+        ten_year_low: item.ten_year_low,
+        trend_label: item.trend_label,
+        target_band: item.target_band,
+        notes: item.notes || null,
+        updated_at: nowIso,
+      }));
+
+      await client.from('inflation_rates').upsert(rowsToUpsert, { onConflict: 'country_code' });
+    } catch (err) {
+      console.warn('Failed to upsert to startupcreme.inflation_rates:', err);
+    }
+  }
+
+  return res.json({
+    success: true,
+    inflation_rates: updatedList,
+    recorded_at: nowIso,
+  });
 });
 
 // Automated n8n Webhook Receiver for Rate Snapshots
@@ -495,6 +803,7 @@ expansionRouter.post(
       source = 'n8n_webhook_job',
       central_bank_rates,
       cloud_pricing_index,
+      inflation_rates,
       metadata = {},
     } = req.body || {};
 
@@ -508,6 +817,11 @@ expansionRouter.post(
         ? cloud_pricing_index
         : runtimeRateSnapshot.cloud_pricing_index;
 
+    const updatedInflation =
+      Array.isArray(inflation_rates) && inflation_rates.length > 0
+        ? inflation_rates.map((i: CountryInflationRecord) => recalculateInflationStats(i))
+        : (runtimeRateSnapshot.inflation_rates || INITIAL_INFLATION_RATES);
+
     const nowIso = new Date().toISOString();
     const nextSnapshot: RateSnapshotPayload = {
       id: `snap-${Date.now()}`,
@@ -515,9 +829,15 @@ expansionRouter.post(
       recorded_at: nowIso,
       central_bank_rates: updatedCentralBanks,
       cloud_pricing_index: updatedCloudPricing,
+      inflation_rates: updatedInflation,
     };
 
     runtimeRateSnapshot = nextSnapshot;
+
+    const mergedMetadata = {
+      ...metadata,
+      inflation_rates: updatedInflation,
+    };
 
     const client = getSupabaseAdminClient();
     if (client) {
@@ -525,7 +845,7 @@ expansionRouter.post(
         const { data, error } = await client
           .from('rate_snapshots')
           .insert({
-            snapshot_type: 'combined',
+            snapshot_type: 'central_bank',
             source: nextSnapshot.source,
             central_bank_rates: nextSnapshot.central_bank_rates,
             cloud_pricing_index: nextSnapshot.cloud_pricing_index,
@@ -534,6 +854,29 @@ expansionRouter.post(
           })
           .select('*')
           .single();
+
+        if (Array.isArray(inflation_rates) && inflation_rates.length > 0) {
+          const rowsToUpsert = updatedInflation.map((item) => ({
+            id: item.id,
+            country: item.country,
+            country_code: item.country_code,
+            flag_emoji: item.flag_emoji,
+            currency: item.currency,
+            benchmark_index: item.benchmark_index,
+            statistical_agency: item.statistical_agency,
+            official_source_url: item.official_source_url,
+            history_10y: item.history_10y,
+            current_rate: item.current_rate,
+            ten_year_avg: item.ten_year_avg,
+            ten_year_high: item.ten_year_high,
+            ten_year_low: item.ten_year_low,
+            trend_label: item.trend_label,
+            target_band: item.target_band,
+            notes: item.notes || null,
+            updated_at: nowIso,
+          }));
+          await client.from('inflation_rates').upsert(rowsToUpsert, { onConflict: 'country_code' });
+        }
 
         if (!error && data) {
           runtimeRateSnapshot.id = data.id;

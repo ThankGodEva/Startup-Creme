@@ -31,10 +31,14 @@ export const ArticleCard: React.FC<ArticleCardProps> = ({
         }}
         className="group relative rounded-2xl bg-white border border-slate-200 hover:border-slate-300 overflow-hidden cursor-pointer transition-all duration-300 shadow-sm hover:shadow-md grid md:grid-cols-12 items-stretch block text-left"
       >
-        <div className="md:col-span-7 relative min-h-[260px] overflow-hidden">
+        <div className="md:col-span-7 relative aspect-[16/10] md:aspect-auto md:min-h-[260px] overflow-hidden bg-slate-100">
           <img
             src={normalizeImageUrl(post.cover_image) || 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&q=80&w=1200'}
             alt={post.title}
+            width={1200}
+            height={675}
+            loading="lazy"
+            decoding="async"
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           />
           <div className="absolute top-4 left-4 flex items-center gap-2">
@@ -130,10 +134,14 @@ export const ArticleCard: React.FC<ArticleCardProps> = ({
     >
       <div>
         {/* Cover Image */}
-        <div className="relative h-44 overflow-hidden bg-slate-100">
+        <div className="relative aspect-[16/9] w-full overflow-hidden bg-slate-100">
           <img
             src={normalizeImageUrl(post.cover_image) || 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&q=80&w=800'}
             alt={post.title}
+            width={800}
+            height={450}
+            loading="lazy"
+            decoding="async"
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           />
           <div className="absolute top-3 left-3 flex items-center gap-1.5">

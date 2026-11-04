@@ -15,6 +15,7 @@ import {
 import { StartupEntry, StartupStage, CreateStartupPayload, UserProfile } from '../types';
 import { store } from '../lib/store';
 import { useHashAnchorScroll, Route } from '../hooks/useHashAnchorScroll';
+import { StartupLogo } from './StartupLogo';
 
 /**
  * React Router 7 hash-aware meta export for /directory
@@ -451,30 +452,7 @@ export const StartupDirectoryModule: React.FC<StartupDirectoryModuleProps> = ({
                   {/* Header: Logo + Name + Metadata */}
                   <div className="flex items-start justify-between gap-3 sm:gap-4 mb-4 min-w-0">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      {startup.logo_url ? (
-                        <div className="h-12 min-w-12 max-w-[120px] rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0 shadow-2xs">
-                          <img
-                            src={startup.logo_url}
-                            alt={`${startup.name} logo`}
-                            className="max-h-9 max-w-full w-auto h-auto object-contain"
-                            loading="lazy"
-                            onError={(e) => {
-                              const target = e.currentTarget;
-                              target.style.display = 'none';
-                              const parent = target.parentElement;
-                              if (parent) {
-                                parent.className =
-                                  'w-12 h-12 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 font-serif font-bold text-lg shrink-0';
-                                parent.textContent = startup.name.charAt(0).toUpperCase();
-                              }
-                            }}
-                          />
-                        </div>
-                      ) : (
-                        <div className="w-12 h-12 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 font-serif font-bold text-lg shrink-0">
-                          {startup.name.charAt(0).toUpperCase()}
-                        </div>
-                      )}
+                      <StartupLogo startup={startup} />
                       <div className="min-w-0 flex-1">
                         <h2 className="font-serif text-lg font-bold text-slate-900 leading-snug break-words">
                           {startup.name}
@@ -776,19 +754,21 @@ export const StartupDirectoryModule: React.FC<StartupDirectoryModuleProps> = ({
                     placeholder="https://company.com/logo.png"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:bg-white focus:border-slate-900 focus:outline-none"
                   />
-                  {logoUrl.trim() && (
+                  {(logoUrl.trim() || websiteUrl.trim()) && (
                     <div className="mt-2 flex items-center gap-2.5 p-2 rounded-lg bg-slate-50 border border-slate-200">
-                      <div className="h-10 min-w-10 max-w-[120px] px-2 py-1 bg-white border border-slate-200 rounded-lg flex items-center justify-center shrink-0">
-                        <img
-                          src={logoUrl.trim()}
-                          alt="Logo preview"
-                          className="max-h-7 max-w-full w-auto h-auto object-contain"
-                          onError={(e) => {
-                            (e.currentTarget as HTMLElement).style.display = 'none';
-                          }}
-                        />
-                      </div>
-                      <span className="text-[11px] text-slate-500">Live logo preview (supports rectangular & square logos)</span>
+                      <StartupLogo
+                        startup={{
+                          name: name || 'Startup Preview',
+                          logo_url: logoUrl.trim() || null,
+                          website_url: websiteUrl.trim(),
+                        }}
+                        size="sm"
+                      />
+                      <span className="text-[11px] text-slate-500">
+                        {logoUrl.trim()
+                          ? 'Live logo preview (custom URL + auto-fallback)'
+                          : 'Auto-detected website favicon/logo preview'}
+                      </span>
                     </div>
                   )}
                 </div>

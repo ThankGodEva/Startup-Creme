@@ -9,8 +9,10 @@ export interface UserProfile {
   full_name: string;
   avatar_url?: string;
   role: UserRole;
+  reputation?: number;
+  badge?: string;
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
 }
 
 export interface PostContentNode {
@@ -386,6 +388,31 @@ export interface CentralBankRate {
   historical_12m: number[];
 }
 
+export interface YearlyInflationRate {
+  year: number; // e.g. 2017, 2018, ... 2026
+  rate: number; // YoY percentage e.g. 2.1
+}
+
+export interface CountryInflationRecord {
+  id: string;
+  country: string; // e.g. 'United States'
+  country_code: string; // e.g. 'US'
+  flag_emoji: string; // e.g. '🇺🇸'
+  currency: string; // e.g. 'USD ($)'
+  benchmark_index: string; // e.g. 'Headline CPI-U (Consumer Price Index)'
+  statistical_agency: string; // e.g. 'Bureau of Labor Statistics (BLS)'
+  official_source_url: string;
+  history_10y: YearlyInflationRate[]; // 10-year historical trajectory (2017–2026)
+  current_rate: number; // latest 2026 headline rate
+  ten_year_avg: number;
+  ten_year_high: { year: number; rate: number };
+  ten_year_low: { year: number; rate: number };
+  trend_label: 'Disinflating' | 'Accelerating' | 'Anchored' | 'Volatile';
+  target_band: string; // e.g. '2.0% Target', '3.0% - 6.0% Target Band'
+  notes?: string;
+  updated_at?: string;
+}
+
 export interface CloudProviderIndexEntry {
   id: string;
   provider: string; // e.g., 'AWS', 'Google Cloud', 'Supabase', 'Vercel', 'Cloudflare', 'Neon'
@@ -407,7 +434,8 @@ export interface RateSnapshotPayload {
   source: string;
   recorded_at: string;
   central_bank_rates: CentralBankRate[];
-  cloud_pricing_index: CloudProviderIndexEntry[];
+  cloud_pricing_index?: CloudProviderIndexEntry[];
+  inflation_rates?: CountryInflationRecord[];
 }
 
 // Module 4: Niche Remote Startup Job & Fractional Talent Board (startupcreme.jobs)

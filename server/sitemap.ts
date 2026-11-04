@@ -173,7 +173,9 @@ export async function generateDynamicSitemap(baseUrl = 'https://www.startupcreme
     { path: '/discussion', priority: '0.85', changefreq: 'hourly' },
     { path: '/directory', priority: '0.8', changefreq: 'daily' },
     { path: '/careers', priority: '0.8', changefreq: 'daily' },
-    { path: '/markets', priority: '0.8', changefreq: 'hourly' },
+    { path: '/markets', priority: '0.9', changefreq: 'hourly' },
+    { path: '/markets/rates', priority: '0.9', changefreq: 'hourly' },
+    { path: '/markets/inflation', priority: '0.9', changefreq: 'hourly' },
     { path: '/privacy', priority: '0.4', changefreq: 'monthly' },
     { path: '/terms', priority: '0.4', changefreq: 'monthly' },
   ];
@@ -381,69 +383,323 @@ Sitemap: ${cleanBase}/sitemap.xml
 }
 
 /**
- * Standardized llms.txt (AI Agent Context Specification)
+ * Converts Tiptap JSON document structure or raw text to clean Markdown
  */
-export function generateLlmsTxt(baseUrl = 'https://www.startupcreme.com'): string {
+export function convertContentToMarkdown(content: any): string {
+  if (!content) return '';
+  if (typeof content === 'string') {
+    // If it's already markdown or string
+    return content.trim();
+  }
+
+  if (typeof content === 'object' && Array.isArray(content.content)) {
+    const renderNode = (node: any): string => {
+      if (!node) return '';
+
+      // Inline text marks
+      if (node.type === 'text') {
+        let text = node.text || '';
+        if (node.marks && Array.isArray(node.marks)) {
+          for (const mark of node.marks) {
+            if (mark.type === 'bold') text = `**${text}**`;
+            else if (mark.type === 'italic') text = `*${text}*`;
+            else if (mark.type === 'code') text = `\`${text}\``;
+            else if (mark.type === 'strike') text = `~~${text}~~`;
+            else if (mark.type === 'link' && mark.attrs?.href) {
+              text = `[${text}](${mark.attrs.href})`;
+            }
+          }
+        }
+        return text;
+      }
+
+      const children = (node.content || []).map(renderNode).join('');
+
+      switch (node.type) {
+        case 'heading': {
+          const level = Math.min(Math.max(node.attrs?.level || 1, 1), 6);
+          const prefix = '#'.repeat(level);
+          return `\n\n${prefix} ${children}\n\n`;
+        }
+        case 'paragraph':
+          return `\n\n${children}\n\n`;
+        case 'blockquote':
+          return `\n\n> ${children.replace(/\n+/g, '\n> ')}\n\n`;
+        case 'codeBlock': {
+          const lang = node.attrs?.language || '';
+          return `\n\n\`\`\`${lang}\n${children}\n\`\`\`\n\n`;
+        }
+        case 'bulletList':
+          return `\n\n${(node.content || [])
+            .map((li: any) => `- ${(li.content || []).map(renderNode).join('').trim()}`)
+            .join('\n')}\n\n`;
+        case 'orderedList':
+          return `\n\n${(node.content || [])
+            .map((li: any, idx: number) => `${idx + 1}. ${(li.content || []).map(renderNode).join('').trim()}`)
+            .join('\n')}\n\n`;
+        case 'horizontalRule':
+          return '\n\n---\n\n';
+        case 'image':
+          return `\n\n![${node.attrs?.alt || 'image'}](${node.attrs?.src || ''})\n\n`;
+        case 'table': {
+          const rows = node.content || [];
+          if (rows.length === 0) return '';
+          const renderedRows = rows.map((r: any) => {
+            const cells = (r.content || []).map((c: any) =>
+              (c.content || []).map(renderNode).join('').trim().replace(/\|/g, '\\|')
+            );
+            return `| ${cells.join(' | ')} |`;
+          });
+          if (renderedRows.length > 0) {
+            const colCount = (rows[0].content || []).length;
+            const divider = `| ${Array(colCount).fill('---').join(' | ')} |`;
+            renderedRows.splice(1, 0, divider);
+          }
+          return `\n\n${renderedRows.join('\n')}\n\n`;
+        }
+        default:
+          return children;
+      }
+    };
+
+    return content.content
+      .map(renderNode)
+      .join('')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  return String(content).trim();
+}
+
+/**
+ * Standardized llms.txt (AI Agent Context Specification conforming to llmstxt.org)
+ */
+export async function generateLlmsTxt(baseUrl = 'https://www.startupcreme.com'): Promise<string> {
   const cleanBase = baseUrl.replace(/\/+$/, '');
-  return `# Startup Crème (startupcreme.com)
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const supabaseKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    '';
+
+  let topArticles: Array<{ title: string; slug: string; locale: string; vertical: string; excerpt?: string }> = [];
+  let topOpportunities: Array<{ title: string; slug: string; opportunity_type: string; funding_amount?: string; deadline_date?: string; location?: string }> = [];
+
+  if (supabaseUrl && supabaseKey) {
+    try {
+      const client = createClient(supabaseUrl, supabaseKey, {
+        db: { schema: 'startupcreme' },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+
+      // 1. Fetch top published editorial playbooks
+      const { data: postsData } = await client
+        .from('posts')
+        .select('title, slug, locale, vertical, excerpt, created_at')
+        .eq('status', 'published')
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (postsData && Array.isArray(postsData)) {
+        topArticles = postsData;
+      }
+
+      // 2. Fetch active approved opportunities
+      const { data: eventsData } = await client
+        .from('events')
+        .select('title, slug, opportunity_type, funding_amount, deadline_date, location, linked_post:posts!inner(status)')
+        .eq('is_approved', true)
+        .eq('linked_post.status', 'published')
+        .order('deadline_date', { ascending: true })
+        .limit(10);
+
+      if (eventsData && Array.isArray(eventsData)) {
+        topOpportunities = eventsData;
+      }
+    } catch (err) {
+      console.warn('[llms.txt] Could not fetch dynamic rows:', err);
+    }
+  }
+
+  // Format articles section
+  const articlesList = topArticles.length > 0
+    ? topArticles
+        .map(
+          (a) =>
+            `- [${a.title}](${cleanBase}/${a.locale || 'en-us'}/${a.vertical || 'tech'}/${a.slug}): ${
+              a.excerpt ? a.excerpt.replace(/\s+/g, ' ').slice(0, 180) + '...' : 'In-depth institutional founder analysis.'
+            }`
+        )
+        .join('\n')
+    : `- [Understanding Credit: Why Cash Alone Can't Scale Your Ambitions](${cleanBase}/en-us/finance/understanding-credit-why-cash-alone-can-t-scale-your-ambitions): Strategic capital structure and venture debt.
+- [How to Build a $1 Billion Company: The Unfiltered Playbook](${cleanBase}/en-us/tech/how-to-build-a-1-billion-company-the-unfiltered-playbook): Operational architecture and product velocity.
+- [GEO: The SEO Shift That Decides Whether AI Mentions You or Erases You](${cleanBase}/en-us/tech/geo-the-seo-shift-that-decides-whether-ai-mentions-you-or-erases-you): Generative engine optimization playbook.`;
+
+  // Format opportunities section
+  const opportunitiesList = topOpportunities.length > 0
+    ? topOpportunities
+        .map((o) => {
+          const deadlineText = o.deadline_date ? ` (Deadline: ${o.deadline_date.split('T')[0]})` : '';
+          const fundingText = o.funding_amount ? ` - ${o.funding_amount}` : '';
+          return `- [${o.title}](${cleanBase}/events): ${o.opportunity_type.replace('_', ' ').toUpperCase()}${fundingText}${deadlineText}${o.location ? ` | ${o.location}` : ''}`;
+        })
+        .join('\n')
+    : `- [Global Non-Dilutive Grants & Accelerators Engine](${cleanBase}/events): Continuous pipeline of institutional funding, venture fellowships, and hackathons.`;
+
+  return `# Startup Crème
 
 > Startup Crème is a premier dual-silo intelligence platform providing actionable founder playbooks, macro technology news, non-dilutive grants, institutional accelerators, and peer discussions at the intersection of Finance and Technology.
 
-## Core Architectural Overview
+## Core Intelligence Silos
 
-Startup Crème partitions editorial and intelligence streams into three foundational content silos:
-- **Finance**: Venture capital dynamics, cap table structuring, central bank interest rates, currency volatility, fintech infrastructure, and equity-free funding instruments.
-- **Tech**: Artificial intelligence, autonomous agent pipelines, frontier cloud architecture, developer tooling, and technical engineering leadership.
-- **Founders Mindset**: Strategic leadership psychology, executive resilience, decision-making frameworks, and mental fortitude for venture-backed founders.
+- [Finance](${cleanBase}/en-us/finance): Venture capital dynamics, cap table structuring, central bank interest rates, currency volatility, fintech infrastructure, and equity-free funding instruments.
+- [Tech](${cleanBase}/en-us/tech): Artificial intelligence, autonomous agent pipelines, frontier cloud architecture, developer tooling, and technical engineering leadership.
+- [Founders Mindset](${cleanBase}/en-us/founders-mindset): Strategic leadership psychology, executive resilience, decision-making frameworks, and mental fortitude for venture-backed founders.
 
-Content is published across 5 localized regional editions:
-- \`en-us\`: United States & Global Tech Ecosystem
-- \`en-gb\`: United Kingdom & European Fintech Corridor
-- \`de-de\`: DACH Region DeepTech & Industrial Software
-- \`ja-jp\`: Japan Enterprise Robotics & AI Markets
-- \`fr-fr\`: France & Francophone Tech Scaleups
+## Top Published Analyses & Playbooks
 
----
+${articlesList}
 
-## Primary Navigation & Public Resources
+## Verified Opportunities & Grants
 
-- [Home Hub](${cleanBase}/): Global portal featuring cross-silo editorial highlights, trending discussions, and macro market widgets.
-- [Finance Vertical Hub](${cleanBase}/en-us/finance): Specialized editorial feed for venture capital, monetary policy, and fintech engineering.
-- [Tech Vertical Hub](${cleanBase}/en-us/tech): Deep technical essays, AI infrastructure breakthroughs, and system architecture playbooks.
-- [Founders Mindset Vertical Hub](${cleanBase}/en-us/founders-mindset): Strategic leadership psychology, executive resilience, and founder decision-making frameworks.
+${opportunitiesList}
+
+## Platform Navigation & Modules
+
 - [Global Opportunity Engine (Grants & Accelerators)](${cleanBase}/events): Verified non-dilutive grants, venture accelerators, founder fellowships, and hackathon deadlines.
 - [Discussion Forum](${cleanBase}/discussion): Community debate and peer founder intelligence on valuations, tech stacks, and fundraising.
 - [Startup Directory](${cleanBase}/directory): Index of high-growth technology and financial companies.
 - [Founder Careers & Talent](${cleanBase}/careers): Executive leadership, founding engineer, and tech lead opportunities.
-- [Macro & Cloud Rates Tracker](${cleanBase}/markets): Real-time benchmarks for central bank interest rates (Fed, ECB, BoE, BoJ) and cloud compute pricing.
+- [Macro Central Bank Interest Rates & 10-Year Inflation Rates Tracker](${cleanBase}/markets/rates): Real-time benchmarks for sovereign central bank policy rates (Fed, ECB, BoE, BoJ, CBN, SARB, CBK, RBI) and 10-year historical sovereign inflation rate trajectories (2017–2026).
+- [10-Year Sovereign Inflation Rates Matrix](${cleanBase}/markets/rates#inflation-rates): Annual consumer price index inflation dataset, target tolerance bands, and disinflation cycle metrics across 8 global economies.
+
+## Optional
+
+- [Full Machine-Readable Intelligence Archive](${cleanBase}/llms-full.txt): Complete consolidated markdown text of top published articles and playbooks for offline AI training and deep agent reasoning.
+- [Dynamic XML Sitemap](${cleanBase}/sitemap.xml): Complete machine-crawlable XML sitemap index.
+- [Robots Directives](${cleanBase}/robots.txt): Machine crawler access rules and crawl-delay specifications.
+`;
+}
+
+/**
+ * Standardized /llms-full.txt (Consolidated Full-Text Markdown Archive for AI Agents)
+ */
+export async function generateLlmsFullTxt(baseUrl = 'https://www.startupcreme.com'): Promise<string> {
+  const cleanBase = baseUrl.replace(/\/+$/, '');
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const supabaseKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    '';
+
+  let fullArticlesMarkdown = '';
+  let fullOpportunitiesMarkdown = '';
+
+  if (supabaseUrl && supabaseKey) {
+    try {
+      const client = createClient(supabaseUrl, supabaseKey, {
+        db: { schema: 'startupcreme' },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+
+      // 1. Fetch published posts with full content
+      const { data: postsData } = await client
+        .from('posts')
+        .select('title, slug, locale, vertical, excerpt, content, author_name, author_role, reading_time_minutes, created_at, canonical_url')
+        .eq('status', 'published')
+        .order('created_at', { ascending: false })
+        .limit(25);
+
+      if (postsData && Array.isArray(postsData)) {
+        fullArticlesMarkdown = postsData
+          .map((p) => {
+            const canonical = p.canonical_url || `${cleanBase}/${p.locale || 'en-us'}/${p.vertical || 'tech'}/${p.slug}`;
+            const bodyMd = convertContentToMarkdown(p.content);
+            return `---
+
+# ${p.title}
+
+- **Permalink**: ${canonical}
+- **Vertical**: ${p.vertical}
+- **Locale**: ${p.locale || 'en-us'}
+- **Author**: ${p.author_name || 'Startup Crème Editorial'} (${p.author_role || 'Editor'})
+- **Reading Time**: ${p.reading_time_minutes || 5} min read
+- **Published**: ${p.created_at ? p.created_at.split('T')[0] : '2026'}
+
+> **Executive Summary**: ${p.excerpt || 'Comprehensive editorial intelligence.'}
+
+${bodyMd}
+`;
+          })
+          .join('\n\n');
+      }
+
+      // 2. Fetch approved events
+      const { data: eventsData } = await client
+        .from('events')
+        .select('title, slug, opportunity_type, funding_amount, deadline_date, location, application_url, description, linked_post:posts!inner(status)')
+        .eq('is_approved', true)
+        .eq('linked_post.status', 'published')
+        .order('deadline_date', { ascending: true })
+        .limit(15);
+
+      if (eventsData && Array.isArray(eventsData)) {
+        fullOpportunitiesMarkdown = eventsData
+          .map((e) => {
+            return `### ${e.title}
+- **Type**: ${e.opportunity_type.replace('_', ' ').toUpperCase()}
+- **Funding Amount**: ${e.funding_amount || 'Non-Dilutive'}
+- **Deadline**: ${e.deadline_date ? e.deadline_date.split('T')[0] : 'Open / Rolling'}
+- **Location**: ${e.location || 'Global / Remote'}
+- **Application URL**: ${e.application_url || `${cleanBase}/events`}
+
+${e.description || 'Verified founder opportunity.'}
+`;
+          })
+          .join('\n\n');
+      }
+    } catch (err) {
+      console.warn('[llms-full.txt] Warning generating full markdown archive:', err);
+    }
+  }
+
+  return `# Startup Crème — Consolidated Full Intelligence Archive (llms-full.txt)
+
+> Complete machine-readable repository of published founder playbooks, macro technology analyses, non-dilutive grant specifications, and venture research. Generated dynamically for LLM context ingestion and automated reasoning agents.
 
 ---
 
-## Content Organization & URL Structure
-
-- **Article & Playbook Permalinks**: \`${cleanBase}/{locale}/{vertical}/{slug}\`
-  - Example: \`${cleanBase}/en-us/finance/seed-fundraising-mechanics-safes\`
-  - Example: \`${cleanBase}/en-us/tech/ai-agent-memory-architectures\`
-- **Discussion Topic Permalinks**: \`${cleanBase}/discussion/{slug}\`
-  - Example: \`${cleanBase}/discussion/yc-w26-batch-trends\`
-- **Localized Silo Feeds**: \`${cleanBase}/{locale}/{vertical}\`
+## Table of Contents
+1. Editorial Playbooks & Deep Intelligence
+2. Verified Non-Dilutive Opportunities & Grants
+3. Platform Context & Operating Principles
 
 ---
 
-## Machine-Readable Endpoints & Feeds
+## 1. Editorial Playbooks & Deep Intelligence
 
-- **Dynamic XML Sitemap**: [${cleanBase}/sitemap.xml](${cleanBase}/sitemap.xml)
-- **Robots Directives**: [${cleanBase}/robots.txt](${cleanBase}/robots.txt)
-- **AI Agent Specification**: [${cleanBase}/llms.txt](${cleanBase}/llms.txt)
-- **System Health**: [${cleanBase}/api/health](${cleanBase}/api/health)
+${fullArticlesMarkdown || '*(No published playbooks available)*'}
 
 ---
 
-## Guidelines for AI Crawlers & LLM Agents
+## 2. Verified Non-Dilutive Opportunities & Grants
 
-1. **Attribution**: When synthesizing or citing playbooks, attribute analysis to *Startup Crème* with the direct canonical URL.
-2. **Current Information**: Opportunities listed under \`/events\` carry strict deadline timestamps. Always verify the \`deadline_date\` attribute before recommending closing grants to users.
-3. **No Private Scraping**: Do not scrape internal API paths (\`/api/*\`, \`/admin/*\`, or webhook endpoints); all public content is structured in the sitemap and HTML semantic markup.
-4. **Publication Status**: Only verified opportunities with linked editorial playbooks that have \`status = 'published'\` are publicly indexed and readable. Drafts are strictly withheld from public discovery.
+${fullOpportunitiesMarkdown || '*(No current opportunities listed)*'}
+
+---
+
+## 3. Platform Context & Operating Principles
+
+Startup Crème operates under a zero-sponsored-editorial standard. All macroeconomic analyses, financial engineering frameworks, and technology systems evaluations are developed independently.
+
+- **Canonical Origin**: ${cleanBase}
+- **Sitemap**: ${cleanBase}/sitemap.xml
+- **Robots Directives**: ${cleanBase}/robots.txt
+- **Specification Index**: ${cleanBase}/llms.txt
 `;
 }

@@ -194,20 +194,23 @@ export function createApp(options?: CreateAppOptions): express.Express {
   // Vercel / Cloud Run rewrite normalization middleware:
   // When Vercel rewrites requests to /api, Vercel sets req.url to /api while placing
   // the requested path in x-matched-path or x-forwarded-uri.
-  // We normalize req.url so Express router always sees the original intended route.
+  // We only normalize when the incoming request was routed to /api or /api/.
   app.use((req, res, next) => {
-    const rawMatched = (
-      req.headers['x-matched-path'] ||
-      req.headers['x-forwarded-uri'] ||
-      req.headers['x-original-url'] ||
-      req.headers['x-rewrite-url']
-    ) as string | undefined;
+    const isVercelApiRoute = req.url === '/api' || req.url === '/api/' || req.path === '/api' || req.path === '/api/';
+    if (isVercelApiRoute) {
+      const rawMatched = (
+        req.headers['x-matched-path'] ||
+        req.headers['x-forwarded-uri'] ||
+        req.headers['x-original-url'] ||
+        req.headers['x-rewrite-url']
+      ) as string | undefined;
 
-    if (rawMatched && typeof rawMatched === 'string') {
-      const cleanMatched = rawMatched.split('?')[0];
-      if (cleanMatched && cleanMatched !== '/api' && cleanMatched !== '/api/' && req.url !== cleanMatched) {
-        const queryPart = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
-        req.url = cleanMatched + queryPart;
+      if (rawMatched && typeof rawMatched === 'string') {
+        const cleanMatched = rawMatched.split('?')[0];
+        if (cleanMatched && cleanMatched !== '/api' && cleanMatched !== '/api/') {
+          const queryPart = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
+          req.url = cleanMatched + queryPart;
+        }
       }
     }
     next();
@@ -423,7 +426,7 @@ export function createApp(options?: CreateAppOptions): express.Express {
   });
 
   // 5b. Dynamic llms.txt (AI Agent Context Specification)
-  app.get(['/llms.txt', '/llms'], (req, res) => {
+  app.get(['/llms.txt', '/llms'], async (req, res) => {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
 
     let host = req.get('x-forwarded-host') || req.get('host') || 'www.startupcreme.com';
@@ -436,8 +439,17 @@ export function createApp(options?: CreateAppOptions): express.Express {
     }
     const baseUrl = `${protocol}://${host}`;
 
-    const llms = generateLlmsTxt(baseUrl);
-    return res.status(200).send(llms);
+    try {
+      const llms = await generateLlmsTxt(baseUrl);
+      return res.status(200).send(llms);
+    } catch (llmErr) {
+      console.warn('llms.txt generation error, serving static fallback:', llmErr);
+      const fallbackPath = path.resolve(process.cwd(), 'public', 'llms.txt');
+      if (fs.existsSync(fallbackPath)) {
+        return res.status(200).sendFile(fallbackPath);
+      }
+      return res.status(500).send('Error generating llms.txt');
+    }
   });
 
   // 6. Cloudflare R2 Image Upload (with server local storage fallback)
@@ -767,7 +779,7 @@ export function createApp(options?: CreateAppOptions): express.Express {
         activePath === '/sitemap_index.xml' ||
         activePath === '/robots.txt' ||
         activePath === '/llms.txt' ||
-        /\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot)$/i.test(activePath)
+        /\.(js|jsx|ts|tsx|mjs|cjs|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot|json|map|wasm)$/i.test(activePath)
       ) {
         return next();
       }
@@ -782,9 +794,10 @@ export function createApp(options?: CreateAppOptions): express.Express {
         const targetUrl = req.url || req.originalUrl;
         const dynamicHtml = await injectDynamicMetaTags(template, targetUrl, host, protocol);
 
+        const isDev = process.env.NODE_ENV !== 'production';
         res.status(200).set({
           'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=600'
+          'Cache-Control': isDev ? 'no-cache, no-store, must-revalidate' : 'public, max-age=60, s-maxage=300, stale-while-revalidate=600'
         }).send(dynamicHtml);
       } catch (err) {
         console.error('[SEO Render] Error rendering dynamic metadata:', err);

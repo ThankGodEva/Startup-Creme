@@ -124,11 +124,47 @@ export function generateSitemapXML(posts: Post[], topics: DiscussionTopic[]): st
   xml += `    <priority>0.5</priority>\n`;
   xml += `  </url>\n`;
 
-  // Forum
+  // Forum & Platform Modules
   xml += `  <url>\n`;
   xml += `    <loc>${baseUrl}/discussion</loc>\n`;
   xml += `    <changefreq>hourly</changefreq>\n`;
+  xml += `    <priority>0.85</priority>\n`;
+  xml += `  </url>\n`;
+
+  xml += `  <url>\n`;
+  xml += `    <loc>${baseUrl}/directory</loc>\n`;
+  xml += `    <changefreq>daily</changefreq>\n`;
   xml += `    <priority>0.8</priority>\n`;
+  xml += `  </url>\n`;
+
+  xml += `  <url>\n`;
+  xml += `    <loc>${baseUrl}/careers</loc>\n`;
+  xml += `    <changefreq>daily</changefreq>\n`;
+  xml += `    <priority>0.8</priority>\n`;
+  xml += `  </url>\n`;
+
+  xml += `  <url>\n`;
+  xml += `    <loc>${baseUrl}/events</loc>\n`;
+  xml += `    <changefreq>daily</changefreq>\n`;
+  xml += `    <priority>0.9</priority>\n`;
+  xml += `  </url>\n`;
+
+  xml += `  <url>\n`;
+  xml += `    <loc>${baseUrl}/markets</loc>\n`;
+  xml += `    <changefreq>hourly</changefreq>\n`;
+  xml += `    <priority>0.9</priority>\n`;
+  xml += `  </url>\n`;
+
+  xml += `  <url>\n`;
+  xml += `    <loc>${baseUrl}/markets/rates</loc>\n`;
+  xml += `    <changefreq>hourly</changefreq>\n`;
+  xml += `    <priority>0.9</priority>\n`;
+  xml += `  </url>\n`;
+
+  xml += `  <url>\n`;
+  xml += `    <loc>${baseUrl}/markets/inflation</loc>\n`;
+  xml += `    <changefreq>hourly</changefreq>\n`;
+  xml += `    <priority>0.9</priority>\n`;
   xml += `  </url>\n`;
 
   // Published Posts
@@ -333,8 +369,8 @@ Content is published across 5 localized regional editions:
 - [Global Opportunity Engine (Grants & Accelerators)](${cleanBase}/events): Verified non-dilutive grants, venture accelerators, founder fellowships, and hackathon deadlines.
 - [Discussion Forum](${cleanBase}/discussion): Community debate and peer founder intelligence on valuations, tech stacks, and fundraising.
 - [Startup Directory](${cleanBase}/directory): Index of high-growth technology and financial companies.
-- [Founder Careers & Talent](${cleanBase}/careers): Executive leadership, founding engineer, and tech lead opportunities.
-- [Macro & Cloud Rates Tracker](${cleanBase}/markets): Real-time benchmarks for central bank interest rates (Fed, ECB, BoE, BoJ) and cloud compute pricing.
+- [Macro Central Bank Interest Rates & 10-Year Inflation Rates Tracker](${cleanBase}/markets/rates): Real-time benchmarks for central bank interest rates (Fed, ECB, BoE, BoJ, CBN, SARB, CBK, RBI) and 10-year historical sovereign inflation rate trajectories (2017–2026).
+- [10-Year Sovereign Inflation Rates Matrix](${cleanBase}/markets/rates#inflation-rates): Annual consumer price index inflation dataset, target tolerance bands, and disinflation cycle metrics across 8 global economies.
 
 ---
 

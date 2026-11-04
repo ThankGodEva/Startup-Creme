@@ -3,19 +3,31 @@ import { Header } from './components/Header';
 import { DualHero } from './components/DualHero';
 import { ArticleCard } from './components/ArticleCard';
 import { ArticleView, ArticleLoadingSkeleton } from './components/ArticleView';
-import { DiscussionForum } from './components/DiscussionForum';
-import { TopicDetail } from './components/TopicDetail';
-import { AdminDashboard } from './components/AdminDashboard';
 import { AuthModal } from './components/AuthModal';
 import { BookmarksDrawer } from './components/BookmarksDrawer';
 import { Footer } from './components/Footer';
-import { LegalPage, LegalDocType } from './components/LegalPage';
-import { CalculatorsModule } from './components/CalculatorsModule';
-import { StartupDirectoryModule } from './components/StartupDirectoryModule';
-import { RatesTrackerModule } from './components/RatesTrackerModule';
-import { CareersBoardModule } from './components/CareersBoardModule';
-import { EventsModule } from './components/EventsModule';
-import { AboutPage } from './components/AboutPage';
+import type { LegalDocType } from './components/LegalPage';
+
+// Code-split heavy routes to slash initial JavaScript payload & optimize TTI
+const AdminDashboard = React.lazy(() => import('./components/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+const CalculatorsModule = React.lazy(() => import('./components/CalculatorsModule').then(m => ({ default: m.CalculatorsModule })));
+const StartupDirectoryModule = React.lazy(() => import('./components/StartupDirectoryModule').then(m => ({ default: m.StartupDirectoryModule })));
+const RatesTrackerModule = React.lazy(() => import('./components/RatesTrackerModule').then(m => ({ default: m.RatesTrackerModule })));
+const CareersBoardModule = React.lazy(() => import('./components/CareersBoardModule').then(m => ({ default: m.CareersBoardModule })));
+const EventsModule = React.lazy(() => import('./components/EventsModule').then(m => ({ default: m.EventsModule })));
+const AboutPage = React.lazy(() => import('./components/AboutPage').then(m => ({ default: m.AboutPage })));
+const LegalPage = React.lazy(() => import('./components/LegalPage').then(m => ({ default: m.LegalPage })));
+const DiscussionForum = React.lazy(() => import('./components/DiscussionForum').then(m => ({ default: m.DiscussionForum })));
+const TopicDetail = React.lazy(() => import('./components/TopicDetail').then(m => ({ default: m.TopicDetail })));
+
+const ModuleLoadingFallback: React.FC = () => (
+  <div className="min-h-[50vh] flex flex-col items-center justify-center py-20 px-4 text-center">
+    <div className="w-8 h-8 border-3 border-cyan-600 border-t-transparent rounded-full animate-spin mb-3" />
+    <span className="text-xs font-mono text-slate-500 uppercase tracking-widest font-semibold">
+      Loading Platform View...
+    </span>
+  </div>
+);
 
 import { store } from './lib/store';
 import { Post, DiscussionTopic, UserProfile, ContentVertical } from './types';
@@ -105,7 +117,7 @@ export default function App() {
       return;
     }
 
-    if (parts[0] === 'rates' || parts[0] === 'markets') {
+    if (parts[0] === 'rates' || parts[0] === 'markets' || parts[0] === 'inflation' || parts[0] === 'inflation-rates') {
       if (!isMarketsEnabled()) {
         setActiveTab('home');
         setSelectedPost(null);
@@ -577,7 +589,8 @@ export default function App() {
 
       {/* Main Dynamic Router Content */}
       <main className="flex-1 w-full max-w-full overflow-x-hidden">
-        {/* ARTICLE DETAILED VIEW */}
+        <React.Suspense fallback={<ModuleLoadingFallback />}>
+          {/* ARTICLE DETAILED VIEW */}
         {selectedPost ? (
           <ArticleView
             post={selectedPost}
@@ -1033,10 +1046,10 @@ export default function App() {
                               onClick={() => handleTabChange('rates', '#central-bank-rates')}
                               className="font-serif text-base font-bold text-slate-900 group-hover:text-emerald-700 transition-colors mb-2 cursor-pointer"
                             >
-                              Macro & Cloud Rate Trackers
+                              Macro & Central Bank Rate Tracker
                             </h3>
                             <p className="text-xs text-slate-500 leading-relaxed mb-3">
-                              Central bank policy rates (FED, ECB, CBN, BoE) alongside serverless compute, database egress, and GPU pricing index.
+                              Sovereign central bank policy rates (FED, ECB, CBN, BoE) alongside monetary easing cycles, inflation metrics, and real policy yield curves.
                             </p>
                             <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono text-slate-500 mb-4 pt-2 border-t border-slate-100">
                               <a
@@ -1048,17 +1061,6 @@ export default function App() {
                                 className="hover:text-emerald-700 underline-offset-2 hover:underline"
                               >
                                 #central-bank-rates
-                              </a>
-                              <span aria-hidden="true">·</span>
-                              <a
-                                href="/markets/rates#cloud-pricing-index"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  handleTabChange('rates', '#cloud-pricing-index');
-                                }}
-                                className="hover:text-emerald-700 underline-offset-2 hover:underline"
-                              >
-                                #cloud-pricing-index
                               </a>
                             </div>
                           </div>
@@ -1400,6 +1402,7 @@ export default function App() {
             </div>
           </div>
         )}
+        </React.Suspense>
       </main>
 
       {/* Footer */}
