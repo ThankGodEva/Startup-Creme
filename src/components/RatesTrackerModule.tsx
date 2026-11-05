@@ -5,7 +5,6 @@ import {
   Minus,
   RefreshCw,
   Landmark,
-  Webhook,
   CheckCircle2,
   Percent,
   BarChart3,
@@ -71,7 +70,6 @@ export const RatesTrackerModule: React.FC = () => {
   const [regionFilter, setRegionFilter] = useState<'all' | 'americas_eu' | 'africa_apac'>('all');
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncSuccessMessage, setSyncSuccessMessage] = useState<string | null>(null);
-  const [showWebhookSpec, setShowWebhookSpec] = useState(false);
 
   // Inflation section state (Trend Charts & Cards active first)
   const [inflationViewMode, setInflationViewMode] = useState<'cards' | 'matrix'>('cards');
@@ -142,7 +140,7 @@ export const RatesTrackerModule: React.FC = () => {
     const updated = await store.triggerRateWebhookSync();
     setSnapshot(updated);
     setIsSyncing(false);
-    setSyncSuccessMessage('Snapshot synchronized via /api/webhooks/n8n/rates and cached in startupcreme.rate_snapshots.');
+    setSyncSuccessMessage('Snapshot synchronized successfully with live macroeconomic data sources.');
     setTimeout(() => setSyncSuccessMessage(null), 5000);
   };
 
@@ -359,15 +357,6 @@ export const RatesTrackerModule: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setShowWebhookSpec(!showWebhookSpec)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
-          >
-            <Webhook className="w-3.5 h-3.5 text-cyan-600" />
-            <span>n8n Webhook Architecture</span>
-          </button>
-
-          <button
-            type="button"
             onClick={handleWebhookSync}
             disabled={isSyncing}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-semibold transition-colors cursor-pointer"
@@ -383,47 +372,6 @@ export const RatesTrackerModule: React.FC = () => {
         <div className="bg-white border border-emerald-300 rounded-xl p-4 flex items-center gap-2.5 text-xs text-slate-800 shadow-xs">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
           <span className="font-medium">{syncSuccessMessage}</span>
-        </div>
-      )}
-
-      {/* Expandable n8n Webhook & Supabase Snapshot Architecture Drawer */}
-      {showWebhookSpec && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <div>
-              <h2 className="font-serif text-base font-bold text-slate-900">
-                Automated n8n Webhook & Supabase Rate Snapshot Architecture
-              </h2>
-              <p className="text-xs text-slate-500">
-                Snapshots are ingested via scheduled n8n HTTP nodes into <code className="font-mono text-slate-800">startupcreme.rate_snapshots</code>
-              </p>
-            </div>
-            <span className="text-xs font-mono text-slate-500">
-              Last Sync: {new Date(snapshot.recorded_at).toLocaleString()}
-            </span>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-4 text-xs">
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
-              <div className="font-semibold text-slate-900">Webhook Ingestion Endpoint</div>
-              <div className="font-mono text-emerald-700 bg-white border border-slate-200 rounded-lg px-3 py-2">
-                POST /api/webhooks/n8n/rates
-              </div>
-              <p className="text-slate-500 leading-relaxed">
-                Accepts JSON payload of <code className="font-mono">central_bank_rates</code> and <code className="font-mono">inflation_rates</code> from automated n8n cron workflows and persists a timestamped snapshot row in Supabase.
-              </p>
-            </div>
-
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
-              <div className="font-semibold text-slate-900">Active Snapshot Metadata</div>
-              <div className="font-mono text-[11px] text-slate-700 space-y-1">
-                <div>Snapshot ID: {snapshot.id}</div>
-                <div>Source Pipeline: {snapshot.source}</div>
-                <div>Central Banks Tracked: {snapshot.central_bank_rates.length} Institutions</div>
-                <div>Inflation Economies: {inflationRatesList.length} Jurisdictions</div>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 
