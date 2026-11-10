@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   X,
   Calendar,
@@ -13,10 +13,16 @@ import {
   AlertCircle,
   Loader2,
   CheckCircle2,
+  Image as ImageIcon,
+  Upload,
+  Link as LinkIcon,
+  Globe,
 } from 'lucide-react';
 import { store } from '../lib/store';
 import { EventOpportunity, OpportunityType } from '../types';
 import { EventSubmissionSchema } from '../lib/validation';
+import { EVENT_BANNER_PRESETS, getEventBanner } from '../lib/eventsHelper';
+import { getEventShareUrl } from '../lib/router';
 
 interface PublishEventModalProps {
   isOpen: boolean;
@@ -45,13 +51,18 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
   const [location, setLocation] = useState('Global (Remote)');
   const [deadlineDate, setDeadlineDate] = useState('');
   const [applicationUrl, setApplicationUrl] = useState('');
-  const [vertical, setVertical] = useState<'finance' | 'tech' | 'founders-mindset'>('tech');
   const [description, setDescription] = useState('');
-
-  // Advanced fields
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [slug, setSlug] = useState('');
-  const [coverImage, setCoverImage] = useState('');
+
+  // Banner image state
+  const [bannerImage, setBannerImage] = useState('');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Companion Post Toggle: "An 'Events & Grants' can but must not have a post"
+  const [createCompanionPost, setCreateCompanionPost] = useState(false);
+  const [vertical, setVertical] = useState<'finance' | 'tech' | 'founders-mindset'>('tech');
   const [fullContent, setFullContent] = useState('');
 
   // Submission state
@@ -72,6 +83,45 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
     }
   };
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingImage(true);
+    setUploadError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+
+      const resp = await fetch('/api/upload-image', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!resp.ok) {
+        throw new Error(`Upload failed with status: ${resp.status}`);
+      }
+
+      const result = await resp.json();
+      if (result.success && result.url) {
+        setBannerImage(result.url);
+      } else {
+        throw new Error(result.error || 'Failed to retrieve uploaded image URL');
+      }
+    } catch (err: any) {
+      setUploadError(err.message || 'Image upload failed. You can paste an image URL instead.');
+    } finally {
+      setIsUploadingImage(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const currentEffectiveBanner = bannerImage.trim() || getEventBanner({ opportunity_type: opportunityType });
+  const previewSlug = slug || 'new-opportunity';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
@@ -86,10 +136,12 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
       location: location || 'Global (Remote)',
       deadline_date: deadlineDate,
       funding_amount: fundingAmount ? fundingAmount : null,
+      banner_image: bannerImage.trim() || null,
+      create_post: createCompanionPost,
       vertical,
       locale: 'en-us',
       slug: slug || undefined,
-      content: fullContent || undefined,
+      content: createCompanionPost ? (fullContent || description) : undefined,
     });
 
     if (!validationResult.success) {
@@ -112,12 +164,14 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
         location: location || 'Global (Remote)',
         deadline_date: deadlineDate,
         application_url: applicationUrl,
+        banner_image: currentEffectiveBanner,
+        cover_image: currentEffectiveBanner,
+        create_post: createCompanionPost,
         vertical,
         locale: 'en-us',
         description,
         slug: slug || undefined,
-        content: fullContent || description,
-        cover_image: coverImage || null,
+        content: createCompanionPost ? (fullContent || description) : undefined,
       });
 
       if (!res.success || !res.event) {
@@ -145,7 +199,7 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
       className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6"
     >
       <div
-        className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-8 animate-in fade-in zoom-in-95 duration-200"
+        className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-8 animate-in fade-in zoom-in-95 duration-200 text-left"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
@@ -159,7 +213,7 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
               Publish Grant, Accelerator or Event
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Manually publish verified opportunities to <code className="font-mono text-slate-700">startupcreme.events</code> and link them with an editorial post.
+              Every opportunity includes a hero banner and unique shareable link. Companion editorial posts are optional.
             </p>
           </div>
           <button
@@ -173,7 +227,7 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
           {formError && (
             <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-start gap-2.5">
               <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
@@ -181,7 +235,95 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
             </div>
           )}
 
-          {/* Title */}
+          {/* 1. HERO BANNER SECTION */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-slate-800">
+                Event Banner Image <span className="text-amber-700">*</span>
+              </label>
+              <span className="text-[11px] font-mono text-slate-400">16:9 Landscape Banner</span>
+            </div>
+
+            {/* Banner Live Preview */}
+            <div className="relative w-full h-36 sm:h-44 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 group shadow-xs">
+              <img
+                src={currentEffectiveBanner}
+                alt="Event Banner Preview"
+                className="w-full h-full object-cover transition-transform group-hover:scale-102"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-slate-950/20 to-transparent flex items-end p-3.5">
+                <div className="flex items-center justify-between w-full text-white text-xs">
+                  <span className="font-semibold truncate max-w-[70%]">
+                    {title || 'Opportunity Banner Preview'}
+                  </span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase font-bold bg-white/20 backdrop-blur-xs border border-white/30">
+                    {opportunityType}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Banner URL Input & File Upload */}
+            <div className="flex flex-col sm:flex-row gap-2 pt-1">
+              <div className="relative flex-1">
+                <ImageIcon className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                <input
+                  type="url"
+                  value={bannerImage}
+                  onChange={(e) => setBannerImage(e.target.value)}
+                  placeholder="Paste banner image URL (or select preset below)..."
+                  className="w-full bg-white border border-slate-300 rounded-xl pl-9 pr-3.5 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-amber-600 shadow-2xs"
+                />
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={handleImageUpload}
+                className="hidden"
+              />
+
+              <button
+                type="button"
+                disabled={isUploadingImage}
+                onClick={() => fileInputRef.current?.click()}
+                className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+              >
+                {isUploadingImage ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Upload className="w-3.5 h-3.5 text-slate-600" />
+                )}
+                <span>{isUploadingImage ? 'Uploading...' : 'Upload Image'}</span>
+              </button>
+            </div>
+
+            {uploadError && (
+              <p className="text-[11px] text-rose-600">{uploadError}</p>
+            )}
+
+            {/* Preset Banner Quick Selection */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[11px] text-slate-400 font-medium mr-1">Thematic Presets:</span>
+              {EVENT_BANNER_PRESETS.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => setBannerImage(preset.url)}
+                  className={`text-[10px] font-mono px-2 py-0.5 rounded-md border transition-colors cursor-pointer ${
+                    bannerImage === preset.url
+                      ? 'bg-amber-100 text-amber-900 border-amber-300 font-bold'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 2. TITLE */}
           <div>
             <label className="block text-xs font-bold text-slate-800 mb-1.5">
               Opportunity / Event Title <span className="text-rose-600">*</span>
@@ -201,7 +343,33 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
             )}
           </div>
 
-          {/* Grid: Type & Funding */}
+          {/* 3. UNIQUE SHAREABLE LINK PREVIEW & CUSTOM SLUG */}
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <LinkIcon className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Unique Shareable Link</span>
+              </span>
+              <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                Canonical URL
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono text-slate-500 shrink-0">/events/</span>
+              <input
+                type="text"
+                value={slug}
+                onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '-'))}
+                placeholder="custom-slug"
+                className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-800 focus:outline-none focus:border-indigo-600"
+              />
+            </div>
+            <p className="text-[10px] text-slate-500 font-mono truncate">
+              Full Link: <code className="text-slate-800">{getEventShareUrl({ slug: previewSlug })}</code>
+            </p>
+          </div>
+
+          {/* 4. TYPE & FUNDING */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-800 mb-1.5">
@@ -237,7 +405,7 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
             </div>
           </div>
 
-          {/* Grid: Location & Deadline */}
+          {/* 5. LOCATION & DEADLINE */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-800 mb-1.5">
@@ -278,47 +446,30 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
             </div>
           </div>
 
-          {/* Grid: Application URL & Vertical */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="sm:col-span-2">
-              <label className="block text-xs font-bold text-slate-800 mb-1.5">
-                Official Application Portal URL <span className="text-rose-600">*</span>
-              </label>
-              <div className="relative">
-                <ExternalLink className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
-                <input
-                  type="url"
-                  required
-                  value={applicationUrl}
-                  onChange={(e) => setApplicationUrl(e.target.value)}
-                  placeholder="https://techstars.com/apply"
-                  className={`w-full bg-white border ${
-                    fieldErrors.application_url ? 'border-rose-400 focus:border-rose-600' : 'border-slate-300 focus:border-amber-600'
-                  } rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none transition-colors shadow-2xs`}
-                />
-              </div>
-              {fieldErrors.application_url && (
-                <p className="text-[11px] text-rose-600 mt-1">{fieldErrors.application_url}</p>
-              )}
+          {/* 6. APPLICATION PORTAL URL */}
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1.5">
+              Official Application Portal URL <span className="text-rose-600">*</span>
+            </label>
+            <div className="relative">
+              <ExternalLink className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+              <input
+                type="url"
+                required
+                value={applicationUrl}
+                onChange={(e) => setApplicationUrl(e.target.value)}
+                placeholder="https://techstars.com/apply"
+                className={`w-full bg-white border ${
+                  fieldErrors.application_url ? 'border-rose-400 focus:border-rose-600' : 'border-slate-300 focus:border-amber-600'
+                } rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none transition-colors shadow-2xs`}
+              />
             </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-800 mb-1.5">
-                Silo / Vertical
-              </label>
-              <select
-                value={vertical}
-                onChange={(e) => setVertical(e.target.value as any)}
-                className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-amber-600 cursor-pointer shadow-2xs"
-              >
-                <option value="tech">Tech & AI</option>
-                <option value="finance">Finance & FinTech</option>
-                <option value="founders-mindset">Founders Mindset</option>
-              </select>
-            </div>
+            {fieldErrors.application_url && (
+              <p className="text-[11px] text-rose-600 mt-1">{fieldErrors.application_url}</p>
+            )}
           </div>
 
-          {/* Description */}
+          {/* 7. DESCRIPTION */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs font-bold text-slate-800">
@@ -343,53 +494,40 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
             )}
           </div>
 
-          {/* Advanced Collapsible Accordion */}
-          <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
-            <button
-              type="button"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-semibold text-slate-700 hover:text-slate-900 transition-colors cursor-pointer"
-            >
-              <div className="flex items-center gap-2">
-                <FileText className="w-3.5 h-3.5 text-amber-700" />
-                <span>Advanced Editorial Options (Slug, Cover Image, Full Article)</span>
+          {/* 8. COMPANION POST TOGGLE ("An 'Events & Grants' can but must not have a post") */}
+          <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+            <label className="flex items-start gap-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={createCompanionPost}
+                onChange={(e) => setCreateCompanionPost(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+              />
+              <div>
+                <span className="text-xs font-bold text-slate-900 block">
+                  Create a companion editorial post / article for this opportunity
+                </span>
+                <span className="text-[11px] text-slate-500 leading-relaxed block mt-0.5">
+                  Optional. When unchecked, this opportunity is published directly as a standalone verified event with its unique shareable link and banner.
+                </span>
               </div>
-              {showAdvanced ? (
-                <ChevronUp className="w-4 h-4 text-slate-400" />
-              ) : (
-                <ChevronDown className="w-4 h-4 text-slate-400" />
-              )}
-            </button>
+            </label>
 
-            {showAdvanced && (
-              <div className="p-4 pt-2 space-y-3.5 border-t border-slate-200 bg-white">
+            {createCompanionPost && (
+              <div className="pt-3 border-t border-slate-200 space-y-3 bg-white p-3 rounded-lg border border-slate-100 animate-in fade-in duration-150">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    Custom URL Slug
+                    Editorial Silo / Vertical
                   </label>
-                  <input
-                    type="text"
-                    value={slug}
-                    onChange={(e) => setSlug(e.target.value)}
-                    placeholder="auto-generated-from-title"
-                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:border-amber-600"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-0.5">
-                    URL: <code className="font-mono">/events#{slug || 'slug'}</code>
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    Cover Image URL (Optional)
-                  </label>
-                  <input
-                    type="url"
-                    value={coverImage}
-                    onChange={(e) => setCoverImage(e.target.value)}
-                    placeholder="https://images.unsplash.com/..."
-                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-amber-600"
-                  />
+                  <select
+                    value={vertical}
+                    onChange={(e) => setVertical(e.target.value as any)}
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-amber-600 cursor-pointer"
+                  >
+                    <option value="tech">Tech & AI</option>
+                    <option value="finance">Finance & FinTech</option>
+                    <option value="founders-mindset">Founders Mindset</option>
+                  </select>
                 </div>
 
                 <div>
@@ -424,7 +562,7 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-2 cursor-pointer disabled:opacity-50"
             >
               {isSubmitting ? (
                 <>
@@ -434,7 +572,7 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
               ) : (
                 <>
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Publish Opportunity</span>
+                  <span>{createCompanionPost ? 'Publish Event & Post' : 'Publish Opportunity'}</span>
                 </>
               )}
             </button>

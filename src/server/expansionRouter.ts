@@ -1271,78 +1271,110 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
       });
     }
 
-    let linkedPostId: string;
+    const shouldCreatePost = rawBody.create_post !== undefined
+      ? Boolean(rawBody.create_post)
+      : Boolean(rawBody.content && typeof rawBody.content === 'string' && rawBody.content.length > 50 && rawBody.content !== description);
 
-    if (existingPost) {
-      // "Do not update title, content, excerpt or status of an existing post in any case via this route."
-      // Keep existing post untouched!
-      linkedPostId = existingPost.id;
-    } else {
-      // Create new post with resolved status (draft by default)
-      const postRow = {
-        locale: normLocale,
-        vertical: normVertical,
-        slug: normSlug,
-        title: effectiveTitle,
-        excerpt: validated.excerpt ? validated.excerpt.trim() : description.slice(0, 240),
-        content: jsonbContent,
-        status: resolvedStatus,
-        meta_description: validated.meta_description
-          ? validated.meta_description.trim()
-          : (validated.excerpt || description).slice(0, 160),
-        canonical_url: validated.canonical_url ? validated.canonical_url.trim() : null,
-        cover_image: validated.cover_image ? validated.cover_image.trim() : null,
-        source_url: validated.source_url ? validated.source_url.trim() : null,
-        source_name: validated.source_name ? validated.source_name.trim() : null,
-        ai_generated: Boolean(validated.ai_generated),
-        hide_ai_disclosure: Boolean(validated.hide_ai_disclosure),
-        author_name: validated.author_name || 'Startup Crème Editorial',
-        author_role: validated.author_role || 'Principal Editor',
-        author_avatar: validated.author_avatar || null,
-        dual_silo: normVertical === 'founders-mindset' ? false : Boolean(validated.dual_silo),
-        silo_badge: validated.silo_badge || null,
-        tags: validated.tags || [],
-        reading_time_minutes: validated.reading_time_minutes || 5,
-        word_count: validated.word_count || 800,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
+    let linkedPostId: string | null = null;
+    let linkedPostSnapshot: any = null;
 
-      if (client) {
-        const postsTable = client.schema ? client.schema('startupcreme').from('posts') : client.from('posts');
-        let insertPostRes = await postsTable
-          .insert(postRow)
-          .select('id, status')
-          .single();
-
-        if (insertPostRes.error && (insertPostRes.error.code === 'PGRST204' || String(insertPostRes.error.message || '').includes('column'))) {
-          // Schema migration not yet applied on remote Supabase; strip new columns for insert
-          const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
-          insertPostRes = await postsTable
-            .insert(legacyPostRow)
-            .select('id, status')
-            .single();
-        }
-
-        if (insertPostRes.error && insertPostRes.error.code === '22P02' && String(insertPostRes.error.message || '').includes('vertical')) {
-          // Enum value 'founders-mindset' not yet added on remote DB; fallback to 'tech'
-          const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
-          insertPostRes = await postsTable
-            .insert({ ...legacyPostRow, vertical: 'tech' })
-            .select('id, status')
-            .single();
-        }
-
-        if (insertPostRes.error) throw insertPostRes.error;
-        linkedPostId = insertPostRes.data.id;
+    if (shouldCreatePost) {
+      if (existingPost) {
+        // Keep existing post untouched
+        linkedPostId = existingPost.id;
+        linkedPostSnapshot = {
+          id: existingPost.id,
+          locale: existingPost.locale,
+          vertical: existingPost.vertical,
+          slug: existingPost.slug,
+          title: existingPost.title,
+          status: existingPost.status,
+          canonical_url: existingPost.canonical_url,
+          source_name: existingPost.source_name,
+          source_url: existingPost.source_url,
+          ai_generated: Boolean(existingPost.ai_generated),
+          hide_ai_disclosure: Boolean(existingPost.hide_ai_disclosure),
+        };
       } else {
-        linkedPostId = `post-${Date.now()}`;
+        // Create new post with resolved status (draft by default)
+        const postRow = {
+          locale: normLocale,
+          vertical: normVertical,
+          slug: normSlug,
+          title: effectiveTitle,
+          excerpt: validated.excerpt ? validated.excerpt.trim() : description.slice(0, 240),
+          content: jsonbContent,
+          status: resolvedStatus,
+          meta_description: validated.meta_description
+            ? validated.meta_description.trim()
+            : (validated.excerpt || description).slice(0, 160),
+          canonical_url: validated.canonical_url ? validated.canonical_url.trim() : null,
+          cover_image: (validated as any).banner_image ? (validated as any).banner_image.trim() : (validated.cover_image ? validated.cover_image.trim() : null),
+          source_url: validated.source_url ? validated.source_url.trim() : null,
+          source_name: validated.source_name ? validated.source_name.trim() : null,
+          ai_generated: Boolean(validated.ai_generated),
+          hide_ai_disclosure: Boolean(validated.hide_ai_disclosure),
+          author_name: validated.author_name || 'Startup Crème Editorial',
+          author_role: validated.author_role || 'Principal Editor',
+          author_avatar: validated.author_avatar || null,
+          dual_silo: normVertical === 'founders-mindset' ? false : Boolean(validated.dual_silo),
+          silo_badge: validated.silo_badge || null,
+          tags: validated.tags || [],
+          reading_time_minutes: validated.reading_time_minutes || 5,
+          word_count: validated.word_count || 800,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        if (client) {
+          const postsTable = client.schema ? client.schema('startupcreme').from('posts') : client.from('posts');
+          let insertPostRes = await postsTable
+            .insert(postRow)
+            .select('id, status')
+            .single();
+
+          if (insertPostRes.error && (insertPostRes.error.code === 'PGRST204' || String(insertPostRes.error.message || '').includes('column'))) {
+            const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
+            insertPostRes = await postsTable
+              .insert(legacyPostRow)
+              .select('id, status')
+              .single();
+          }
+
+          if (insertPostRes.error && insertPostRes.error.code === '22P02' && String(insertPostRes.error.message || '').includes('vertical')) {
+            const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
+            insertPostRes = await postsTable
+              .insert({ ...legacyPostRow, vertical: 'tech' })
+              .select('id, status')
+              .single();
+          }
+
+          if (insertPostRes.error) throw insertPostRes.error;
+          linkedPostId = insertPostRes.data.id;
+        } else {
+          linkedPostId = `post-${Date.now()}`;
+        }
+
+        linkedPostSnapshot = {
+          id: linkedPostId,
+          locale: normLocale,
+          vertical: normVertical,
+          slug: normSlug,
+          title: effectiveTitle,
+          status: resolvedStatus,
+          canonical_url: validated.canonical_url ? validated.canonical_url.trim() : null,
+          source_name: validated.source_name ? validated.source_name.trim() : null,
+          source_url: validated.source_url ? validated.source_url.trim() : null,
+          ai_generated: Boolean(validated.ai_generated),
+          hide_ai_disclosure: Boolean(validated.hide_ai_disclosure),
+        };
       }
     }
 
     // Now process event row
     let eventId: string;
-    const eventRow = {
+    const normBannerImage = (validated as any).banner_image?.trim() || validated.cover_image?.trim() || null;
+    const eventRow: any = {
       title: effectiveEventTitle,
       slug: normSlug,
       description,
@@ -1351,6 +1383,7 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
       location: (validated.location || 'Global (Remote)').trim(),
       deadline_date: new Date(validated.deadline_date).toISOString(),
       application_url: cleanAppUrl,
+      banner_image: normBannerImage,
       linked_post_id: linkedPostId,
     };
 
@@ -1359,20 +1392,41 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
 
       if (existingEvent) {
         eventId = existingEvent.id;
-        if (!existingEvent.linked_post_id) {
-          await eventsTable.update({ linked_post_id: linkedPostId }).eq('id', existingEvent.id);
+        const updatePayload: any = {};
+        if (normBannerImage && !existingEvent.banner_image) {
+          updatePayload.banner_image = normBannerImage;
+        }
+        if (linkedPostId && !existingEvent.linked_post_id) {
+          updatePayload.linked_post_id = linkedPostId;
+        }
+        if (Object.keys(updatePayload).length > 0) {
+          try {
+            await eventsTable.update(updatePayload).eq('id', existingEvent.id);
+          } catch {
+            // Ignore optional update failure
+          }
         }
       } else {
         let insertRes = await eventsTable
           .insert(eventRow)
-          .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
+          .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, banner_image, linked_post_id, created_at')
           .maybeSingle();
+
+        // If banner_image column not present yet on remote DB, fallback without it
+        if (insertRes.error && String(insertRes.error.message || '').includes('banner_image')) {
+          const { banner_image, ...legacyEventRow } = eventRow;
+          insertRes = await eventsTable
+            .insert(legacyEventRow)
+            .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
+            .maybeSingle();
+        }
 
         // Fallback if remote database has not yet applied enum additions for fellowship/incubator
         if (insertRes.error && insertRes.error.code === '22P02' && String(insertRes.error.message || '').includes('opportunity_type')) {
           const fallbackOpp = validated.opportunity_type === 'fellowship' ? 'grant' : 'accelerator';
+          const { banner_image, ...legacyEventRow } = eventRow;
           insertRes = await eventsTable
-            .insert({ ...eventRow, opportunity_type: fallbackOpp })
+            .insert({ ...legacyEventRow, opportunity_type: fallbackOpp })
             .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
             .maybeSingle();
         }
@@ -1392,20 +1446,6 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
       eventId = existingEvent?.id || `event-${Date.now()}`;
     }
 
-    const linkedPostSnapshot = {
-      id: linkedPostId,
-      locale: normLocale,
-      vertical: normVertical,
-      slug: normSlug,
-      title: effectiveTitle,
-      status: (existingPost?.status || resolvedStatus) as 'draft' | 'published',
-      canonical_url: existingPost?.canonical_url || (validated.canonical_url ? validated.canonical_url.trim() : null),
-      source_name: existingPost?.source_name || (validated.source_name ? validated.source_name.trim() : null),
-      source_url: existingPost?.source_url || (validated.source_url ? validated.source_url.trim() : null),
-      ai_generated: existingPost?.ai_generated !== undefined ? Boolean(existingPost.ai_generated) : Boolean(validated.ai_generated),
-      hide_ai_disclosure: existingPost?.hide_ai_disclosure !== undefined ? Boolean(existingPost.hide_ai_disclosure) : Boolean(validated.hide_ai_disclosure),
-    };
-
     const memoryEvent: EventOpportunity = {
       id: eventId,
       title: effectiveEventTitle,
@@ -1416,6 +1456,7 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
       location: validated.location || 'Global (Remote)',
       deadline_date: new Date(validated.deadline_date).toISOString(),
       application_url: cleanAppUrl,
+      banner_image: normBannerImage,
       linked_post_id: linkedPostId,
       linked_post: linkedPostSnapshot as any,
       created_at: new Date().toISOString(),
@@ -1428,14 +1469,15 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Event and post successfully processed',
+      message: linkedPostId ? 'Event and post successfully processed' : 'Standalone event & grant successfully published',
       post: linkedPostSnapshot,
       data: {
         post_id: linkedPostId,
         event_id: eventId,
-        status: linkedPostSnapshot.status,
+        status: linkedPostSnapshot ? linkedPostSnapshot.status : 'published',
         event_title: effectiveEventTitle,
         application_url: cleanAppUrl,
+        banner_image: normBannerImage,
         opportunity_type: validated.opportunity_type,
         funding_amount: memoryEvent.funding_amount,
         deadline_date: memoryEvent.deadline_date,
@@ -1454,7 +1496,7 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
   }
 });
 
-// Public GET events listing: only returns rows whose linked post has status = 'published'
+// Public GET events listing: returns standalone events as well as events whose linked post is published
 expansionRouter.get('/events', async (req: Request, res: Response) => {
   const typeFilter = (req.query.type as string) || '';
   const searchFilter = (req.query.search as string) || '';
@@ -1482,8 +1524,7 @@ expansionRouter.get('/events', async (req: Request, res: Response) => {
     try {
       let query = client
         .from('events')
-        .select('*, linked_post:posts!inner(*)')
-        .eq('linked_post.status', 'published')
+        .select('*, linked_post:posts(*)')
         .order('deadline_date', { ascending: true });
 
       if (types.length === 1) {
@@ -1500,41 +1541,23 @@ expansionRouter.get('/events', async (req: Request, res: Response) => {
 
       let { data, error } = await query;
 
-      // Handle 22P02 enum mismatch if remote DB hasn't applied latest enum additions
-      if (error && error.code === '22P02' && types.length > 0) {
-        const baseline = types.filter((t) =>
-          ['grant', 'accelerator', 'pitch_competition', 'conference'].includes(t)
-        );
-        if (baseline.length > 0) {
-          let retryQ = client
-            .from('events')
-            .select('*, linked_post:posts!inner(*)')
-            .eq('linked_post.status', 'published')
-            .order('deadline_date', { ascending: true });
-          if (baseline.length === 1) {
-            retryQ = retryQ.eq('opportunity_type', baseline[0]);
-          } else {
-            retryQ = retryQ.in('opportunity_type', baseline);
-          }
-          const retryRes = await retryQ;
-          if (!retryRes.error && Array.isArray(retryRes.data)) {
-            data = retryRes.data;
-            error = null;
-          }
-        }
-      }
-
       if (!error && Array.isArray(data)) {
-        const dbSlugs = new Set(data.map((d: any) => d.slug));
+        // Events without a post, OR events whose post has status = 'published'
+        const publicEvents = data.filter((d: any) => {
+          if (!d.linked_post_id) return true; // Standalone event
+          return d.linked_post?.status === 'published';
+        });
+
+        const dbSlugs = new Set(publicEvents.map((d: any) => d.slug));
         const matchingMemory = runtimeEvents.filter((m) => {
           if (dbSlugs.has(m.slug)) return false;
-          if (m.linked_post?.status !== 'published') return false;
+          if (m.linked_post_id && m.linked_post?.status !== 'published') return false;
           if (types.length > 0) {
             return types.includes(String(m.opportunity_type || '').toLowerCase());
           }
           return true;
         });
-        const combined = [...data, ...matchingMemory];
+        const combined = [...publicEvents, ...matchingMemory];
         return res.json({ success: true, count: combined.length, events: combined });
       }
     } catch {
@@ -1542,8 +1565,8 @@ expansionRouter.get('/events', async (req: Request, res: Response) => {
     }
   }
 
-  // In-memory fallback: strictly enforce that only events with published linked posts are returned
-  let filtered = runtimeEvents.filter((e) => e.linked_post?.status === 'published');
+  // In-memory fallback
+  let filtered = runtimeEvents.filter((e) => !e.linked_post_id || e.linked_post?.status === 'published');
   if (types.length > 0) {
     filtered = filtered.filter((e) =>
       types.includes(String(e.opportunity_type || '').toLowerCase())
@@ -1562,7 +1585,7 @@ expansionRouter.get('/events', async (req: Request, res: Response) => {
   return res.json({ success: true, count: filtered.length, events: filtered });
 });
 
-// Single event by slug: strictly require linked post status = 'published'
+// Single event by slug: returns standalone event or event whose linked post is published
 expansionRouter.get('/events/:slug', async (req: Request, res: Response) => {
   const { slug } = req.params;
   const client = getSupabaseAdminClient();
@@ -1570,13 +1593,14 @@ expansionRouter.get('/events/:slug', async (req: Request, res: Response) => {
     try {
       const { data, error } = await client
         .from('events')
-        .select('*, linked_post:posts!inner(*)')
+        .select('*, linked_post:posts(*)')
         .eq('slug', slug)
-        .eq('linked_post.status', 'published')
         .maybeSingle();
 
       if (!error && data) {
-        return res.json({ success: true, event: data });
+        if (!data.linked_post_id || data.linked_post?.status === 'published') {
+          return res.json({ success: true, event: data });
+        }
       }
     } catch {
       // fallback
@@ -1584,7 +1608,7 @@ expansionRouter.get('/events/:slug', async (req: Request, res: Response) => {
   }
 
   const found = runtimeEvents.find(
-    (e) => e.slug === slug && e.linked_post?.status === 'published'
+    (e) => e.slug === slug && (!e.linked_post_id || e.linked_post?.status === 'published')
   );
   if (found) {
     return res.json({ success: true, event: found });

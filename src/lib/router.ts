@@ -28,6 +28,18 @@ export function getTopicUrl(topic: DiscussionTopic, locale = 'en-us'): string {
   return `/${locale}/discussions/${slug}`;
 }
 
+export function getEventUrl(event: { slug?: string; id?: string }): string {
+  const slug = event.slug || event.id || 'opportunity';
+  return `/events/${slug}`;
+}
+
+export function getEventShareUrl(event: { slug?: string; id?: string }): string {
+  const origin = typeof window !== 'undefined' && window.location?.origin
+    ? window.location.origin
+    : 'https://www.startupcreme.com';
+  return `${origin}${getEventUrl(event)}`;
+}
+
 export function getTabUrl(tab: NavigationTab, locale = 'en-us'): string {
   if (tab === 'admin') return '/admin';
   if (tab === 'home') return `/${locale}`;

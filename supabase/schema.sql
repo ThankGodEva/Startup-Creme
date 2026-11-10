@@ -959,6 +959,7 @@ CREATE TABLE IF NOT EXISTS startupcreme.events (
   location text not null,
   deadline_date timestamp with time zone not null,
   application_url text not null,
+  banner_image text null,
   linked_post_id uuid null,
   created_at timestamp with time zone not null default timezone ('utc'::text, now()),
   constraint events_pkey primary key (id),
@@ -977,7 +978,8 @@ DROP POLICY IF EXISTS "Public can view published events" ON startupcreme.events;
 CREATE POLICY "Public can view published events"
   ON startupcreme.events FOR SELECT
   USING (
-    EXISTS (
+    startupcreme.events.linked_post_id IS NULL
+    OR EXISTS (
       SELECT 1 FROM startupcreme.posts p
       WHERE p.id = startupcreme.events.linked_post_id
         AND p.status = 'published'

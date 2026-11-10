@@ -388,7 +388,7 @@ export async function resolvePageMetadata(
 
   const baseUrl = `${normalizedProtocol}://${normalizedHost}`;
   const cleanPath = reqPath.split('?')[0].split('#')[0];
-  const fullUrl = `${baseUrl}${cleanPath.startsWith('/') ? cleanPath : '/' + cleanPath}`;
+  let fullUrl = `${baseUrl}${cleanPath.startsWith('/') ? cleanPath : '/' + cleanPath}`;
 
   const segments = cleanPath.split('/').filter(Boolean);
 
@@ -521,10 +521,102 @@ export async function resolvePageMetadata(
       title = 'Remote Startup Job & Fractional Talent Board | StartupCrème';
       description = 'Curated remote software engineering, FinOps, financial modeling, and fractional CTO/CFO leadership roles.';
       section = 'Careers';
-    } else if (lowerSlug === 'events') {
+    } else if (lowerSlug === 'events' && segments.length === 1) {
       title = 'Grants, Accelerators & Startup Events | StartupCrème';
       description = 'Curated non-dilutive grants, institutional venture accelerators, founder fellowships, and tech competitions for software engineers, fintech builders, and tech entrepreneurs.';
       section = 'Events';
+      coverImage = 'https://images.unsplash.com/photo-1553729459-efe14ef6055d?auto=format&fit=crop&q=80&w=1200&h=630';
+    } else if (segments[0] === 'events' && segments.length >= 2) {
+      // Unique shareable event & grant landing page (/events/:slug)
+      const eventSlug = decodeURIComponent(segments[1]).trim().toLowerCase();
+      title = 'Grants, Accelerators & Startup Events | StartupCrème';
+      description = 'Verified startup opportunity and non-dilutive funding engine.';
+      section = 'Events';
+      coverImage = 'https://images.unsplash.com/photo-1553729459-efe14ef6055d?auto=format&fit=crop&q=80&w=1200&h=630';
+
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+      const supabaseKey =
+        process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        process.env.SERVICE_ROLE_KEY ||
+        process.env.SUPABASE_ANON_KEY ||
+        process.env.VITE_SUPABASE_ANON_KEY ||
+        '';
+
+      if (supabaseUrl && supabaseKey) {
+        try {
+          const client = createClient(supabaseUrl, supabaseKey, {
+            db: { schema: 'startupcreme' },
+            auth: { persistSession: false, autoRefreshToken: false }
+          });
+          const { data: eventData } = await client
+            .from('events')
+            .select('*, linked_post:posts(*)')
+            .eq('slug', eventSlug)
+            .maybeSingle();
+
+          if (eventData) {
+            title = `${eventData.title} | Grants & Events | StartupCrème`;
+            description = (eventData.description || '')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .slice(0, 180) || description;
+            fullUrl = `${baseUrl}/events/${eventData.slug}`;
+
+            // Banner resolution
+            if (eventData.banner_image && typeof eventData.banner_image === 'string' && eventData.banner_image.trim()) {
+              coverImage = eventData.banner_image.trim();
+            } else if (eventData.linked_post?.cover_image) {
+              coverImage = eventData.linked_post.cover_image;
+            } else {
+              const oppType = String(eventData.opportunity_type || '').toLowerCase();
+              if (oppType === 'grant') {
+                coverImage = 'https://images.unsplash.com/photo-1553729459-efe14ef6055d?auto=format&fit=crop&q=80&w=1200&h=630';
+              } else if (oppType === 'accelerator' || oppType === 'incubator') {
+                coverImage = 'https://images.unsplash.com/photo-1559136555-9303baea8ebd?auto=format&fit=crop&q=80&w=1200&h=630';
+              } else if (oppType === 'fellowship') {
+                coverImage = 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&q=80&w=1200&h=630';
+              } else if (oppType === 'pitch_competition' || oppType === 'hackathon') {
+                coverImage = 'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&q=80&w=1200&h=630';
+              } else if (oppType === 'conference') {
+                coverImage = 'https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&q=80&w=1200&h=630';
+              }
+            }
+
+            const eventJsonLd = {
+              '@context': 'https://schema.org',
+              '@type': 'Event',
+              name: eventData.title,
+              description: eventData.description,
+              image: [coverImage],
+              url: fullUrl,
+              eventAttendanceMode: eventData.location?.toLowerCase().includes('remote') || eventData.location?.toLowerCase().includes('global')
+                ? 'https://schema.org/OnlineEventAttendanceMode'
+                : 'https://schema.org/OfflineEventAttendanceMode',
+              eventStatus: 'https://schema.org/EventScheduled',
+              endDate: eventData.deadline_date,
+              location: {
+                '@type': 'Place',
+                name: eventData.location || 'Global (Remote)',
+              },
+              offers: {
+                '@type': 'Offer',
+                price: '0',
+                priceCurrency: 'USD',
+                url: eventData.application_url,
+                availability: 'https://schema.org/InStock',
+              },
+              organizer: {
+                '@type': 'Organization',
+                name: 'StartupCrème Opportunity Engine',
+                url: baseUrl,
+              },
+            };
+            jsonLdScript = `<script type="application/ld+json">${JSON.stringify(eventJsonLd)}</script>`;
+          }
+        } catch (evErr) {
+          console.warn('[Meta] Error resolving event metadata:', evErr);
+        }
+      }
     } else if (lowerSlug === 'about' || lowerSlug === 'about-us') {
       title = 'About StartupCrème | Institutional Finance, Tech & AI Intelligence';
       description = 'StartupCrème is a global guide dedicated to helping founders, software architects, and finance professionals build, fund, and scale companies in the age of AI. Built and operated by Habinsoft Technologies Limited and led by Chibueze ThankGod.';

@@ -243,6 +243,8 @@ export const EventSubmissionSchema = z.object({
   location: z.string().trim().min(2, 'Location is required').max(100).default('Global (Remote)'),
   deadline_date: z.string().trim().min(4, 'Valid deadline date required'),
   funding_amount: z.string().trim().max(100).optional().nullable(),
+  banner_image: z.string().trim().optional().nullable(),
+  create_post: z.boolean().optional().default(false),
   vertical: z.enum(['finance', 'tech', 'founders-mindset']).optional().default('tech'),
   locale: z.string().trim().optional().default('en-us'),
   slug: z.string().trim().optional(),

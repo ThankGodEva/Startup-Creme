@@ -2645,6 +2645,8 @@ class StartupCremeStore {
     const isAdmin = this.currentUser?.role === 'admin';
     if (isAdmin) return this.events;
     return this.events.filter((e) => {
+      // Standalone events without a post are always published and viewable
+      if (!e.linked_post_id) return true;
       const post = e.linked_post || this.posts.find((p) => p.id === e.linked_post_id);
       return post?.status === 'published';
     });
@@ -2672,12 +2674,7 @@ class StartupCremeStore {
 
     if (isSupabaseConfigured()) {
       const { data, error } = await supabaseExecute<EventOpportunity[]>((client) => {
-        let q: any = client.from('events');
-        if (isAdmin) {
-          q = q.select('*, linked_post:posts(*)');
-        } else {
-          q = q.select('*, linked_post:posts!inner(*)').eq('linked_post.status', 'published');
-        }
+        let q: any = client.from('events').select('*, linked_post:posts(*)');
         if (type && type !== 'all') {
           const rawTypes = type.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean);
           const mapped: string[] = [];
@@ -2694,6 +2691,7 @@ class StartupCremeStore {
       });
       if (!error && Array.isArray(data)) {
         this.events = isAdmin ? data : data.filter((e) => {
+          if (!e.linked_post_id) return true;
           const post = e.linked_post || this.posts.find((p) => p.id === e.linked_post_id);
           return post?.status === 'published';
         });
@@ -2781,6 +2779,8 @@ class StartupCremeStore {
     slug?: string;
     content?: string;
     cover_image?: string | null;
+    banner_image?: string | null;
+    create_post?: boolean;
   }): Promise<{ success: boolean; event?: EventOpportunity; error?: string }> {
     if (!this.currentUser || this.currentUser.role !== 'admin') {
       return { success: false, error: 'Admin privileges required to manually publish events.' };
@@ -2800,6 +2800,8 @@ class StartupCremeStore {
     const normFunding = eventData.funding_amount?.trim() || null;
     const normDescription = eventData.description.trim();
     const normContent = eventData.content?.trim() || normDescription;
+    const normBanner = eventData.banner_image?.trim() || eventData.cover_image?.trim() || null;
+    const shouldCreatePost = Boolean(eventData.create_post);
 
     const payload = {
       event_title: normTitle,
@@ -2814,7 +2816,9 @@ class StartupCremeStore {
       vertical: normVertical,
       locale: normLocale,
       content: normContent,
-      cover_image: eventData.cover_image || null,
+      cover_image: normBanner,
+      banner_image: normBanner,
+      create_post: shouldCreatePost,
       status: 'published',
     };
 
@@ -2833,7 +2837,7 @@ class StartupCremeStore {
         const body = await resp.json();
         if (body.success && body.data) {
           serverEventId = body.data.event_id;
-          serverPostId = body.data.post_id;
+          serverPostId = body.data.post_id || null;
         }
       }
     } catch {
@@ -2843,29 +2847,32 @@ class StartupCremeStore {
     // Direct Supabase upsert fallback if configured and not yet assigned
     if (isSupabaseConfigured() && !serverEventId) {
       try {
-        const postResult = await supabaseExecute<any>((client) =>
-          client.from('posts').upsert({
-            locale: normLocale,
-            vertical: normVertical,
-            slug: normSlug,
-            title: normTitle,
-            excerpt: normDescription.slice(0, 240),
-            content: {
-              type: 'doc',
-              content: [
-                {
-                  type: 'paragraph',
-                  content: [{ type: 'text', text: normContent }],
-                },
-              ],
-            },
-            status: 'published',
-            meta_description: normDescription.slice(0, 160),
-            updated_at: new Date().toISOString(),
-          }, { onConflict: 'locale,vertical,slug' }).select('id').maybeSingle()
-        );
+        if (shouldCreatePost) {
+          const postResult = await supabaseExecute<any>((client) =>
+            client.from('posts').upsert({
+              locale: normLocale,
+              vertical: normVertical,
+              slug: normSlug,
+              title: normTitle,
+              excerpt: normDescription.slice(0, 240),
+              content: {
+                type: 'doc',
+                content: [
+                  {
+                    type: 'paragraph',
+                    content: [{ type: 'text', text: normContent }],
+                  },
+                ],
+              },
+              status: 'published',
+              cover_image: normBanner,
+              meta_description: normDescription.slice(0, 160),
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'locale,vertical,slug' }).select('id').maybeSingle()
+          );
 
-        serverPostId = postResult.data?.id || null;
+          serverPostId = postResult.data?.id || null;
+        }
 
         const eventResult = await supabaseExecute<any>((client) =>
           client.from('events').upsert({
@@ -2877,6 +2884,7 @@ class StartupCremeStore {
             location: normLocation,
             deadline_date: new Date(normDeadline).toISOString(),
             application_url: normAppUrl,
+            banner_image: normBanner,
             linked_post_id: serverPostId,
           }, { onConflict: 'application_url' }).select('id').maybeSingle()
         );
@@ -2897,6 +2905,7 @@ class StartupCremeStore {
       location: normLocation,
       deadline_date: normDeadline,
       application_url: normAppUrl,
+      banner_image: normBanner,
       linked_post_id: serverPostId,
       created_at: new Date().toISOString(),
     };

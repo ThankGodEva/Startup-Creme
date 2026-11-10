@@ -50,6 +50,7 @@ export default function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showBookmarksDrawer, setShowBookmarksDrawer] = useState(false);
   const [adminTab, setAdminTab] = useState<'posts' | 'discussions' | 'seo'>('posts');
+  const [selectedEventSlug, setSelectedEventSlug] = useState<string | null>(null);
 
   // Sync React state with URL path
   const syncStateFromUrl = useCallback(() => {
@@ -150,6 +151,7 @@ export default function App() {
       setSelectedTopic(null);
       setLoadingArticleSlug(null);
       setLoadingTopicSlug(null);
+      setSelectedEventSlug(parts[1] || null);
       return;
     }
 
@@ -816,6 +818,7 @@ export default function App() {
           /* MODULE 5: GRANTS, ACCELERATORS & STARTUP EVENTS (/events) */
           <EventsModule
             currentUser={currentUser}
+            initialEventSlug={selectedEventSlug}
             onSelectPost={handleSelectPost}
             onOpenAuth={() => setShowAuthModal(true)}
           />

@@ -20,10 +20,13 @@ import {
   Info,
   Loader2,
   Plus,
+  Share2,
+  Globe,
 } from 'lucide-react';
 import { EventOpportunity, UserProfile, Post } from '../types';
 import { store } from '../lib/store';
-import { getPostUrl } from '../lib/router';
+import { getPostUrl, getEventUrl, getEventShareUrl } from '../lib/router';
+import { getEventBanner } from '../lib/eventsHelper';
 import { useHashAnchorScroll, Route } from '../hooks/useHashAnchorScroll';
 import { PublishEventModal } from './PublishEventModal';
 
@@ -63,6 +66,7 @@ export async function loader({ request }: { request?: Request } = {}) {
 
 interface EventsModuleProps {
   currentUser?: UserProfile | null;
+  initialEventSlug?: string | null;
   onSelectPost?: (post: Post) => void;
   onOpenAuth?: () => void;
 }
@@ -133,6 +137,7 @@ const formatDeadline = (dateStr?: string | null): string => {
 
 export const EventsModule: React.FC<EventsModuleProps> = ({
   currentUser,
+  initialEventSlug,
   onSelectPost,
   onOpenAuth,
 }) => {
@@ -145,6 +150,59 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
   const [selectedEvent, setSelectedEvent] = useState<EventOpportunity | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showPublishModal, setShowPublishModal] = useState(false);
+  const [copiedEventId, setCopiedEventId] = useState<string | null>(null);
+
+  // Deep-linking: match initialEventSlug to an event on mount/load
+  useEffect(() => {
+    if (!initialEventSlug || events.length === 0) return;
+    const match = events.find(
+      (e) => e.slug === initialEventSlug || e.id === initialEventSlug
+    );
+    if (match) {
+      setSelectedEvent(match);
+    }
+  }, [initialEventSlug, events]);
+
+  const openEvent = (item: EventOpportunity) => {
+    setSelectedEvent(item);
+    const eventUrl = getEventUrl(item);
+    if (window.location.pathname !== eventUrl) {
+      window.history.pushState({}, '', eventUrl);
+    }
+  };
+
+  const closeEvent = () => {
+    setSelectedEvent(null);
+    if (window.location.pathname.startsWith('/events/') || window.location.pathname.startsWith('/grants/')) {
+      window.history.pushState({}, '', '/events#opportunities');
+    }
+  };
+
+  const handleShareEvent = async (item: EventOpportunity, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const shareUrl = getEventShareUrl(item);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+      } else {
+        const input = document.createElement('input');
+        input.value = shareUrl;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+      }
+      setCopiedEventId(item.id);
+      setTimeout(() => {
+        setCopiedEventId((prev) => (prev === item.id ? null : prev));
+      }, 2500);
+    } catch {
+      setCopiedEventId(item.id);
+      setTimeout(() => {
+        setCopiedEventId((prev) => (prev === item.id ? null : prev));
+      }, 2500);
+    }
+  };
 
   const handleHashChange = useCallback((rawHash: string) => {
     const clean = rawHash.replace(/^#/, '').toLowerCase();
@@ -240,9 +298,12 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
     const allPosts = store.getPosts();
 
     const list = events.filter((evt) => {
-      // 1. Public security boundary: Anonymous and ordinary users can only see events whose linked post is published
+      // 1. Public security boundary:
+      // An Event & Grant CAN but MUST NOT have a post.
+      // If linked_post_id is present, non-admin users only see it if the linked post is published.
+      // If linked_post_id is null/undefined (standalone opportunity), it is publicly visible.
       const linkedPost = evt.linked_post || allPosts.find((p) => p.id === evt.linked_post_id);
-      if (!isAdmin) {
+      if (!isAdmin && evt.linked_post_id) {
         if (!linkedPost || linkedPost.status !== 'published') {
           return false;
         }
@@ -490,101 +551,130 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
             const isClosingSoon = daysLeft !== null && daysLeft >= 0 && daysLeft <= 14;
             const isExpired = daysLeft !== null && daysLeft < 0;
             const linkedPost = item.linked_post || allPosts.find((p) => p.id === item.linked_post_id);
+            const bannerUrl = getEventBanner(item);
+            const isCopied = copiedEventId === item.id;
 
             return (
               <div
                 key={item.id}
-                onClick={() => setSelectedEvent(item)}
-                className="group bg-white border border-slate-200 hover:border-slate-300 rounded-2xl p-6 shadow-xs hover:shadow-md transition-all flex flex-col justify-between cursor-pointer text-left"
+                onClick={() => openEvent(item)}
+                className="group bg-white border border-slate-200 hover:border-slate-300 rounded-2xl overflow-hidden shadow-xs hover:shadow-md transition-all flex flex-col justify-between cursor-pointer text-left"
               >
                 <div>
-                  {/* Top Badges: Type Badge & Deadline Status */}
-                  <div className="flex items-center justify-between gap-2 mb-3">
-                    {/* 1. Type Badge */}
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-mono uppercase font-bold tracking-wider bg-slate-100 text-slate-800 border border-slate-200">
-                      <Award className="w-3 h-3 text-amber-600 shrink-0" />
-                      <span>{formatOpportunityType(item.opportunity_type)}</span>
-                    </span>
+                  {/* Hero Banner for Every Event */}
+                  <div className="relative aspect-video w-full overflow-hidden bg-slate-100">
+                    <img
+                      src={bannerUrl}
+                      alt={item.title}
+                      loading="lazy"
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-transparent" />
 
-                    {/* Deadline Pill */}
-                    {daysLeft !== null ? (
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold ${
-                          isExpired
-                            ? 'bg-slate-100 text-slate-500 border border-slate-200'
-                            : isClosingSoon
-                            ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                            : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                        }`}
-                      >
-                        <Clock className="w-3 h-3" />
-                        {isExpired
-                          ? 'Expired'
-                          : daysLeft === 0
-                          ? 'Closes Today'
-                          : `${daysLeft}d left`}
+                    {/* Top Badges on Banner */}
+                    <div className="absolute top-3 left-3 right-3 flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono uppercase font-bold tracking-wider bg-slate-900/80 backdrop-blur-xs text-white border border-white/20 shadow-xs">
+                        <Award className="w-3 h-3 text-amber-400 shrink-0" />
+                        <span>{formatOpportunityType(item.opportunity_type)}</span>
                       </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                        <Clock className="w-3 h-3" />
-                        Rolling
+
+                      {daysLeft !== null ? (
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold backdrop-blur-xs shadow-xs ${
+                            isExpired
+                              ? 'bg-slate-900/80 text-slate-300 border border-white/20'
+                              : isClosingSoon
+                              ? 'bg-rose-900/80 text-rose-200 border border-rose-400/40'
+                              : 'bg-emerald-900/80 text-emerald-200 border border-emerald-400/40'
+                          }`}
+                        >
+                          <Clock className="w-3 h-3" />
+                          {isExpired
+                            ? 'Expired'
+                            : daysLeft === 0
+                            ? 'Closes Today'
+                            : `${daysLeft}d left`}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-blue-900/80 backdrop-blur-xs text-blue-200 border border-blue-400/40 shadow-xs">
+                          <Clock className="w-3 h-3" />
+                          Rolling
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Funding Pill on Banner bottom */}
+                    <div className="absolute bottom-2.5 left-3">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-950/80 backdrop-blur-xs border border-emerald-500/40 text-emerald-300 text-xs font-mono font-bold shadow-xs">
+                        <DollarSign className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{item.funding_amount || 'Non-dilutive / Grant'}</span>
                       </span>
+                    </div>
+                  </div>
+
+                  {/* Card Content */}
+                  <div className="p-5">
+                    {/* Standalone vs Post Tag */}
+                    <div className="mb-2 flex items-center justify-between text-[11px] font-mono text-slate-400">
+                      {linkedPost ? (
+                        <span className="text-amber-700 font-semibold flex items-center gap-1">
+                          <FileText className="w-3 h-3" />
+                          <span>Includes Editorial Post</span>
+                        </span>
+                      ) : (
+                        <span className="text-slate-500 flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-amber-600" />
+                          <span>Standalone Verified Opportunity</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Title */}
+                    <h3 className="font-serif text-lg font-bold text-slate-900 group-hover:text-amber-700 transition-colors line-clamp-2 mb-2 leading-snug">
+                      {item.title}
+                    </h3>
+
+                    {/* Excerpt / Description */}
+                    <p className="text-xs text-slate-500 line-clamp-3 mb-4 leading-relaxed">
+                      {item.description}
+                    </p>
+
+                    {/* Linked Post Highlight if present */}
+                    {linkedPost && (
+                      <div className="mb-4 pt-3 border-t border-slate-100">
+                        <a
+                          href={getPostUrl(linkedPost)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onSelectPost) {
+                              e.preventDefault();
+                              onSelectPost(linkedPost);
+                            }
+                          }}
+                          className="group/link flex items-center justify-between gap-2 p-2.5 rounded-xl bg-amber-50/70 hover:bg-amber-100/80 border border-amber-200/80 text-amber-950 transition-colors"
+                          title={`Read editorial analysis: ${linkedPost.title}`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                            <span className="text-xs font-semibold truncate">
+                              Analysis: {linkedPost.title}
+                            </span>
+                          </div>
+                          <ArrowRight className="w-3.5 h-3.5 text-amber-700 shrink-0 transition-transform group-hover/link:translate-x-0.5" />
+                        </a>
+                      </div>
                     )}
                   </div>
-
-                  {/* Title */}
-                  <h3 className="font-serif text-lg font-bold text-slate-900 group-hover:text-amber-700 transition-colors line-clamp-2 mb-2">
-                    {item.title}
-                  </h3>
-
-                  {/* 2. Funding Amount */}
-                  <div className="mb-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-mono font-bold">
-                    <DollarSign className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-                    <span>{item.funding_amount || 'Non-dilutive / Equity-free'}</span>
-                  </div>
-
-                  {/* Excerpt / Description */}
-                  <p className="text-xs text-slate-500 line-clamp-3 mb-4 leading-relaxed">
-                    {item.description}
-                  </p>
-
-                  {/* 5. Links to the Linked Post (inline card highlight) */}
-                  {linkedPost && (
-                    <div className="mb-4 pt-3 border-t border-slate-100">
-                      <a
-                        href={getPostUrl(linkedPost)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (onSelectPost) {
-                            e.preventDefault();
-                            onSelectPost(linkedPost);
-                          }
-                        }}
-                        className="group/link flex items-center justify-between gap-2 p-2.5 rounded-xl bg-amber-50/70 hover:bg-amber-100/80 border border-amber-200/80 text-amber-950 transition-colors"
-                        title={`Read editorial analysis: ${linkedPost.title}`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <FileText className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                          <span className="text-xs font-semibold truncate">
-                            Analysis: {linkedPost.title}
-                          </span>
-                        </div>
-                        <ArrowRight className="w-3.5 h-3.5 text-amber-700 shrink-0 transition-transform group-hover/link:translate-x-0.5" />
-                      </a>
-                    </div>
-                  )}
                 </div>
 
                 {/* Footer Info & Actions */}
-                <div className="pt-4 border-t border-slate-100 space-y-3">
+                <div className="px-5 pb-5 pt-3 border-t border-slate-100 space-y-3">
                   <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono gap-2">
-                    {/* 3. Location */}
                     <span className="flex items-center gap-1 truncate max-w-[170px]" title={item.location}>
                       <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                       <span className="truncate">{item.location || 'Global (Remote)'}</span>
                     </span>
 
-                    {/* 4. Deadline */}
                     <span className="flex items-center gap-1 text-slate-600 shrink-0" title={`Deadline: ${formatDeadline(item.deadline_date)}`}>
                       <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                       <span>{formatDeadline(item.deadline_date)}</span>
@@ -592,16 +682,41 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
                   </div>
 
                   <div className="flex items-center justify-between gap-2 pt-1">
-                    <a
-                      href={item.application_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-slate-900 hover:text-amber-700 transition-colors"
-                    >
-                      <span>Apply Portal</span>
-                      <ExternalLink className="w-3 h-3 text-slate-400" />
-                    </a>
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={item.application_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-slate-900 hover:text-amber-700 transition-colors"
+                      >
+                        <span>Apply</span>
+                        <ExternalLink className="w-3 h-3 text-slate-400" />
+                      </a>
+
+                      <button
+                        type="button"
+                        onClick={(e) => handleShareEvent(item, e)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                          isCopied
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                            : 'bg-slate-50 text-slate-600 hover:text-slate-900 hover:bg-slate-100 border-slate-200'
+                        }`}
+                        title="Copy unique shareable link"
+                      >
+                        {isCopied ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <span>Copied</span>
+                          </>
+                        ) : (
+                          <>
+                            <Share2 className="w-3 h-3 text-slate-500 shrink-0" />
+                            <span>Share</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
 
                     <div className="flex items-center gap-2">
                       {isAdmin && (
@@ -623,7 +738,7 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
                             e.stopPropagation();
                             onSelectPost?.(linkedPost);
                           }}
-                          className="text-xs font-semibold text-amber-700 hover:text-amber-800 flex items-center gap-0.5 group-hover:translate-x-0.5 transition-transform"
+                          className="text-xs font-semibold text-amber-700 hover:text-amber-800 flex items-center gap-0.5 group-hover:translate-x-0.5 transition-transform cursor-pointer"
                         >
                           <span>Read Post</span>
                           <ChevronRight className="w-3.5 h-3.5" />
@@ -646,121 +761,228 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
       {/* Event Details Modal */}
       {selectedEvent && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 sm:p-8 shadow-2xl space-y-6 text-left">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono uppercase font-bold tracking-wider bg-slate-100 text-slate-800 border border-slate-200">
-                    {formatOpportunityType(selectedEvent.opportunity_type)}
-                  </span>
-                  <span className="text-xs font-mono text-slate-500">
-                    ID: {selectedEvent.id.slice(0, 8)}...
-                  </span>
-                </div>
-                <h2 className="font-serif text-2xl font-bold text-slate-900 leading-snug">
-                  {selectedEvent.title}
-                </h2>
-              </div>
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl text-left">
+            {/* Modal Banner Hero */}
+            <div className="relative aspect-video sm:aspect-21/9 w-full overflow-hidden bg-slate-900">
+              <img
+                src={getEventBanner(selectedEvent)}
+                alt={selectedEvent.title}
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent" />
+
+              {/* Close Button on Banner */}
               <button
                 type="button"
-                onClick={() => setSelectedEvent(null)}
-                className="p-2 rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+                onClick={closeEvent}
+                className="absolute top-4 right-4 p-2 rounded-xl bg-slate-950/60 hover:bg-slate-950/90 text-white backdrop-blur-xs transition-colors cursor-pointer border border-white/20"
+                aria-label="Close modal"
               >
                 ✕
               </button>
-            </div>
 
-            {/* Key stats row */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-200/80 text-xs">
-              <div>
-                <span className="text-slate-500 block text-[10px] uppercase font-mono">Funding / Grant</span>
-                <span className="font-bold text-emerald-700 text-sm font-mono">
-                  {selectedEvent.funding_amount || 'Non-Specified'}
-                </span>
-              </div>
-              <div>
-                <span className="text-slate-500 block text-[10px] uppercase font-mono">Application Deadline</span>
-                <span className="font-semibold text-slate-900 font-mono">
-                  {formatDeadline(selectedEvent.deadline_date)}
-                </span>
-              </div>
-              <div className="col-span-2 sm:col-span-1">
-                <span className="text-slate-500 block text-[10px] uppercase font-mono">Location & Scope</span>
-                <span className="font-semibold text-slate-900">
-                  {selectedEvent.location || 'Global (Remote)'}
-                </span>
-              </div>
-            </div>
-
-            {/* Description */}
-            <div>
-              <h4 className="font-serif text-sm font-bold text-slate-900 mb-2">
-                Opportunity Brief & Scope
-              </h4>
-              <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-line">
-                {selectedEvent.description}
-              </p>
-            </div>
-
-            {/* Linked Post Analysis if available */}
-            {(() => {
-              const linkedPost = selectedEvent.linked_post || allPosts.find((p) => p.id === selectedEvent.linked_post_id);
-              if (!linkedPost) return null;
-              return (
-                <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 flex items-center justify-between gap-4">
-                  <div>
-                    <div className="text-[10px] font-mono text-amber-800 uppercase font-semibold">
-                      Linked Editorial Article
-                    </div>
-                    <div className="font-serif text-sm font-bold text-slate-900 line-clamp-1">
-                      {linkedPost.title}
-                    </div>
-                  </div>
-                  {onSelectPost && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSelectPost(linkedPost);
-                        setSelectedEvent(null);
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold shrink-0 transition-colors cursor-pointer"
-                    >
-                      Read Analysis
-                    </button>
-                  )}
+              {/* Overlaid Badges */}
+              <div className="absolute bottom-4 left-6 right-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono uppercase font-bold tracking-wider bg-slate-900/90 text-amber-400 border border-amber-400/40 backdrop-blur-xs shadow-xs">
+                    {formatOpportunityType(selectedEvent.opportunity_type)}
+                  </span>
+                  <span className="text-xs font-mono text-slate-300">
+                    ID: {selectedEvent.id.slice(0, 8)}...
+                  </span>
                 </div>
-              );
-            })()}
+                <h2 className="font-serif text-xl sm:text-2xl font-bold text-white leading-snug drop-shadow-xs">
+                  {selectedEvent.title}
+                </h2>
+              </div>
+            </div>
 
-            {/* Modal Bottom Actions */}
-            <div className="pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
-              <a
-                href={selectedEvent.application_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer"
-              >
-                <span>Open Application Portal</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
+            <div className="p-6 sm:p-8 space-y-6">
+              {/* Unique Shareable Link Box */}
+              <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950 font-mono uppercase tracking-wider">
+                    <Share2 className="w-3.5 h-3.5 text-amber-700" />
+                    <span>Unique Shareable Link</span>
+                  </div>
+                  <span className="text-[11px] font-mono text-amber-700">
+                    Canonical Opportunity URL
+                  </span>
+                </div>
 
-              <div className="flex items-center gap-2">
-                {isAdmin && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={getEventShareUrl(selectedEvent)}
+                    className="flex-1 bg-white border border-amber-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 select-all focus:outline-none"
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                  />
                   <button
                     type="button"
-                    onClick={(e) => handleDeleteEvent(selectedEvent.id, e)}
-                    className="px-3.5 py-2 rounded-xl text-rose-700 hover:bg-rose-50 border border-rose-200 text-xs font-semibold transition-colors cursor-pointer"
+                    onClick={() => handleShareEvent(selectedEvent)}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                      copiedEventId === selectedEvent.id
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-amber-600 hover:bg-amber-700 text-white'
+                    }`}
                   >
-                    Delete Event
+                    {copiedEventId === selectedEvent.id ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Link</span>
+                      </>
+                    )}
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setSelectedEvent(null)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                </div>
+
+                {/* Social Share Buttons */}
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="text-[11px] text-slate-500 font-medium">Quick share:</span>
+                  <a
+                    href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                      `${selectedEvent.title} - ${getEventShareUrl(selectedEvent)}`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-emerald-700 hover:border-emerald-300 text-[11px] font-medium transition-colors"
+                  >
+                    WhatsApp
+                  </a>
+                  <a
+                    href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(
+                      getEventShareUrl(selectedEvent)
+                    )}&text=${encodeURIComponent(
+                      `${selectedEvent.title} | Grants & Events on @startupcreme`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-sky-600 hover:border-sky-300 text-[11px] font-medium transition-colors"
+                  >
+                    X / Twitter
+                  </a>
+                  <a
+                    href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(
+                      getEventShareUrl(selectedEvent)
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-blue-700 hover:border-blue-300 text-[11px] font-medium transition-colors"
+                  >
+                    LinkedIn
+                  </a>
+                </div>
+              </div>
+
+              {/* Key stats row */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-200/80 text-xs">
+                <div>
+                  <span className="text-slate-500 block text-[10px] uppercase font-mono">Funding / Grant</span>
+                  <span className="font-bold text-emerald-700 text-sm font-mono">
+                    {selectedEvent.funding_amount || 'Non-Specified'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px] uppercase font-mono">Application Deadline</span>
+                  <span className="font-semibold text-slate-900 font-mono">
+                    {formatDeadline(selectedEvent.deadline_date)}
+                  </span>
+                </div>
+                <div className="col-span-2 sm:col-span-1">
+                  <span className="text-slate-500 block text-[10px] uppercase font-mono">Location & Scope</span>
+                  <span className="font-semibold text-slate-900">
+                    {selectedEvent.location || 'Global (Remote)'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div>
+                <h4 className="font-serif text-sm font-bold text-slate-900 mb-2">
+                  Opportunity Brief & Scope
+                </h4>
+                <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-line">
+                  {selectedEvent.description}
+                </p>
+              </div>
+
+              {/* Linked Post Analysis OR Standalone Status */}
+              {(() => {
+                const linkedPost =
+                  selectedEvent.linked_post ||
+                  allPosts.find((p) => p.id === selectedEvent.linked_post_id);
+                if (linkedPost) {
+                  return (
+                    <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 flex items-center justify-between gap-4">
+                      <div>
+                        <div className="text-[10px] font-mono text-amber-800 uppercase font-semibold">
+                          Linked Editorial Article
+                        </div>
+                        <div className="font-serif text-sm font-bold text-slate-900 line-clamp-1">
+                          {linkedPost.title}
+                        </div>
+                      </div>
+                      {onSelectPost && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelectPost(linkedPost);
+                            closeEvent();
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold shrink-0 transition-colors cursor-pointer"
+                        >
+                          Read Analysis
+                        </button>
+                      )}
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3 text-xs text-slate-600">
+                    <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>
+                      <strong>Verified Standalone Opportunity:</strong> This grant/event is curated directly without requiring a companion editorial article.
+                    </span>
+                  </div>
+                );
+              })()}
+
+              {/* Modal Bottom Actions */}
+              <div className="pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                <a
+                  href={selectedEvent.application_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
                 >
-                  Close
-                </button>
+                  <span>Open Application Portal</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+
+                <div className="flex items-center gap-2">
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteEvent(selectedEvent.id, e)}
+                      className="px-3.5 py-2 rounded-xl text-rose-700 hover:bg-rose-50 border border-rose-200 text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      Delete Event
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={closeEvent}
+                    className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
           </div>

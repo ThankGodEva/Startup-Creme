@@ -495,6 +495,7 @@ export interface EventOpportunity {
   location: string;
   deadline_date: string;
   application_url: string;
+  banner_image?: string | null;
   linked_post_id: string | null;
   created_at: string;
   updated_at?: string;
@@ -520,6 +521,8 @@ export interface IngestEventPayload {
   author_role?: string;
   author_avatar?: string | null;
   cover_image?: string | null;
+  banner_image?: string | null;
+  create_post?: boolean;
   canonical_url?: string | null;
   status?: PublicationStatus;
   tags?: string[];
