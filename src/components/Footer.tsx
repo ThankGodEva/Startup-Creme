@@ -53,12 +53,12 @@ export const Footer: React.FC<FooterProps> = ({ currentLocale, onTabChange, onOp
               className="w-8 h-8 object-cover rounded-lg shadow-xs border border-slate-700" 
             />
             <span className="font-serif text-2xl font-bold text-white tracking-tight">
-              Startup <span className="text-emerald-400">Crème</span>
+              Startup<span className="text-emerald-400">Crème</span>
             </span>
           </div>
 
           <p className="text-xs text-slate-400 leading-relaxed mb-6 font-sans">
-            Startup Crème is the definitive multinational publication delivering non-sponsored institutional intelligence on private credit, venture capital liquidity, autonomous AI architectures, and GPU cluster engineering.
+            StartupCrème is the definitive multinational publication delivering non-sponsored institutional intelligence on private credit, venture capital liquidity, autonomous AI architectures, and GPU cluster engineering.
           </p>
 
           <div className="flex items-center gap-2 text-xs text-emerald-400 font-mono">

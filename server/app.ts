@@ -216,6 +216,57 @@ export function createApp(options?: CreateAppOptions): express.Express {
     next();
   });
 
+  // Standard Security Headers (defense-in-depth across direct and edge requests)
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    next();
+  });
+
+  // Protective Method-Validation Guard Middleware:
+  // Intercepts incoming requests on non-API routes and instantly rejects any unexpected
+  // POST, PUT, DELETE, or PATCH spam targeting frontend pages or asset routes
+  // (e.g., WordPress scanner bots hitting /index.php or /).
+  // Non-API routes strictly only permit GET, HEAD, and OPTIONS.
+  app.use((req, res, next) => {
+    const method = req.method ? req.method.toUpperCase() : 'GET';
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+      return next();
+    }
+
+    // Determine normalized request path
+    const rawMatched = (
+      req.headers['x-matched-path'] ||
+      req.headers['x-forwarded-uri'] ||
+      req.headers['x-original-url'] ||
+      req.headers['x-rewrite-url']
+    ) as string | undefined;
+
+    const candidatePath = (rawMatched ? rawMatched.split('?')[0] : (req.path || req.url.split('?')[0] || '')).toLowerCase();
+
+    // Check if the route is a legitimate API endpoint
+    const isApiRoute =
+      candidatePath === '/api' ||
+      candidatePath.startsWith('/api/') ||
+      candidatePath === '/upload-image' ||
+      candidatePath.startsWith('/editorial') ||
+      candidatePath === '/health' ||
+      candidatePath === '/auth/profile';
+
+    if (isApiRoute) {
+      return next();
+    }
+
+    // Instantly reject unexpected mutating methods on frontend or asset routes
+    res.setHeader('Allow', 'GET, HEAD, OPTIONS');
+    return res.status(405).json({
+      error: 'Method Not Allowed',
+      message: `HTTP method ${method} is not allowed on non-API route '${candidatePath}'. Non-API routes only accept GET, HEAD, and OPTIONS requests.`,
+      allowedMethods: ['GET', 'HEAD', 'OPTIONS'],
+    });
+  });
+
   // Static uploads directory middleware (safe creation for serverless / read-only filesystems)
   const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
   if (!fs.existsSync(uploadsDir)) {
