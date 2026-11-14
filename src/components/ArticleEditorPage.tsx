@@ -52,7 +52,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { Post, ContentVertical, PublicationStatus, UserProfile } from '../types';
-import { normalizeImageUrl } from '../lib/router';
+import { normalizeImageUrl, getPublisherAvatar } from '../lib/router';
 import { compressImage, formatBytes } from '../lib/imageCompression';
 import { supabase } from '../lib/supabase';
 
@@ -247,7 +247,7 @@ export const ArticleEditorPage: React.FC<ArticleEditorPageProps> = ({
       dual_silo: vertical === 'founders-mindset' ? false : dualSilo,
       author_name: authorName,
       author_role: authorRole,
-      author_avatar: currentUser?.avatar_url || post?.author_avatar,
+      author_avatar: getPublisherAvatar(post?.author_avatar || currentUser?.avatar_url, authorName),
       meta_description: metaDescription.trim() || excerpt.trim(),
       source_url: sourceUrl.trim() || null,
       source_name: sourceName.trim() || null,

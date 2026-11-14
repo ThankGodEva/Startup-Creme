@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { Post, PostComment, UserProfile, PostContentNode } from '../types';
 import { updatePageSEO } from '../lib/seo';
-import { normalizeImageUrl, getPostUrl } from '../lib/router';
+import { normalizeImageUrl, getPostUrl, getPublisherAvatar, PUBLISHER_AVATAR_URL } from '../lib/router';
 import { store } from '../lib/store';
 import { CommentForm } from './CommentForm';
 import { CommentList } from './CommentList';
@@ -521,9 +521,16 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-200 pt-6">
             <div className="flex items-center gap-3">
               <img
-                src={post.author_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200'}
-                alt={post.author_name}
-                className="w-11 h-11 rounded-full object-cover ring-2 ring-slate-200"
+                src={getPublisherAvatar(post.author_avatar, post.author_name)}
+                alt={post.author_name || 'StartupCrème'}
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  if (!target.dataset.fallbackApplied) {
+                    target.dataset.fallbackApplied = 'true';
+                    target.src = PUBLISHER_AVATAR_URL;
+                  }
+                }}
+                className="w-11 h-11 rounded-full object-cover bg-white ring-2 ring-slate-200"
               />
               <div>
                 <div className="text-sm font-bold text-slate-900">{post.author_name}</div>

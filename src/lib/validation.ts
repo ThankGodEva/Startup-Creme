@@ -66,7 +66,7 @@ export const EditorialDraftSubmissionSchema = z.object({
   author_avatar: z
     .string()
     .trim()
-    .regex(/^https:\/\/.+/i, 'Author avatar must be a valid HTTPS URL')
+    .regex(/^(https:\/\/.+|\/.+)/i, 'Author avatar must be a valid HTTPS URL or local path')
     .optional()
     .nullable(),
   dual_silo: z.boolean().optional().default(false),
@@ -181,7 +181,7 @@ export const EventWebhookIngestionSchema = z
     author_avatar: z
       .string()
       .trim()
-      .regex(/^https:\/\/.+/i, 'Author avatar must be a valid HTTPS URL')
+      .regex(/^(https:\/\/.+|\/.+)/i, 'Author avatar must be a valid HTTPS URL or local path')
       .optional()
       .nullable(),
     canonical_url: z.string().trim().url('Canonical URL must be a valid URL').optional().nullable(),

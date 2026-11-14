@@ -1,6 +1,6 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { isSupabaseConfigured, supabase } from './supabase';
-import { normalizeImageUrl } from './router';
+import { normalizeImageUrl, getPublisherAvatar } from './router';
 import {
   Post,
   DiscussionTopic,
@@ -813,7 +813,7 @@ class StartupCremeStore {
         id: 'admin-demo-id',
         email: 'admin@startupcreme.com',
         full_name: 'Startup Crème Admin',
-        avatar_url: '/logo.jpg',
+        avatar_url: '/logo.png',
         role: 'admin',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -1233,7 +1233,7 @@ class StartupCremeStore {
         cover_image: normalizeImageUrl(post.cover_image) || 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&q=80&w=1200',
         author_name: post.author_name || this.currentUser?.full_name || 'Startup Crème Editorial',
         author_role: post.author_role || 'Senior Analyst',
-        author_avatar: post.author_avatar || this.currentUser?.avatar_url,
+        author_avatar: getPublisherAvatar(post.author_avatar || this.currentUser?.avatar_url, post.author_name || this.currentUser?.full_name || 'Startup Crème Editorial'),
         dual_silo: targetVertical === 'founders-mindset' ? false : Boolean(post.dual_silo),
         silo_badge: post.silo_badge || '',
         tags: post.tags || ['Finance', 'Tech'],

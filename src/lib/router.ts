@@ -99,3 +99,39 @@ export function normalizeImageUrl(url?: string | null): string {
   }
   return trimmed;
 }
+
+export const PUBLISHER_AVATAR_URL = '/logo.png';
+
+/**
+ * Resolves the authoritative publisher / author avatar image.
+ * Ensures Startup Crème publisher articles and any missing or placeholder avatars
+ * cleanly render the brand logo (/logo.png).
+ */
+export function getPublisherAvatar(authorAvatar?: string | null, authorName?: string | null): string {
+  const trimmed = (authorAvatar || '').trim();
+  const nameLower = (authorName || '').trim().toLowerCase();
+
+  const isPlaceholderAvatar =
+    !trimmed ||
+    trimmed.includes('picsum.photos') ||
+    trimmed.includes('unsplash.com/photo-1534528741775') ||
+    trimmed.includes('unsplash.com/photo-1507003211169') ||
+    trimmed.endsWith('/logo.jpg') ||
+    trimmed.endsWith('/logo.png');
+
+  if (
+    nameLower.includes('startup crème') ||
+    nameLower.includes('startupcreme') ||
+    nameLower.includes('editorial')
+  ) {
+    if (isPlaceholderAvatar) {
+      return PUBLISHER_AVATAR_URL;
+    }
+  }
+
+  if (isPlaceholderAvatar) {
+    return PUBLISHER_AVATAR_URL;
+  }
+
+  return normalizeImageUrl(trimmed);
+}

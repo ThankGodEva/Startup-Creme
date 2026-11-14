@@ -1316,7 +1316,7 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
           hide_ai_disclosure: Boolean(validated.hide_ai_disclosure),
           author_name: validated.author_name || 'Startup Crème Editorial',
           author_role: validated.author_role || 'Principal Editor',
-          author_avatar: validated.author_avatar || null,
+          author_avatar: validated.author_avatar || '/logo.png',
           dual_silo: normVertical === 'founders-mindset' ? false : Boolean(validated.dual_silo),
           silo_badge: validated.silo_badge || null,
           tags: validated.tags || [],

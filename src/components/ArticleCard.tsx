@@ -1,7 +1,7 @@
 import React from 'react';
 import { Clock, Bookmark, ArrowUpRight, Sparkles } from 'lucide-react';
 import { Post } from '../types';
-import { getPostUrl, normalizeImageUrl } from '../lib/router';
+import { getPostUrl, normalizeImageUrl, getPublisherAvatar, PUBLISHER_AVATAR_URL } from '../lib/router';
 
 interface ArticleCardProps {
   post: Post;
@@ -87,9 +87,16 @@ export const ArticleCard: React.FC<ArticleCardProps> = ({
             <div className="flex items-center justify-between border-t border-slate-100 pt-4">
               <div className="flex items-center gap-2.5">
                 <img
-                  src={post.author_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'}
-                  alt={post.author_name}
-                  className="w-7 h-7 rounded-full object-cover ring-1 ring-slate-200"
+                  src={getPublisherAvatar(post.author_avatar, post.author_name)}
+                  alt={post.author_name || 'StartupCrème'}
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    if (!target.dataset.fallbackApplied) {
+                      target.dataset.fallbackApplied = 'true';
+                      target.src = PUBLISHER_AVATAR_URL;
+                    }
+                  }}
+                  className="w-7 h-7 rounded-full object-cover bg-white ring-1 ring-slate-200"
                 />
                 <div>
                   <div className="text-xs font-bold text-slate-800">{post.author_name}</div>
@@ -190,9 +197,16 @@ export const ArticleCard: React.FC<ArticleCardProps> = ({
       <div className="px-5 pb-4 pt-3 border-t border-slate-100 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <img
-            src={post.author_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'}
-            alt={post.author_name}
-            className="w-6 h-6 rounded-full object-cover ring-1 ring-slate-200"
+            src={getPublisherAvatar(post.author_avatar, post.author_name)}
+            alt={post.author_name || 'StartupCrème'}
+            onError={(e) => {
+              const target = e.currentTarget;
+              if (!target.dataset.fallbackApplied) {
+                target.dataset.fallbackApplied = 'true';
+                target.src = PUBLISHER_AVATAR_URL;
+              }
+            }}
+            className="w-6 h-6 rounded-full object-cover bg-white ring-1 ring-slate-200"
           />
           <span className="text-xs text-slate-700 font-semibold truncate max-w-[120px]">{post.author_name}</span>
         </div>

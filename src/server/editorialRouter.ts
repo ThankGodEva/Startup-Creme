@@ -364,7 +364,7 @@ editorialRouter.post('/drafts', requireEditorialAuth, async (req: Request, res: 
       hide_ai_disclosure: Boolean(payload.hide_ai_disclosure),
       author_name: payload.author_name || 'Startup Crème Editorial',
       author_role: payload.author_role || 'Senior Analyst',
-      author_avatar: payload.author_avatar || null,
+      author_avatar: payload.author_avatar || '/logo.png',
       dual_silo: payload.vertical === 'founders-mindset' ? false : (payload.dual_silo || false),
       silo_badge: payload.vertical === 'founders-mindset' ? null : (payload.dual_silo ? 'Dual Silo Analysis' : null),
       tags: payload.tags && payload.tags.length > 0 ? payload.tags : ['Editorial'],

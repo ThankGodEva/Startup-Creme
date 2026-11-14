@@ -218,7 +218,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       cover_image: 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&q=80&w=1200',
       author_name: currentUser.full_name,
       author_role: 'Principal Editor',
-      author_avatar: currentUser.avatar_url,
+      author_avatar: '/logo.png',
       dual_silo: false,
       silo_badge: 'Editorial Lead',
       tags: ['Finance', 'Tech'],
