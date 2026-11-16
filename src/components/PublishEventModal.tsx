@@ -19,6 +19,8 @@ import {
   Globe,
 } from 'lucide-react';
 import { store } from '../lib/store';
+import { supabase } from '../lib/supabase';
+import { compressImage, formatBytes } from '../lib/imageCompression';
 import { EventOpportunity, OpportunityType } from '../types';
 import { EventSubmissionSchema } from '../lib/validation';
 import { EVENT_BANNER_PRESETS, getEventBanner } from '../lib/eventsHelper';
@@ -58,6 +60,7 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
   const [bannerImage, setBannerImage] = useState('');
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccessMsg, setUploadSuccessMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Companion Post Toggle: "An 'Events & Grants' can but must not have a post"
@@ -89,23 +92,85 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
 
     setIsUploadingImage(true);
     setUploadError(null);
+    setUploadSuccessMsg(null);
 
     try {
-      const formData = new FormData();
-      formData.append('image', file);
+      let fileToUpload: File = file;
+      let compressionNote = '';
 
-      const resp = await fetch('/api/upload-image', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!resp.ok) {
-        throw new Error(`Upload failed with status: ${resp.status}`);
+      try {
+        const compressed = await compressImage(file, {
+          maxWidth: 1600,
+          maxHeight: 1600,
+          quality: 0.85,
+          mimeType: 'image/webp',
+        });
+        fileToUpload = compressed.file;
+        if (compressed.originalSize > compressed.compressedSize) {
+          compressionNote = `Optimized (${formatBytes(compressed.originalSize)} → ${formatBytes(compressed.compressedSize)})`;
+        }
+      } catch (compressErr) {
+        console.warn('Image compression skipped, uploading original file:', compressErr);
       }
 
-      const result = await resp.json();
+      const getAuthToken = async (forceRefresh = false): Promise<string | undefined> => {
+        if (forceRefresh) {
+          const { data: refreshed } = await supabase.auth.refreshSession();
+          return refreshed?.session?.access_token;
+        }
+        const { data: sessData } = await supabase.auth.getSession();
+        if (sessData?.session?.access_token) {
+          return sessData.session.access_token;
+        }
+        const { data: refreshed } = await supabase.auth.refreshSession();
+        return refreshed?.session?.access_token;
+      };
+
+      let authToken = await getAuthToken(false);
+      if (!authToken) {
+        throw new Error(
+          'Authentication session required to upload images. Please sign out and sign in with your Supabase admin account, or paste an image URL.'
+        );
+      }
+
+      const executeUpload = async (token: string) => {
+        const formData = new FormData();
+        formData.append('image', fileToUpload);
+        return fetch('/api/upload-image', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        });
+      };
+
+      let resp = await executeUpload(authToken);
+
+      // If token expired just before request, attempt a silent refresh and retry once
+      if (resp.status === 401) {
+        const refreshedToken = await getAuthToken(true);
+        if (refreshedToken && refreshedToken !== authToken) {
+          resp = await executeUpload(refreshedToken);
+        }
+      }
+
+      let result: any = {};
+      try {
+        result = await resp.json();
+      } catch {
+        // Ignore JSON parse error on non-JSON response
+      }
+
+      if (!resp.ok) {
+        throw new Error(result?.error || `Upload failed with status: ${resp.status}`);
+      }
+
       if (result.success && result.url) {
         setBannerImage(result.url);
+        const storageMsg =
+          result.storage === 'r2' ? 'Uploaded to Cloudflare R2 CDN' : 'Uploaded to server storage';
+        setUploadSuccessMsg(compressionNote ? `${compressionNote} · ${storageMsg}` : storageMsg);
       } else {
         throw new Error(result.error || 'Failed to retrieve uploaded image URL');
       }
@@ -268,10 +333,14 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
               <div className="relative flex-1">
                 <ImageIcon className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
                 <input
-                  type="url"
+                  type="text"
                   value={bannerImage}
-                  onChange={(e) => setBannerImage(e.target.value)}
-                  placeholder="Paste banner image URL (or select preset below)..."
+                  onChange={(e) => {
+                    setBannerImage(e.target.value);
+                    setUploadError(null);
+                    setUploadSuccessMsg(null);
+                  }}
+                  placeholder="Paste banner image URL or /uploads/ path (or select preset below)..."
                   className="w-full bg-white border border-slate-300 rounded-xl pl-9 pr-3.5 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-amber-600 shadow-2xs"
                 />
               </div>
@@ -301,6 +370,12 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
 
             {uploadError && (
               <p className="text-[11px] text-rose-600">{uploadError}</p>
+            )}
+            {uploadSuccessMsg && !uploadError && (
+              <p className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                <span>{uploadSuccessMsg}</span>
+              </p>
             )}
 
             {/* Preset Banner Quick Selection */}

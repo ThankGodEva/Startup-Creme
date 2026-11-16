@@ -173,9 +173,16 @@ export const EventWebhookIngestionSchema = z
     cover_image: z
       .string()
       .trim()
-      .regex(/^https:\/\/.+/i, 'Cover image must be a valid HTTPS URL')
+      .regex(/^(https?:\/\/.+|\/.+)/i, 'Cover image must be a valid URL or uploaded path')
       .optional()
       .nullable(),
+    banner_image: z
+      .string()
+      .trim()
+      .regex(/^(https?:\/\/.+|\/.+)/i, 'Banner image must be a valid URL or uploaded path')
+      .optional()
+      .nullable(),
+    create_post: z.boolean().optional().default(false),
     author_name: z.string().trim().max(80).optional().default('Startup Crème Editorial'),
     author_role: z.string().trim().max(80).optional().default('Principal Editor'),
     author_avatar: z
