@@ -11,6 +11,7 @@ import {
   ArrowRight,
   Filter,
   Trash2,
+  Edit3,
   Code2,
   Copy,
   Check,
@@ -150,6 +151,7 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
   const [selectedEvent, setSelectedEvent] = useState<EventOpportunity | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showPublishModal, setShowPublishModal] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<EventOpportunity | null>(null);
   const [copiedEventId, setCopiedEventId] = useState<string | null>(null);
 
   // Deep-linking: match initialEventSlug to an event on mount/load
@@ -421,7 +423,10 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
           {isAdmin ? (
             <button
               type="button"
-              onClick={() => setShowPublishModal(true)}
+              onClick={() => {
+                setEditingEvent(null);
+                setShowPublishModal(true);
+              }}
               className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-sm hover:shadow"
             >
               <Plus className="w-4 h-4" />
@@ -528,7 +533,10 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
           {isAdmin ? (
             <button
               type="button"
-              onClick={() => setShowPublishModal(true)}
+              onClick={() => {
+                setEditingEvent(null);
+                setShowPublishModal(true);
+              }}
               className="mt-5 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4" />
@@ -720,15 +728,29 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
 
                     <div className="flex items-center gap-2">
                       {isAdmin && (
-                        <button
-                          type="button"
-                          disabled={deletingId === item.id}
-                          onClick={(e) => handleDeleteEvent(item.id, e)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                          title="Delete event from database"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingEvent(item);
+                              setShowPublishModal(true);
+                            }}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-amber-700 hover:bg-amber-50 transition-colors cursor-pointer"
+                            title="Edit event details"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={deletingId === item.id}
+                            onClick={(e) => handleDeleteEvent(item.id, e)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                            title="Delete event from database"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
                       )}
 
                       {linkedPost ? (
@@ -951,13 +973,26 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
 
                 <div className="flex items-center gap-2">
                   {isAdmin && (
-                    <button
-                      type="button"
-                      onClick={(e) => handleDeleteEvent(selectedEvent.id, e)}
-                      className="px-3.5 py-2 rounded-xl text-rose-700 hover:bg-rose-50 border border-rose-200 text-xs font-semibold transition-colors cursor-pointer"
-                    >
-                      Delete Event
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingEvent(selectedEvent);
+                          setShowPublishModal(true);
+                        }}
+                        className="px-3.5 py-2 rounded-xl text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Edit Event</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteEvent(selectedEvent.id, e)}
+                        className="px-3.5 py-2 rounded-xl text-rose-700 hover:bg-rose-50 border border-rose-200 text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        Delete Event
+                      </button>
+                    </>
                   )}
                   <button
                     type="button"
@@ -973,12 +1008,27 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
         </div>
       )}
 
-      {/* Admin Manual Opportunity Publishing Modal */}
+      {/* Admin Manual Opportunity Publishing & Editing Modal */}
       <PublishEventModal
         isOpen={showPublishModal}
-        onClose={() => setShowPublishModal(false)}
-        onSuccess={(newEvent) => {
-          setEvents((prev) => [newEvent, ...prev.filter((e) => e.id !== newEvent.id)]);
+        eventToEdit={editingEvent}
+        onClose={() => {
+          setShowPublishModal(false);
+          setEditingEvent(null);
+        }}
+        onSuccess={(savedEvent) => {
+          setEvents((prev) =>
+            prev.some((e) => e.id === savedEvent.id)
+              ? prev.map((e) => (e.id === savedEvent.id ? savedEvent : e))
+              : [savedEvent, ...prev]
+          );
+          if (selectedEvent && selectedEvent.id === savedEvent.id) {
+            setSelectedEvent(savedEvent);
+            const nextUrl = getEventUrl(savedEvent);
+            if (window.location.pathname !== nextUrl) {
+              window.history.replaceState({}, '', nextUrl);
+            }
+          }
         }}
       />
     </div>

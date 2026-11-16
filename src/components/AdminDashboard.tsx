@@ -82,6 +82,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isClearingEvents, setIsClearingEvents] = useState(false);
   const [showApiDocsModal, setShowApiDocsModal] = useState(false);
   const [showPublishEventModal, setShowPublishEventModal] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<EventOpportunity | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -745,7 +746,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <button
                     type="button"
-                    onClick={() => setShowPublishEventModal(true)}
+                    onClick={() => {
+                      setEditingEvent(null);
+                      setShowPublishEventModal(true);
+                    }}
                     className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
                   >
                     <Plus className="w-3.5 h-3.5" />
@@ -799,7 +803,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div className="flex items-center justify-center gap-3 flex-wrap">
                     <button
                       type="button"
-                      onClick={() => setShowPublishEventModal(true)}
+                      onClick={() => {
+                        setEditingEvent(null);
+                        setShowPublishEventModal(true);
+                      }}
                       className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold inline-flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
                     >
                       <Plus className="w-3.5 h-3.5" />
@@ -860,6 +867,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingEvent(e);
+                            setShowPublishEventModal(true);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Edit</span>
+                        </button>
                         <button
                           type="button"
                           disabled={busyModerationId === e.id}
@@ -1028,12 +1046,20 @@ Authorization: Bearer &lt;STARTUPCREME_AUTOMATION_SECRET&gt;
           </div>
         )}
 
-        {/* Admin Manual Opportunity Publishing Modal */}
+        {/* Admin Manual Opportunity Publishing & Editing Modal */}
         <PublishEventModal
           isOpen={showPublishEventModal}
-          onClose={() => setShowPublishEventModal(false)}
-          onSuccess={(newEvent) => {
-            setEvents((prev) => [newEvent, ...prev.filter((e) => e.id !== newEvent.id)]);
+          eventToEdit={editingEvent}
+          onClose={() => {
+            setShowPublishEventModal(false);
+            setEditingEvent(null);
+          }}
+          onSuccess={(savedEvent) => {
+            setEvents((prev) =>
+              prev.some((e) => e.id === savedEvent.id)
+                ? prev.map((e) => (e.id === savedEvent.id ? savedEvent : e))
+                : [savedEvent, ...prev]
+            );
           }}
         />
       </div>

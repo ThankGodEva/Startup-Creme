@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   X,
   Calendar,
@@ -23,13 +23,14 @@ import { supabase } from '../lib/supabase';
 import { compressImage, formatBytes } from '../lib/imageCompression';
 import { EventOpportunity, OpportunityType } from '../types';
 import { EventSubmissionSchema } from '../lib/validation';
-import { EVENT_BANNER_PRESETS, getEventBanner } from '../lib/eventsHelper';
+import { EVENT_BANNER_PRESETS, getEventBanner, stripBannerMeta } from '../lib/eventsHelper';
 import { getEventShareUrl } from '../lib/router';
 
 interface PublishEventModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: (event: EventOpportunity) => void;
+  eventToEdit?: EventOpportunity | null;
 }
 
 const OPPORTUNITY_TYPES: { value: OpportunityType; label: string }[] = [
@@ -42,11 +43,47 @@ const OPPORTUNITY_TYPES: { value: OpportunityType; label: string }[] = [
   { value: 'conference', label: 'Conference / Summit' },
 ];
 
+const formatInputDate = (dateStr?: string | null): string => {
+  if (!dateStr) return '';
+  const match = String(dateStr).match(/^\d{4}-\d{2}-\d{2}/);
+  if (match) return match[0];
+  try {
+    const parsed = new Date(dateStr);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString().slice(0, 10);
+    }
+  } catch {
+    // ignore
+  }
+  return '';
+};
+
+const extractPostPlainText = (content: any, fallbackExcerpt?: string | null): string => {
+  if (!content) return fallbackExcerpt || '';
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content?.content)) {
+    const parts: string[] = [];
+    const walk = (node: any) => {
+      if (!node) return;
+      if (typeof node.text === 'string') parts.push(node.text);
+      if (Array.isArray(node.content)) node.content.forEach(walk);
+      if (node.type === 'paragraph' || node.type === 'heading') parts.push('\n');
+    };
+    content.content.forEach(walk);
+    const joined = parts.join('').replace(/\n{3,}/g, '\n\n').trim();
+    if (joined) return joined;
+  }
+  return fallbackExcerpt || '';
+};
+
 export const PublishEventModal: React.FC<PublishEventModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
+  eventToEdit = null,
 }) => {
+  const isEditMode = Boolean(eventToEdit);
+
   const [title, setTitle] = useState('');
   const [opportunityType, setOpportunityType] = useState<OpportunityType>('grant');
   const [fundingAmount, setFundingAmount] = useState('');
@@ -73,11 +110,56 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    setFormError(null);
+    setFieldErrors({});
+    setUploadError(null);
+    setUploadSuccessMsg(null);
+
+    if (eventToEdit) {
+      setTitle(eventToEdit.title || '');
+      setOpportunityType((eventToEdit.opportunity_type as OpportunityType) || 'grant');
+      setFundingAmount(eventToEdit.funding_amount || '');
+      setLocation(eventToEdit.location || 'Global (Remote)');
+      setDeadlineDate(formatInputDate(eventToEdit.deadline_date));
+      setApplicationUrl(eventToEdit.application_url || '');
+      setDescription(stripBannerMeta(eventToEdit.description || ''));
+      setSlug(eventToEdit.slug || '');
+      setBannerImage(eventToEdit.banner_image || '');
+      setCreateCompanionPost(Boolean(eventToEdit.linked_post_id || eventToEdit.linked_post));
+      const postVertical = eventToEdit.linked_post?.vertical;
+      setVertical(
+        postVertical === 'finance' || postVertical === 'founders-mindset' ? postVertical : 'tech'
+      );
+      setFullContent(
+        extractPostPlainText(eventToEdit.linked_post?.content, eventToEdit.linked_post?.excerpt)
+      );
+    } else {
+      setTitle('');
+      setOpportunityType('grant');
+      setFundingAmount('');
+      setLocation('Global (Remote)');
+      setDeadlineDate('');
+      setApplicationUrl('');
+      setDescription('');
+      setSlug('');
+      setBannerImage('');
+      setCreateCompanionPost(false);
+      setVertical('tech');
+      setFullContent('');
+    }
+  }, [isOpen, eventToEdit]);
+
   if (!isOpen) return null;
 
   const handleTitleChange = (val: string) => {
     setTitle(val);
-    if (!slug || slug === title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')) {
+    if (
+      !isEditMode &&
+      (!slug || slug === title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''))
+    ) {
       const autoSlug = val
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
@@ -222,7 +304,7 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      const res = await store.publishEvent({
+      const submissionPayload = {
         title,
         opportunity_type: opportunityType,
         funding_amount: fundingAmount || null,
@@ -233,14 +315,23 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
         cover_image: currentEffectiveBanner,
         create_post: createCompanionPost,
         vertical,
-        locale: 'en-us',
+        locale: eventToEdit?.linked_post?.locale || 'en-us',
         description,
         slug: slug || undefined,
         content: createCompanionPost ? (fullContent || description) : undefined,
-      });
+      };
+
+      const res = isEditMode && eventToEdit
+        ? await store.updateEvent(eventToEdit.id, submissionPayload)
+        : await store.publishEvent(submissionPayload);
 
       if (!res.success || !res.event) {
-        setFormError(res.error || 'Failed to publish event. Please verify server connectivity.');
+        setFormError(
+          res.error ||
+            (isEditMode
+              ? 'Failed to save event changes. Please verify server connectivity.'
+              : 'Failed to publish event. Please verify server connectivity.')
+        );
         return;
       }
 
@@ -250,7 +341,12 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
       }
       onClose();
     } catch (err: any) {
-      setFormError(err.message || 'An unexpected error occurred while publishing the opportunity.');
+      setFormError(
+        err.message ||
+          (isEditMode
+            ? 'An unexpected error occurred while saving event changes.'
+            : 'An unexpected error occurred while publishing the opportunity.')
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -272,13 +368,15 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
           <div>
             <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-wider text-amber-700 font-bold mb-1">
               <Award className="w-3.5 h-3.5" />
-              <span>Admin Opportunity Publishing Engine</span>
+              <span>{isEditMode ? 'Edit Published Opportunity' : 'Admin Opportunity Publishing Engine'}</span>
             </div>
             <h2 id="publish-event-title" className="font-serif text-xl sm:text-2xl font-bold text-slate-900">
-              Publish Grant, Accelerator or Event
+              {isEditMode ? 'Edit Grant, Accelerator or Event' : 'Publish Grant, Accelerator or Event'}
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Every opportunity includes a hero banner and unique shareable link. Companion editorial posts are optional.
+              {isEditMode
+                ? 'Update banner image, deadline, description, application link, or companion article details.'
+                : 'Every opportunity includes a hero banner and unique shareable link. Companion editorial posts are optional.'}
             </p>
           </div>
           <button
@@ -642,12 +740,18 @@ export const PublishEventModal: React.FC<PublishEventModalProps> = ({
               {isSubmitting ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Publishing Opportunity...</span>
+                  <span>{isEditMode ? 'Saving Changes...' : 'Publishing Opportunity...'}</span>
                 </>
               ) : (
                 <>
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>{createCompanionPost ? 'Publish Event & Post' : 'Publish Opportunity'}</span>
+                  <span>
+                    {isEditMode
+                      ? 'Save Changes'
+                      : createCompanionPost
+                      ? 'Publish Event & Post'
+                      : 'Publish Opportunity'}
+                  </span>
                 </>
               )}
             </button>

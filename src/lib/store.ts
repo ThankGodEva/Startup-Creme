@@ -2943,6 +2943,156 @@ class StartupCremeStore {
 
     return { success: true, event: finalEvent };
   }
+
+  public async updateEvent(
+    id: string,
+    eventData: {
+      title: string;
+      description: string;
+      opportunity_type: OpportunityType | string;
+      funding_amount?: string | null;
+      location?: string;
+      deadline_date: string;
+      application_url: string;
+      vertical?: 'finance' | 'tech' | 'founders-mindset';
+      locale?: string;
+      slug?: string;
+      content?: string;
+      cover_image?: string | null;
+      banner_image?: string | null;
+      create_post?: boolean;
+    }
+  ): Promise<{ success: boolean; event?: EventOpportunity; error?: string }> {
+    if (!this.currentUser || this.currentUser.role !== 'admin') {
+      return { success: false, error: 'Admin privileges required to edit events.' };
+    }
+
+    const existing = this.events.find((e) => e.id === id);
+    const normTitle = eventData.title.trim();
+    const generatedSlug = normTitle
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const normSlug = (eventData.slug?.trim() || existing?.slug || generatedSlug) || `event-${Date.now()}`;
+    const normAppUrl = eventData.application_url.trim();
+    const normLocation = (eventData.location || 'Global (Remote)').trim();
+    const normVertical = eventData.vertical || 'tech';
+    const normLocale = eventData.locale || 'en-us';
+    const normDeadline = eventData.deadline_date;
+    const normFunding = eventData.funding_amount?.trim() || null;
+    const normDescription = stripBannerMeta(eventData.description.trim());
+    const normContent = eventData.content?.trim() || normDescription;
+    const normBanner = eventData.banner_image?.trim() || eventData.cover_image?.trim() || null;
+    const shouldCreatePost = Boolean(eventData.create_post);
+
+    const payload = {
+      title: normTitle,
+      slug: normSlug,
+      description: normDescription,
+      opportunity_type: eventData.opportunity_type || 'grant',
+      funding_amount: normFunding,
+      location: normLocation,
+      deadline_date: normDeadline,
+      application_url: normAppUrl,
+      vertical: normVertical,
+      locale: normLocale,
+      content: normContent,
+      cover_image: normBanner,
+      banner_image: normBanner,
+      create_post: shouldCreatePost,
+    };
+
+    try {
+      const headers = await this.getRequestAuthHeaders();
+      const resp = await fetch(`/api/events/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      const body = await resp.json().catch(() => ({}));
+      if (resp.ok && body.success && body.event) {
+        const updated = normalizeEventRecord(body.event);
+        this.events = this.events.some((e) => e.id === id)
+          ? this.events.map((e) => (e.id === id ? updated : e))
+          : [updated, ...this.events];
+        this.notify();
+        return { success: true, event: updated };
+      }
+
+      if (resp.status >= 400 && resp.status < 500) {
+        return {
+          success: false,
+          error: body?.error || `Failed to update opportunity (${resp.status})`,
+        };
+      }
+    } catch {
+      // Fall back to direct Supabase update if server route unreachable
+    }
+
+    if (isSupabaseConfigured()) {
+      try {
+        let updateRes = await supabaseExecute<any>((client) =>
+          client
+            .from('events')
+            .update({
+              title: normTitle,
+              slug: normSlug,
+              description: normDescription,
+              opportunity_type: eventData.opportunity_type || 'grant',
+              funding_amount: normFunding,
+              location: normLocation,
+              deadline_date: new Date(normDeadline).toISOString(),
+              application_url: normAppUrl,
+              banner_image: normBanner,
+            })
+            .eq('id', id)
+            .select('*, linked_post:posts(*)')
+            .maybeSingle()
+        );
+
+        if (
+          updateRes.error &&
+          (String(updateRes.error.message || '').includes('banner_image') ||
+            updateRes.error.code === 'PGRST204')
+        ) {
+          updateRes = await supabaseExecute<any>((client) =>
+            client
+              .from('events')
+              .update({
+                title: normTitle,
+                slug: normSlug,
+                description: encodeDescriptionWithBanner(normDescription, normBanner),
+                opportunity_type: eventData.opportunity_type || 'grant',
+                funding_amount: normFunding,
+                location: normLocation,
+                deadline_date: new Date(normDeadline).toISOString(),
+                application_url: normAppUrl,
+              })
+              .eq('id', id)
+              .select('*, linked_post:posts(*)')
+              .maybeSingle()
+          );
+        }
+
+        if (!updateRes.error && updateRes.data) {
+          const updated = normalizeEventRecord(updateRes.data);
+          this.events = this.events.map((e) => (e.id === id ? updated : e));
+          this.notify();
+          return { success: true, event: updated };
+        }
+
+        return {
+          success: false,
+          error: updateRes.error?.message || 'Failed to update event in Supabase.',
+        };
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Unexpected error updating event.' };
+      }
+    }
+
+    return { success: false, error: 'Unable to persist event changes to backend.' };
+  }
 }
 
 export const store = new StartupCremeStore();
