@@ -1,6 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { isSupabaseConfigured, supabase } from './supabase';
 import { normalizeImageUrl, getPublisherAvatar } from './router';
+import { normalizeEventRecord, encodeDescriptionWithBanner, stripBannerMeta } from './eventsHelper';
 import {
   Post,
   DiscussionTopic,
@@ -739,19 +740,20 @@ class StartupCremeStore {
       }
       this.postComments = groupedPostComments;
 
-      // Fetch Events strictly from startupcreme schema (only published for public)
+      // Fetch Events strictly from startupcreme schema (standalone events + published linked posts)
       try {
         const isAdmin = this.currentUser?.role === 'admin';
         const { data: eventsData } = await supabaseExecute((client) => {
-          let q = client.from('events');
-          if (isAdmin) {
-            return q.select('*, linked_post:posts(*)').order('deadline_date', { ascending: true });
-          } else {
-            return q.select('*, linked_post:posts!inner(*)').eq('linked_post.status', 'published').order('deadline_date', { ascending: true });
-          }
+          return client
+            .from('events')
+            .select('*, linked_post:posts(*)')
+            .order('deadline_date', { ascending: true });
         });
         if (eventsData && Array.isArray(eventsData)) {
-          this.events = isAdmin ? eventsData : eventsData.filter(e => e.linked_post?.status === 'published');
+          const normalized = eventsData.map((e: any) => normalizeEventRecord(e));
+          this.events = isAdmin
+            ? normalized
+            : normalized.filter((e: any) => !e.linked_post_id || e.linked_post?.status === 'published');
         }
       } catch {
         // ignore if events table not created yet
@@ -2643,8 +2645,9 @@ class StartupCremeStore {
   // --------------------------------------------------------------------
   public getEvents(): EventOpportunity[] {
     const isAdmin = this.currentUser?.role === 'admin';
-    if (isAdmin) return this.events;
-    return this.events.filter((e) => {
+    const normalized = this.events.map((e) => normalizeEventRecord(e));
+    if (isAdmin) return normalized;
+    return normalized.filter((e) => {
       // Standalone events without a post are always published and viewable
       if (!e.linked_post_id) return true;
       const post = e.linked_post || this.posts.find((p) => p.id === e.linked_post_id);
@@ -2663,7 +2666,7 @@ class StartupCremeStore {
       if (resp.ok) {
         const body = await resp.json();
         if (Array.isArray(body.events)) {
-          this.events = body.events;
+          this.events = body.events.map((e: EventOpportunity) => normalizeEventRecord(e));
           this.notify();
           return this.getEvents();
         }
@@ -2690,7 +2693,8 @@ class StartupCremeStore {
         return q.order('deadline_date', { ascending: true });
       });
       if (!error && Array.isArray(data)) {
-        this.events = isAdmin ? data : data.filter((e) => {
+        const normalized = data.map((e) => normalizeEventRecord(e));
+        this.events = isAdmin ? normalized : normalized.filter((e) => {
           if (!e.linked_post_id) return true;
           const post = e.linked_post || this.posts.find((p) => p.id === e.linked_post_id);
           return post?.status === 'published';
@@ -2798,7 +2802,7 @@ class StartupCremeStore {
     const normLocale = eventData.locale || 'en-us';
     const normDeadline = eventData.deadline_date;
     const normFunding = eventData.funding_amount?.trim() || null;
-    const normDescription = eventData.description.trim();
+    const normDescription = stripBannerMeta(eventData.description.trim());
     const normContent = eventData.content?.trim() || normDescription;
     const normBanner = eventData.banner_image?.trim() || eventData.cover_image?.trim() || null;
     const shouldCreatePost = Boolean(eventData.create_post);
@@ -2874,7 +2878,7 @@ class StartupCremeStore {
           serverPostId = postResult.data?.id || null;
         }
 
-        const eventResult = await supabaseExecute<any>((client) =>
+        let eventResult = await supabaseExecute<any>((client) =>
           client.from('events').upsert({
             title: normTitle,
             slug: normSlug,
@@ -2888,6 +2892,26 @@ class StartupCremeStore {
             linked_post_id: serverPostId,
           }, { onConflict: 'application_url' }).select('id').maybeSingle()
         );
+
+        if (
+          eventResult.error &&
+          (String(eventResult.error.message || '').includes('banner_image') ||
+            eventResult.error.code === 'PGRST204')
+        ) {
+          eventResult = await supabaseExecute<any>((client) =>
+            client.from('events').upsert({
+              title: normTitle,
+              slug: normSlug,
+              description: encodeDescriptionWithBanner(normDescription, normBanner),
+              opportunity_type: eventData.opportunity_type || 'grant',
+              funding_amount: normFunding,
+              location: normLocation,
+              deadline_date: new Date(normDeadline).toISOString(),
+              application_url: normAppUrl,
+              linked_post_id: serverPostId,
+            }, { onConflict: 'application_url' }).select('id').maybeSingle()
+          );
+        }
 
         serverEventId = eventResult.data?.id || null;
       } catch {

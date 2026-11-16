@@ -18,6 +18,11 @@ import {
   EventOpportunity,
 } from '../types';
 import { EventWebhookIngestionSchema } from '../lib/validation';
+import {
+  normalizeEventRecord,
+  encodeDescriptionWithBanner,
+  stripBannerMeta,
+} from '../lib/eventsHelper';
 
 export const expansionRouter = Router();
 
@@ -1142,6 +1147,8 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
     title: rawTitle || undefined,
     event_title: rawEventTitle || undefined,
     slug: candidateSlug || undefined,
+    banner_image: typeof rawBody.banner_image === 'string' && !rawBody.banner_image.trim() ? null : rawBody.banner_image,
+    cover_image: typeof rawBody.cover_image === 'string' && !rawBody.cover_image.trim() ? null : rawBody.cover_image,
   };
 
   // 3. Zod Schema Validation
@@ -1163,7 +1170,7 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
   const normLocale = validated.locale;
   const cleanAppUrl = validated.application_url;
   const rawContent = validated.content || validated.description || effectiveTitle;
-  const description = (validated.description || validated.excerpt || effectiveTitle).trim();
+  const description = stripBannerMeta((validated.description || validated.excerpt || effectiveTitle).trim());
 
   // 4. Status Resolution:
   // Default status must be "draft", not "published".
@@ -1218,9 +1225,9 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
         .maybeSingle();
       if (foundPost) existingPost = foundPost;
 
-      // Check existing event by application_url or slug
+      // Check existing event by application_url or slug (use * so schema differences never fail select)
       const { data: foundEvent } = await eventsTable
-        .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id')
+        .select('*')
         .or(`application_url.eq.${cleanAppUrl},slug.eq.${normSlug}`)
         .maybeSingle();
       if (foundEvent) existingEvent = foundEvent;
@@ -1392,8 +1399,9 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
 
       if (existingEvent) {
         eventId = existingEvent.id;
+        const normalizedExisting = normalizeEventRecord(existingEvent);
         const updatePayload: any = {};
-        if (normBannerImage && !existingEvent.banner_image) {
+        if (normBannerImage && normBannerImage !== normalizedExisting.banner_image) {
           updatePayload.banner_image = normBannerImage;
         }
         if (linkedPostId && !existingEvent.linked_post_id) {
@@ -1401,41 +1409,61 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
         }
         if (Object.keys(updatePayload).length > 0) {
           try {
-            await eventsTable.update(updatePayload).eq('id', existingEvent.id);
+            const { error: updateErr } = await eventsTable.update(updatePayload).eq('id', existingEvent.id);
+            if (updateErr && (String(updateErr.message || '').includes('banner_image') || updateErr.code === 'PGRST204')) {
+              const { banner_image: _ignoredBanner, ...fallbackUpdate } = updatePayload;
+              if (normBannerImage) {
+                fallbackUpdate.description = encodeDescriptionWithBanner(
+                  existingEvent.description || description,
+                  normBannerImage
+                );
+              }
+              if (Object.keys(fallbackUpdate).length > 0) {
+                await eventsTable.update(fallbackUpdate).eq('id', existingEvent.id);
+              }
+            }
           } catch {
             // Ignore optional update failure
           }
         }
       } else {
+        let safeEventRow: any = { ...eventRow };
         let insertRes = await eventsTable
-          .insert(eventRow)
-          .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, banner_image, linked_post_id, created_at')
+          .insert(safeEventRow)
+          .select('*')
           .maybeSingle();
 
-        // If banner_image column not present yet on remote DB, fallback without it
-        if (insertRes.error && String(insertRes.error.message || '').includes('banner_image')) {
-          const { banner_image, ...legacyEventRow } = eventRow;
+        // If banner_image column not present yet on remote DB, encode banner URL inside description metadata
+        if (
+          insertRes.error &&
+          (String(insertRes.error.message || '').includes('banner_image') || insertRes.error.code === 'PGRST204')
+        ) {
+          const { banner_image: _ignoredBanner, ...legacyEventRow } = safeEventRow;
+          safeEventRow = {
+            ...legacyEventRow,
+            description: encodeDescriptionWithBanner(description, normBannerImage),
+          };
           insertRes = await eventsTable
-            .insert(legacyEventRow)
-            .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
+            .insert(safeEventRow)
+            .select('*')
             .maybeSingle();
         }
 
         // Fallback if remote database has not yet applied enum additions for fellowship/incubator
         if (insertRes.error && insertRes.error.code === '22P02' && String(insertRes.error.message || '').includes('opportunity_type')) {
           const fallbackOpp = validated.opportunity_type === 'fellowship' ? 'grant' : 'accelerator';
-          const { banner_image, ...legacyEventRow } = eventRow;
+          safeEventRow = { ...safeEventRow, opportunity_type: fallbackOpp };
           insertRes = await eventsTable
-            .insert({ ...legacyEventRow, opportunity_type: fallbackOpp })
-            .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
+            .insert(safeEventRow)
+            .select('*')
             .maybeSingle();
         }
 
         if (insertRes.error && String(insertRes.error.message || '').includes('events_slug_key')) {
-          const fallbackRow = { ...eventRow, slug: `${normSlug}-${Date.now().toString(36)}` };
+          safeEventRow = { ...safeEventRow, slug: `${normSlug}-${Date.now().toString(36)}` };
           insertRes = await eventsTable
-            .insert(fallbackRow)
-            .select('id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at')
+            .insert(safeEventRow)
+            .select('*')
             .single();
         }
 
@@ -1446,7 +1474,7 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
       eventId = existingEvent?.id || `event-${Date.now()}`;
     }
 
-    const memoryEvent: EventOpportunity = {
+    const memoryEvent: EventOpportunity = normalizeEventRecord({
       id: eventId,
       title: effectiveEventTitle,
       slug: normSlug,
@@ -1460,7 +1488,7 @@ expansionRouter.post('/events/webhook', async (req: Request, res: Response) => {
       linked_post_id: linkedPostId,
       linked_post: linkedPostSnapshot as any,
       created_at: new Date().toISOString(),
-    };
+    });
 
     runtimeEvents = [
       memoryEvent,
@@ -1557,7 +1585,7 @@ expansionRouter.get('/events', async (req: Request, res: Response) => {
           }
           return true;
         });
-        const combined = [...publicEvents, ...matchingMemory];
+        const combined = [...publicEvents, ...matchingMemory].map((ev: any) => normalizeEventRecord(ev));
         return res.json({ success: true, count: combined.length, events: combined });
       }
     } catch {
@@ -1582,7 +1610,8 @@ expansionRouter.get('/events', async (req: Request, res: Response) => {
     );
   }
 
-  return res.json({ success: true, count: filtered.length, events: filtered });
+  const normalizedFiltered = filtered.map((ev) => normalizeEventRecord(ev));
+  return res.json({ success: true, count: normalizedFiltered.length, events: normalizedFiltered });
 });
 
 // Single event by slug: returns standalone event or event whose linked post is published
@@ -1599,7 +1628,7 @@ expansionRouter.get('/events/:slug', async (req: Request, res: Response) => {
 
       if (!error && data) {
         if (!data.linked_post_id || data.linked_post?.status === 'published') {
-          return res.json({ success: true, event: data });
+          return res.json({ success: true, event: normalizeEventRecord(data) });
         }
       }
     } catch {
@@ -1611,7 +1640,7 @@ expansionRouter.get('/events/:slug', async (req: Request, res: Response) => {
     (e) => e.slug === slug && (!e.linked_post_id || e.linked_post?.status === 'published')
   );
   if (found) {
-    return res.json({ success: true, event: found });
+    return res.json({ success: true, event: normalizeEventRecord(found) });
   }
 
   return res.status(404).json({ error: 'Event not found' });

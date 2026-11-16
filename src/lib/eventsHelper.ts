@@ -1,5 +1,42 @@
 import { EventOpportunity } from '../types';
 
+const BANNER_META_REGEX = /\s*\[banner_url:([^\]]+)\]\s*$/i;
+
+export function stripBannerMeta(description?: string | null): string {
+  if (!description) return '';
+  return description.replace(BANNER_META_REGEX, '').trim();
+}
+
+export function extractBannerFromDescription(description?: string | null): string | null {
+  if (!description) return null;
+  const match = description.match(BANNER_META_REGEX);
+  return match?.[1]?.trim() || null;
+}
+
+export function encodeDescriptionWithBanner(description: string, bannerUrl?: string | null): string {
+  const cleanDesc = stripBannerMeta(description);
+  const cleanBanner = bannerUrl?.trim();
+  if (!cleanBanner) return cleanDesc;
+  return `${cleanDesc}\n\n[banner_url:${cleanBanner}]`;
+}
+
+export function normalizeEventRecord<T extends Partial<EventOpportunity>>(event: T): T {
+  if (!event) return event;
+  const rawDesc = typeof event.description === 'string' ? event.description : '';
+  const embeddedBanner = extractBannerFromDescription(rawDesc);
+  const cleanDesc = stripBannerMeta(rawDesc);
+  const explicitBanner =
+    event.banner_image && typeof event.banner_image === 'string' && event.banner_image.trim()
+      ? event.banner_image.trim()
+      : null;
+
+  return {
+    ...event,
+    description: cleanDesc,
+    banner_image: explicitBanner || embeddedBanner || null,
+  };
+}
+
 /**
  * Returns a high-fidelity thematic banner image for any event/grant.
  * If the event has an explicit banner_image, it is returned.
@@ -10,6 +47,10 @@ import { EventOpportunity } from '../types';
 export function getEventBanner(event?: Partial<EventOpportunity> | null): string {
   if (event?.banner_image && typeof event.banner_image === 'string' && event.banner_image.trim()) {
     return event.banner_image.trim();
+  }
+  const embedded = extractBannerFromDescription(event?.description);
+  if (embedded) {
+    return embedded;
   }
   if (
     event?.linked_post?.cover_image &&

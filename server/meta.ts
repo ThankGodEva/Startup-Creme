@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { normalizeEventRecord } from '../src/lib/eventsHelper';
 
 export interface PageMetadata {
   title: string;
@@ -555,20 +556,21 @@ export async function resolvePageMetadata(
             .maybeSingle();
 
           if (eventData) {
-            title = `${eventData.title} | Grants & Events | StartupCrème`;
-            description = (eventData.description || '')
+            const normalizedEvent = normalizeEventRecord(eventData);
+            title = `${normalizedEvent.title} | Grants & Events | StartupCrème`;
+            description = (normalizedEvent.description || '')
               .replace(/\s+/g, ' ')
               .trim()
               .slice(0, 180) || description;
-            fullUrl = `${baseUrl}/events/${eventData.slug}`;
+            fullUrl = `${baseUrl}/events/${normalizedEvent.slug}`;
 
             // Banner resolution
-            if (eventData.banner_image && typeof eventData.banner_image === 'string' && eventData.banner_image.trim()) {
-              coverImage = eventData.banner_image.trim();
-            } else if (eventData.linked_post?.cover_image) {
-              coverImage = eventData.linked_post.cover_image;
+            if (normalizedEvent.banner_image && typeof normalizedEvent.banner_image === 'string' && normalizedEvent.banner_image.trim()) {
+              coverImage = normalizedEvent.banner_image.trim();
+            } else if (normalizedEvent.linked_post?.cover_image) {
+              coverImage = normalizedEvent.linked_post.cover_image;
             } else {
-              const oppType = String(eventData.opportunity_type || '').toLowerCase();
+              const oppType = String(normalizedEvent.opportunity_type || '').toLowerCase();
               if (oppType === 'grant') {
                 coverImage = 'https://images.unsplash.com/photo-1553729459-efe14ef6055d?auto=format&fit=crop&q=80&w=1200&h=630';
               } else if (oppType === 'accelerator' || oppType === 'incubator') {
@@ -585,9 +587,9 @@ export async function resolvePageMetadata(
             const eventJsonLd = {
               '@context': 'https://schema.org',
               '@type': 'Event',
-              name: eventData.title,
-              description: eventData.description,
-              image: [coverImage],
+              name: normalizedEvent.title,
+              description: normalizedEvent.description,
+              image: [ensureAbsoluteUrl(coverImage, baseUrl)],
               url: fullUrl,
               eventAttendanceMode: eventData.location?.toLowerCase().includes('remote') || eventData.location?.toLowerCase().includes('global')
                 ? 'https://schema.org/OnlineEventAttendanceMode'

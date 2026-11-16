@@ -798,33 +798,54 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
             </div>
 
             <div className="p-6 sm:p-8 space-y-6">
-              {/* Unique Shareable Link Box */}
-              <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950 font-mono uppercase tracking-wider">
-                    <Share2 className="w-3.5 h-3.5 text-amber-700" />
-                    <span>Unique Shareable Link</span>
-                  </div>
-                  <span className="text-[11px] font-mono text-amber-700">
-                    Canonical Opportunity URL
-                  </span>
+              {/* Share Opportunity Bar */}
+              <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950 font-mono uppercase tracking-wider">
+                  <Share2 className="w-3.5 h-3.5 text-amber-700" />
+                  <span>Share Opportunity</span>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={getEventShareUrl(selectedEvent)}
-                    className="flex-1 bg-white border border-amber-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 select-all focus:outline-none"
-                    onClick={(e) => (e.target as HTMLInputElement).select()}
-                  />
+                {/* Social Share & Copy Link Buttons */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                      `${selectedEvent.title} - ${getEventShareUrl(selectedEvent)}`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-emerald-700 hover:border-emerald-300 text-[11px] font-medium transition-colors"
+                  >
+                    WhatsApp
+                  </a>
+                  <a
+                    href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(
+                      getEventShareUrl(selectedEvent)
+                    )}&text=${encodeURIComponent(
+                      `${selectedEvent.title} | Grants & Events on @startupcreme`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-sky-600 hover:border-sky-300 text-[11px] font-medium transition-colors"
+                  >
+                    X / Twitter
+                  </a>
+                  <a
+                    href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(
+                      getEventShareUrl(selectedEvent)
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-blue-700 hover:border-blue-300 text-[11px] font-medium transition-colors"
+                  >
+                    LinkedIn
+                  </a>
                   <button
                     type="button"
                     onClick={() => handleShareEvent(selectedEvent)}
-                    className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                       copiedEventId === selectedEvent.id
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-amber-600 hover:bg-amber-700 text-white'
+                        ? 'bg-emerald-600 text-white border border-emerald-600'
+                        : 'bg-amber-600 hover:bg-amber-700 text-white border border-amber-600'
                     }`}
                   >
                     {copiedEventId === selectedEvent.id ? (
@@ -839,43 +860,6 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
                       </>
                     )}
                   </button>
-                </div>
-
-                {/* Social Share Buttons */}
-                <div className="flex items-center gap-2 pt-1">
-                  <span className="text-[11px] text-slate-500 font-medium">Quick share:</span>
-                  <a
-                    href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                      `${selectedEvent.title} - ${getEventShareUrl(selectedEvent)}`
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-emerald-700 hover:border-emerald-300 text-[11px] font-medium transition-colors"
-                  >
-                    WhatsApp
-                  </a>
-                  <a
-                    href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(
-                      getEventShareUrl(selectedEvent)
-                    )}&text=${encodeURIComponent(
-                      `${selectedEvent.title} | Grants & Events on @startupcreme`
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-sky-600 hover:border-sky-300 text-[11px] font-medium transition-colors"
-                  >
-                    X / Twitter
-                  </a>
-                  <a
-                    href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(
-                      getEventShareUrl(selectedEvent)
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-blue-700 hover:border-blue-300 text-[11px] font-medium transition-colors"
-                  >
-                    LinkedIn
-                  </a>
                 </div>
               </div>
 
