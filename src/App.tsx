@@ -278,6 +278,7 @@ export default function App() {
         setSelectedTopic(null);
         setLoadingArticleSlug(null);
         setLoadingTopicSlug(null);
+        setSelectedEventSlug(null);
       } else if (first === 'about' || first === 'about-us') {
         setActiveTab('about');
         setSelectedPost(null);
@@ -468,6 +469,7 @@ export default function App() {
     setActiveTab(tab);
     setSelectedPost(null);
     setSelectedTopic(null);
+    setSelectedEventSlug(null);
     const baseTargetUrl = getTabUrl(tab, currentLocale);
     const defaultModuleHash =
       tab === 'calculators'
@@ -819,6 +821,7 @@ export default function App() {
           <EventsModule
             currentUser={currentUser}
             initialEventSlug={selectedEventSlug}
+            onSelectEventSlug={setSelectedEventSlug}
             onSelectPost={handleSelectPost}
             onOpenAuth={() => setShowAuthModal(true)}
           />

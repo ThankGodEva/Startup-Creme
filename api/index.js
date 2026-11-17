@@ -1,6 +1,5 @@
 // server/app.ts
 import express from "express";
-import compression from "compression";
 import path from "path";
 import fs from "fs";
 import crypto3 from "crypto";
@@ -15,6 +14,21 @@ import { createClient } from "@supabase/supabase-js";
 
 // src/lib/expansionData.ts
 var INITIAL_STARTUPS = [
+  {
+    id: "6769b306-f307-4328-a5db-472dd25e3195",
+    name: "Jhora I-Create",
+    slug: "jhora-i-create-rnvs",
+    tagline: "We promote visibility for iCreators at any stage in their business. Feel seen, heard and patronized.",
+    description: "Jhora I-Create is a Nigerian digital marketplace built to empower local creators, artisans, and small-scale manufacturers by connecting them with customers across the country.",
+    website_url: "https://www.jhora.com.ng",
+    logo_url: "https://jhora.com.ng/favicon.png",
+    stage: "mvp",
+    vertical: "E-Commerce",
+    tech_stack: ["React", "Tailwind", "Node.js", "Supabase"],
+    submitted_by: "9373b6e3-dcea-4c1b-8063-d1cd9ee3037a",
+    is_approved: true,
+    created_at: "2026-10-15T22:51:23.448248+00:00"
+  },
   {
     id: "8ec5e176-acf3-45ec-8ade-42e061bd1d32",
     name: "Xhipa",
@@ -275,12 +289,255 @@ var INITIAL_CLOUD_PRICING_INDEX = [
     updated_at: "2026-09-28T00:00:00Z"
   }
 ];
+var INITIAL_INFLATION_RATES = [
+  {
+    id: "inf-us",
+    country: "United States",
+    country_code: "US",
+    flag_emoji: "\u{1F1FA}\u{1F1F8}",
+    currency: "USD ($)",
+    benchmark_index: "Headline CPI-U (Consumer Price Index for All Urban Consumers)",
+    statistical_agency: "U.S. Bureau of Labor Statistics (BLS)",
+    official_source_url: "https://www.bls.gov/cpi/",
+    history_10y: [
+      { year: 2017, rate: 2.1 },
+      { year: 2018, rate: 2.4 },
+      { year: 2019, rate: 1.8 },
+      { year: 2020, rate: 1.2 },
+      { year: 2021, rate: 4.7 },
+      { year: 2022, rate: 8 },
+      { year: 2023, rate: 4.1 },
+      { year: 2024, rate: 2.9 },
+      { year: 2025, rate: 2.7 },
+      { year: 2026, rate: 2.6 }
+    ],
+    current_rate: 2.6,
+    ten_year_avg: 3.25,
+    ten_year_high: { year: 2022, rate: 8 },
+    ten_year_low: { year: 2020, rate: 1.2 },
+    trend_label: "Disinflating",
+    target_band: "2.0% Symmetric Target",
+    notes: "Headline inflation cooled toward the Federal Reserve 2.0% PCE target after 2022 peak post-pandemic supply chain normalization.",
+    updated_at: "2026-09-30T00:00:00Z"
+  },
+  {
+    id: "inf-eu",
+    country: "Eurozone",
+    country_code: "EU",
+    flag_emoji: "\u{1F1EA}\u{1F1FA}",
+    currency: "EUR (\u20AC)",
+    benchmark_index: "Harmonised Index of Consumer Prices (HICP)",
+    statistical_agency: "Eurostat / European Central Bank",
+    official_source_url: "https://ec.europa.eu/eurostat/web/hicp",
+    history_10y: [
+      { year: 2017, rate: 1.5 },
+      { year: 2018, rate: 1.8 },
+      { year: 2019, rate: 1.2 },
+      { year: 2020, rate: 0.3 },
+      { year: 2021, rate: 2.6 },
+      { year: 2022, rate: 8.4 },
+      { year: 2023, rate: 5.4 },
+      { year: 2024, rate: 2.4 },
+      { year: 2025, rate: 2.2 },
+      { year: 2026, rate: 2.1 }
+    ],
+    current_rate: 2.1,
+    ten_year_avg: 2.79,
+    ten_year_high: { year: 2022, rate: 8.4 },
+    ten_year_low: { year: 2020, rate: 0.3 },
+    trend_label: "Anchored",
+    target_band: "2.0% Medium-Term Target",
+    notes: "Energy shock absorption completed; services and wage moderation converging on ECB 2% price stability objective.",
+    updated_at: "2026-09-30T00:00:00Z"
+  },
+  {
+    id: "inf-ng",
+    country: "Nigeria",
+    country_code: "NG",
+    flag_emoji: "\u{1F1F3}\u{1F1EC}",
+    currency: "NGN (\u20A6)",
+    benchmark_index: "National Composite Consumer Price Index (CPI)",
+    statistical_agency: "National Bureau of Statistics (NBS)",
+    official_source_url: "https://nigerianstat.gov.ng/",
+    history_10y: [
+      { year: 2017, rate: 16.5 },
+      { year: 2018, rate: 12.1 },
+      { year: 2019, rate: 11.4 },
+      { year: 2020, rate: 13.2 },
+      { year: 2021, rate: 17 },
+      { year: 2022, rate: 18.8 },
+      { year: 2023, rate: 24.5 },
+      { year: 2024, rate: 31.7 },
+      { year: 2025, rate: 28.2 },
+      { year: 2026, rate: 24.8 }
+    ],
+    current_rate: 24.8,
+    ten_year_avg: 19.82,
+    ten_year_high: { year: 2024, rate: 31.7 },
+    ten_year_low: { year: 2019, rate: 11.4 },
+    trend_label: "Disinflating",
+    target_band: "6.0% - 9.0% Target Band",
+    notes: "Base effects and FX stabilization driving steady deceleration from mid-2024 peak following fuel subsidy and currency reforms.",
+    updated_at: "2026-09-30T00:00:00Z"
+  },
+  {
+    id: "inf-gb",
+    country: "United Kingdom",
+    country_code: "GB",
+    flag_emoji: "\u{1F1EC}\u{1F1E7}",
+    currency: "GBP (\xA3)",
+    benchmark_index: "Consumer Prices Index (CPI Headline YoY)",
+    statistical_agency: "Office for National Statistics (ONS)",
+    official_source_url: "https://www.ons.gov.uk/economy/inflationandpriceindices",
+    history_10y: [
+      { year: 2017, rate: 2.7 },
+      { year: 2018, rate: 2.5 },
+      { year: 2019, rate: 1.8 },
+      { year: 2020, rate: 0.9 },
+      { year: 2021, rate: 2.6 },
+      { year: 2022, rate: 9.1 },
+      { year: 2023, rate: 7.3 },
+      { year: 2024, rate: 2.5 },
+      { year: 2025, rate: 2.8 },
+      { year: 2026, rate: 3.1 }
+    ],
+    current_rate: 3.1,
+    ten_year_avg: 3.53,
+    ten_year_high: { year: 2022, rate: 9.1 },
+    ten_year_low: { year: 2020, rate: 0.9 },
+    trend_label: "Accelerating",
+    target_band: "2.0% Symmetric Target",
+    notes: "Persistent domestic services inflation and wage pressure causing mild rebound above BoE 2.0% target.",
+    updated_at: "2026-09-30T00:00:00Z"
+  },
+  {
+    id: "inf-jp",
+    country: "Japan",
+    country_code: "JP",
+    flag_emoji: "\u{1F1EF}\u{1F1F5}",
+    currency: "JPY (\xA5)",
+    benchmark_index: "Core Consumer Price Index (Excluding Fresh Food)",
+    statistical_agency: "Statistics Bureau of Japan (SBJ)",
+    official_source_url: "https://www.stat.go.jp/english/data/cpi/",
+    history_10y: [
+      { year: 2017, rate: 0.5 },
+      { year: 2018, rate: 1 },
+      { year: 2019, rate: 0.5 },
+      { year: 2020, rate: 0 },
+      { year: 2021, rate: -0.2 },
+      { year: 2022, rate: 2.5 },
+      { year: 2023, rate: 3.2 },
+      { year: 2024, rate: 2.7 },
+      { year: 2025, rate: 2.6 },
+      { year: 2026, rate: 2.6 }
+    ],
+    current_rate: 2.6,
+    ten_year_avg: 1.54,
+    ten_year_high: { year: 2023, rate: 3.2 },
+    ten_year_low: { year: 2021, rate: -0.2 },
+    trend_label: "Anchored",
+    target_band: "2.0% Price Stability Target",
+    notes: "Sustained positive wage-price virtuous cycle allowing Bank of Japan normalization away from decades of deflation.",
+    updated_at: "2026-09-30T00:00:00Z"
+  },
+  {
+    id: "inf-za",
+    country: "South Africa",
+    country_code: "ZA",
+    flag_emoji: "\u{1F1FF}\u{1F1E6}",
+    currency: "ZAR (R)",
+    benchmark_index: "Headline Consumer Price Index (CPI)",
+    statistical_agency: "Statistics South Africa (Stats SA)",
+    official_source_url: "https://www.statssa.gov.za/",
+    history_10y: [
+      { year: 2017, rate: 5.3 },
+      { year: 2018, rate: 4.6 },
+      { year: 2019, rate: 4.1 },
+      { year: 2020, rate: 3.3 },
+      { year: 2021, rate: 4.5 },
+      { year: 2022, rate: 6.9 },
+      { year: 2023, rate: 6 },
+      { year: 2024, rate: 4.6 },
+      { year: 2025, rate: 4.5 },
+      { year: 2026, rate: 4.4 }
+    ],
+    current_rate: 4.4,
+    ten_year_avg: 4.82,
+    ten_year_high: { year: 2022, rate: 6.9 },
+    ten_year_low: { year: 2020, rate: 3.3 },
+    trend_label: "Anchored",
+    target_band: "3.0% - 6.0% (Midpoint 4.5%)",
+    notes: "Comfortably anchored right around the SARB 4.5% target midpoint as rand resilience and lower fuel costs support disinflation.",
+    updated_at: "2026-09-30T00:00:00Z"
+  },
+  {
+    id: "inf-ke",
+    country: "Kenya",
+    country_code: "KE",
+    flag_emoji: "\u{1F1F0}\u{1F1EA}",
+    currency: "KES (KSh)",
+    benchmark_index: "Overall Consumer Price Index (YoY CPI)",
+    statistical_agency: "Kenya National Bureau of Statistics (KNBS)",
+    official_source_url: "https://www.knbs.or.ke/",
+    history_10y: [
+      { year: 2017, rate: 8 },
+      { year: 2018, rate: 4.7 },
+      { year: 2019, rate: 5.2 },
+      { year: 2020, rate: 5.4 },
+      { year: 2021, rate: 6.1 },
+      { year: 2022, rate: 7.7 },
+      { year: 2023, rate: 7.7 },
+      { year: 2024, rate: 5 },
+      { year: 2025, rate: 4.5 },
+      { year: 2026, rate: 4.2 }
+    ],
+    current_rate: 4.2,
+    ten_year_avg: 5.85,
+    ten_year_high: { year: 2017, rate: 8 },
+    ten_year_low: { year: 2026, rate: 4.2 },
+    trend_label: "Disinflating",
+    target_band: "5.0% \xB1 2.5% (2.5% - 7.5%)",
+    notes: "Rebounded agricultural output, food price declines, and shilling stability brought headline inflation to 10-year lows below the 5% target.",
+    updated_at: "2026-09-30T00:00:00Z"
+  },
+  {
+    id: "inf-in",
+    country: "India",
+    country_code: "IN",
+    flag_emoji: "\u{1F1EE}\u{1F1F3}",
+    currency: "INR (\u20B9)",
+    benchmark_index: "All India Consumer Price Index (Combined CPI)",
+    statistical_agency: "Ministry of Statistics & Programme Implementation (MoSPI)",
+    official_source_url: "https://mospi.gov.in/",
+    history_10y: [
+      { year: 2017, rate: 3.6 },
+      { year: 2018, rate: 3.4 },
+      { year: 2019, rate: 4.8 },
+      { year: 2020, rate: 6.2 },
+      { year: 2021, rate: 5.5 },
+      { year: 2022, rate: 6.7 },
+      { year: 2023, rate: 5.7 },
+      { year: 2024, rate: 4.8 },
+      { year: 2025, rate: 4.1 },
+      { year: 2026, rate: 3.7 }
+    ],
+    current_rate: 3.7,
+    ten_year_avg: 4.85,
+    ten_year_high: { year: 2022, rate: 6.7 },
+    ten_year_low: { year: 2018, rate: 3.4 },
+    trend_label: "Disinflating",
+    target_band: "4.0% \xB1 2.0% (2.0% - 6.0%)",
+    notes: "Normal monsoon yields stabilized vegetable and grain components, pulling headline CPI below RBI 4.0% target.",
+    updated_at: "2026-09-30T00:00:00Z"
+  }
+];
 var INITIAL_RATE_SNAPSHOT = {
   id: "snap-2026-10-01",
   source: "n8n_automated_monetary_cloud_pipeline",
   recorded_at: "2026-10-01T06:00:00Z",
   central_bank_rates: INITIAL_CENTRAL_BANK_RATES,
-  cloud_pricing_index: INITIAL_CLOUD_PRICING_INDEX
+  cloud_pricing_index: INITIAL_CLOUD_PRICING_INDEX,
+  inflation_rates: INITIAL_INFLATION_RATES
 };
 var INITIAL_JOBS = [];
 var INITIAL_EVENTS = [];
@@ -346,7 +603,7 @@ var EditorialDraftSubmissionSchema = z.object({
   hide_ai_disclosure: z.boolean().optional().default(false),
   author_name: z.string().trim().max(80).optional().default("Startup Cr\xE8me Editorial"),
   author_role: z.string().trim().max(80).optional().default("Senior Analyst"),
-  author_avatar: z.string().trim().regex(/^https:\/\/.+/i, "Author avatar must be a valid HTTPS URL").optional().nullable(),
+  author_avatar: z.string().trim().regex(/^(https:\/\/.+|\/.+)/i, "Author avatar must be a valid HTTPS URL or local path").optional().nullable(),
   dual_silo: z.boolean().optional().default(false),
   tags: z.array(z.string().trim().min(1).max(50)).max(15).optional().default([]),
   reading_time_minutes: z.number().int().positive().max(120).optional(),
@@ -423,10 +680,12 @@ var EventWebhookIngestionSchema = z.object({
   funding_amount: z.string().trim().max(100).optional().nullable(),
   status: z.enum(["draft", "published"]).optional().default("draft"),
   tags: z.array(z.string().trim().min(1).max(50)).max(15, "Maximum 15 tags allowed").optional().default([]),
-  cover_image: z.string().trim().regex(/^https:\/\/.+/i, "Cover image must be a valid HTTPS URL").optional().nullable(),
+  cover_image: z.string().trim().regex(/^(https?:\/\/.+|\/.+)/i, "Cover image must be a valid URL or uploaded path").optional().nullable(),
+  banner_image: z.string().trim().regex(/^(https?:\/\/.+|\/.+)/i, "Banner image must be a valid URL or uploaded path").optional().nullable(),
+  create_post: z.boolean().optional().default(false),
   author_name: z.string().trim().max(80).optional().default("Startup Cr\xE8me Editorial"),
   author_role: z.string().trim().max(80).optional().default("Principal Editor"),
-  author_avatar: z.string().trim().regex(/^https:\/\/.+/i, "Author avatar must be a valid HTTPS URL").optional().nullable(),
+  author_avatar: z.string().trim().regex(/^(https:\/\/.+|\/.+)/i, "Author avatar must be a valid HTTPS URL or local path").optional().nullable(),
   canonical_url: z.string().trim().url("Canonical URL must be a valid URL").optional().nullable(),
   meta_description: z.string().trim().max(200).optional(),
   reading_time_minutes: z.number().int().positive().max(120).optional(),
@@ -478,11 +737,45 @@ var EventSubmissionSchema = z.object({
   location: z.string().trim().min(2, "Location is required").max(100).default("Global (Remote)"),
   deadline_date: z.string().trim().min(4, "Valid deadline date required"),
   funding_amount: z.string().trim().max(100).optional().nullable(),
+  banner_image: z.string().trim().optional().nullable(),
+  create_post: z.boolean().optional().default(false),
   vertical: z.enum(["finance", "tech", "founders-mindset"]).optional().default("tech"),
   locale: z.string().trim().optional().default("en-us"),
   slug: z.string().trim().optional(),
   content: z.string().trim().optional()
 });
+
+// src/lib/eventsHelper.ts
+var BANNER_META_REGEX = /\s*\[banner_url:([^\]]+)\]\s*$/i;
+function stripBannerMeta(description) {
+  if (!description) return "";
+  return description.replace(BANNER_META_REGEX, "").trim();
+}
+function extractBannerFromDescription(description) {
+  if (!description) return null;
+  const match = description.match(BANNER_META_REGEX);
+  return match?.[1]?.trim() || null;
+}
+function encodeDescriptionWithBanner(description, bannerUrl) {
+  const cleanDesc = stripBannerMeta(description);
+  const cleanBanner = bannerUrl?.trim();
+  if (!cleanBanner) return cleanDesc;
+  return `${cleanDesc}
+
+[banner_url:${cleanBanner}]`;
+}
+function normalizeEventRecord(event) {
+  if (!event) return event;
+  const rawDesc = typeof event.description === "string" ? event.description : "";
+  const embeddedBanner = extractBannerFromDescription(rawDesc);
+  const cleanDesc = stripBannerMeta(rawDesc);
+  const explicitBanner = event.banner_image && typeof event.banner_image === "string" && event.banner_image.trim() ? event.banner_image.trim() : null;
+  return {
+    ...event,
+    description: cleanDesc,
+    banner_image: explicitBanner || embeddedBanner || null
+  };
+}
 
 // src/server/expansionRouter.ts
 var expansionRouter = Router();
@@ -605,6 +898,106 @@ async function requireRouteAdminAuth(req, res) {
   }
   return reqUser;
 }
+var logoProxyCache = /* @__PURE__ */ new Map();
+function isSafeExternalUrl(targetUrl) {
+  try {
+    const parsed = new URL(targetUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+    const host = parsed.hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1" || host.endsWith(".local") || host.endsWith(".internal") || /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) || /^169\.254\./.test(host)) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+expansionRouter.get(["/directory/logo-proxy", "/startups/logo-proxy"], async (req, res) => {
+  const rawUrl = typeof req.query.url === "string" ? req.query.url.trim() : "";
+  const domain = typeof req.query.domain === "string" ? req.query.domain.trim() : "";
+  const name = typeof req.query.name === "string" ? req.query.name.trim() : "Company";
+  const cacheKey = rawUrl || domain || name;
+  const cached = logoProxyCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    res.set({
+      "Content-Type": cached.contentType,
+      "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+      "Access-Control-Allow-Origin": "*"
+    });
+    return res.end(cached.buffer);
+  }
+  const urlsToTry = [];
+  if (rawUrl && isSafeExternalUrl(rawUrl)) {
+    urlsToTry.push(rawUrl);
+  }
+  if (domain) {
+    const cleanDomain = domain.replace(/^https?:\/\//i, "").replace(/^www\./i, "").split("/")[0];
+    if (cleanDomain && isSafeExternalUrl(`https://${cleanDomain}`)) {
+      urlsToTry.push(`https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://${cleanDomain}&size=128`);
+      urlsToTry.push(`https://icons.duckduckgo.com/ip3/${cleanDomain}.ico`);
+    }
+  }
+  for (const targetUrl of urlsToTry) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4e3);
+      const upstream = await fetch(targetUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+        },
+        signal: controller.signal,
+        redirect: "follow"
+      });
+      clearTimeout(timeoutId);
+      if (upstream.ok) {
+        const contentType = upstream.headers.get("content-type") || "image/png";
+        if (contentType.startsWith("image/") || contentType.includes("octet-stream")) {
+          const arrayBuf = await upstream.arrayBuffer();
+          const buf = Buffer.from(arrayBuf);
+          if (buf.length > 0 && buf.length <= 5 * 1024 * 1024) {
+            const finalType = contentType.includes("octet-stream") ? "image/png" : contentType;
+            logoProxyCache.set(cacheKey, {
+              buffer: buf,
+              contentType: finalType,
+              expiresAt: Date.now() + 24 * 60 * 60 * 1e3
+            });
+            if (logoProxyCache.size > 1e3) {
+              const firstKey = logoProxyCache.keys().next().value;
+              if (firstKey) logoProxyCache.delete(firstKey);
+            }
+            res.set({
+              "Content-Type": finalType,
+              "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+              "Access-Control-Allow-Origin": "*"
+            });
+            return res.end(buf);
+          }
+        }
+      }
+    } catch {
+    }
+  }
+  const initial = (name.trim().charAt(0) || "S").toUpperCase();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+    <defs>
+      <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#0f172a"/>
+        <stop offset="100%" stop-color="#1e293b"/>
+      </linearGradient>
+    </defs>
+    <rect width="128" height="128" rx="28" fill="url(#bgGrad)" />
+    <rect x="2" y="2" width="124" height="124" rx="26" fill="none" stroke="#334155" stroke-width="2" />
+    <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#38bdf8" font-family="system-ui, -apple-system, sans-serif" font-size="56" font-weight="700">${initial}</text>
+  </svg>`;
+  const svgBuf = Buffer.from(svg, "utf-8");
+  res.set({
+    "Content-Type": "image/svg+xml; charset=utf-8",
+    "Cache-Control": "public, max-age=86400",
+    "Access-Control-Allow-Origin": "*"
+  });
+  return res.end(svgBuf);
+});
 expansionRouter.get(["/directory", "/startups"], async (req, res) => {
   const stageFilter = req.query.stage || "";
   const verticalFilter = req.query.vertical || "";
@@ -763,13 +1156,145 @@ expansionRouter.get(["/markets/rates", "/rates", "/markets"], async (req, res) =
           source: data.source || "supabase_cached_snapshot",
           recorded_at: data.recorded_at || data.created_at,
           central_bank_rates: Array.isArray(data.central_bank_rates) && data.central_bank_rates.length > 0 ? data.central_bank_rates : INITIAL_CENTRAL_BANK_RATES,
-          cloud_pricing_index: Array.isArray(data.cloud_pricing_index) && data.cloud_pricing_index.length > 0 ? data.cloud_pricing_index : INITIAL_CLOUD_PRICING_INDEX
+          cloud_pricing_index: Array.isArray(data.cloud_pricing_index) && data.cloud_pricing_index.length > 0 ? data.cloud_pricing_index : INITIAL_CLOUD_PRICING_INDEX,
+          inflation_rates: runtimeRateSnapshot.inflation_rates || INITIAL_INFLATION_RATES
         };
+      }
+      const { data: infData, error: infError } = await client.from("inflation_rates").select("*").order("country", { ascending: true });
+      if (!infError && Array.isArray(infData) && infData.length > 0) {
+        runtimeRateSnapshot.inflation_rates = infData;
       }
     } catch {
     }
   }
+  if (!runtimeRateSnapshot.inflation_rates || runtimeRateSnapshot.inflation_rates.length === 0) {
+    runtimeRateSnapshot.inflation_rates = INITIAL_INFLATION_RATES;
+  }
   return res.json(runtimeRateSnapshot);
+});
+expansionRouter.get(["/markets/inflation", "/inflation-rates", "/rates/inflation"], async (req, res) => {
+  if (!isMarketsFeatureEnabled()) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      const { data, error } = await client.from("inflation_rates").select("*").order("country", { ascending: true });
+      if (!error && Array.isArray(data) && data.length > 0) {
+        runtimeRateSnapshot.inflation_rates = data;
+      } else if (!error && Array.isArray(data) && data.length === 0) {
+        await client.from("inflation_rates").upsert(INITIAL_INFLATION_RATES, { onConflict: "country_code" });
+      }
+    } catch {
+    }
+  }
+  const rates = runtimeRateSnapshot.inflation_rates && runtimeRateSnapshot.inflation_rates.length > 0 ? runtimeRateSnapshot.inflation_rates : INITIAL_INFLATION_RATES;
+  return res.json({
+    success: true,
+    inflation_rates: rates,
+    recorded_at: runtimeRateSnapshot.recorded_at
+  });
+});
+function recalculateInflationStats(record) {
+  const history = Array.isArray(record.history_10y) && record.history_10y.length > 0 ? [...record.history_10y].sort((a, b) => a.year - b.year) : [];
+  if (history.length === 0) {
+    return record;
+  }
+  const sum = history.reduce((acc, h) => acc + h.rate, 0);
+  const avg = parseFloat((sum / history.length).toFixed(2));
+  let high = history[0];
+  let low = history[0];
+  for (const h of history) {
+    if (h.rate > high.rate) high = h;
+    if (h.rate < low.rate) low = h;
+  }
+  const latest = history[history.length - 1];
+  const previous = history.length > 1 ? history[history.length - 2] : latest;
+  let trendLabel = record.trend_label || "Anchored";
+  if (latest.rate < previous.rate - 0.2) {
+    trendLabel = "Disinflating";
+  } else if (latest.rate > previous.rate + 0.2) {
+    trendLabel = "Accelerating";
+  } else {
+    trendLabel = "Anchored";
+  }
+  return {
+    ...record,
+    history_10y: history,
+    current_rate: latest.rate,
+    ten_year_avg: avg,
+    ten_year_high: { year: high.year, rate: high.rate },
+    ten_year_low: { year: low.year, rate: low.rate },
+    trend_label: trendLabel,
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+expansionRouter.put(["/markets/inflation", "/rates/inflation"], async (req, res) => {
+  const adminUser = await requireRouteAdminAuth(req, res);
+  if (!adminUser) return;
+  const currentRates = [
+    ...runtimeRateSnapshot.inflation_rates && runtimeRateSnapshot.inflation_rates.length > 0 ? runtimeRateSnapshot.inflation_rates : INITIAL_INFLATION_RATES
+  ];
+  const payload = req.body;
+  if (!payload) {
+    return res.status(400).json({ error: "Missing request payload" });
+  }
+  let updatedList = [];
+  if (Array.isArray(payload.inflation_rates)) {
+    updatedList = payload.inflation_rates.map((item) => recalculateInflationStats(item));
+  } else if (payload.country_code || payload.id) {
+    const targetKey = (payload.country_code || payload.id).toString().toLowerCase();
+    const existingIndex = currentRates.findIndex(
+      (c) => c.id.toLowerCase() === targetKey || c.country_code.toLowerCase() === targetKey
+    );
+    const mergedRecord = recalculateInflationStats({
+      ...existingIndex >= 0 ? currentRates[existingIndex] : payload,
+      ...payload
+    });
+    if (existingIndex >= 0) {
+      currentRates[existingIndex] = mergedRecord;
+      updatedList = currentRates;
+    } else {
+      updatedList = [...currentRates, mergedRecord];
+    }
+  } else {
+    return res.status(400).json({ error: "Invalid payload: provide country_code/id or inflation_rates array" });
+  }
+  runtimeRateSnapshot.inflation_rates = updatedList;
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  runtimeRateSnapshot.recorded_at = nowIso;
+  const client = getSupabaseAdminClient();
+  if (client) {
+    try {
+      const rowsToUpsert = updatedList.map((item) => ({
+        id: item.id,
+        country: item.country,
+        country_code: item.country_code,
+        flag_emoji: item.flag_emoji,
+        currency: item.currency,
+        benchmark_index: item.benchmark_index,
+        statistical_agency: item.statistical_agency,
+        official_source_url: item.official_source_url,
+        history_10y: item.history_10y,
+        current_rate: item.current_rate,
+        ten_year_avg: item.ten_year_avg,
+        ten_year_high: item.ten_year_high,
+        ten_year_low: item.ten_year_low,
+        trend_label: item.trend_label,
+        target_band: item.target_band,
+        notes: item.notes || null,
+        updated_at: nowIso
+      }));
+      await client.from("inflation_rates").upsert(rowsToUpsert, { onConflict: "country_code" });
+    } catch (err) {
+      console.warn("Failed to upsert to startupcreme.inflation_rates:", err);
+    }
+  }
+  return res.json({
+    success: true,
+    inflation_rates: updatedList,
+    recorded_at: nowIso
+  });
 });
 expansionRouter.post(
   ["/webhooks/n8n/rates", "/markets/rates/webhook", "/markets/rates/sync"],
@@ -813,30 +1338,59 @@ expansionRouter.post(
       source = "n8n_webhook_job",
       central_bank_rates,
       cloud_pricing_index,
+      inflation_rates,
       metadata = {}
     } = req.body || {};
     const updatedCentralBanks = Array.isArray(central_bank_rates) && central_bank_rates.length > 0 ? central_bank_rates : runtimeRateSnapshot.central_bank_rates;
     const updatedCloudPricing = Array.isArray(cloud_pricing_index) && cloud_pricing_index.length > 0 ? cloud_pricing_index : runtimeRateSnapshot.cloud_pricing_index;
+    const updatedInflation = Array.isArray(inflation_rates) && inflation_rates.length > 0 ? inflation_rates.map((i) => recalculateInflationStats(i)) : runtimeRateSnapshot.inflation_rates || INITIAL_INFLATION_RATES;
     const nowIso = (/* @__PURE__ */ new Date()).toISOString();
     const nextSnapshot = {
       id: `snap-${Date.now()}`,
       source: String(source),
       recorded_at: nowIso,
       central_bank_rates: updatedCentralBanks,
-      cloud_pricing_index: updatedCloudPricing
+      cloud_pricing_index: updatedCloudPricing,
+      inflation_rates: updatedInflation
     };
     runtimeRateSnapshot = nextSnapshot;
+    const mergedMetadata = {
+      ...metadata,
+      inflation_rates: updatedInflation
+    };
     const client = getSupabaseAdminClient();
     if (client) {
       try {
         const { data, error } = await client.from("rate_snapshots").insert({
-          snapshot_type: "combined",
+          snapshot_type: "central_bank",
           source: nextSnapshot.source,
           central_bank_rates: nextSnapshot.central_bank_rates,
           cloud_pricing_index: nextSnapshot.cloud_pricing_index,
           metadata,
           recorded_at: nowIso
         }).select("*").single();
+        if (Array.isArray(inflation_rates) && inflation_rates.length > 0) {
+          const rowsToUpsert = updatedInflation.map((item) => ({
+            id: item.id,
+            country: item.country,
+            country_code: item.country_code,
+            flag_emoji: item.flag_emoji,
+            currency: item.currency,
+            benchmark_index: item.benchmark_index,
+            statistical_agency: item.statistical_agency,
+            official_source_url: item.official_source_url,
+            history_10y: item.history_10y,
+            current_rate: item.current_rate,
+            ten_year_avg: item.ten_year_avg,
+            ten_year_high: item.ten_year_high,
+            ten_year_low: item.ten_year_low,
+            trend_label: item.trend_label,
+            target_band: item.target_band,
+            notes: item.notes || null,
+            updated_at: nowIso
+          }));
+          await client.from("inflation_rates").upsert(rowsToUpsert, { onConflict: "country_code" });
+        }
         if (!error && data) {
           runtimeRateSnapshot.id = data.id;
           return res.status(201).json({
@@ -1032,7 +1586,9 @@ expansionRouter.post("/events/webhook", async (req, res) => {
     ...rawBody,
     title: rawTitle || void 0,
     event_title: rawEventTitle || void 0,
-    slug: candidateSlug || void 0
+    slug: candidateSlug || void 0,
+    banner_image: typeof rawBody.banner_image === "string" && !rawBody.banner_image.trim() ? null : rawBody.banner_image,
+    cover_image: typeof rawBody.cover_image === "string" && !rawBody.cover_image.trim() ? null : rawBody.cover_image
   };
   const validationResult = EventWebhookIngestionSchema.safeParse(candidatePayload);
   if (!validationResult.success) {
@@ -1051,7 +1607,7 @@ expansionRouter.post("/events/webhook", async (req, res) => {
   const normLocale = validated.locale;
   const cleanAppUrl = validated.application_url;
   const rawContent = validated.content || validated.description || effectiveTitle;
-  const description = (validated.description || validated.excerpt || effectiveTitle).trim();
+  const description = stripBannerMeta((validated.description || validated.excerpt || effectiveTitle).trim());
   const resolvedStatus = rawBody.status === "published" ? "published" : "draft";
   let jsonbContent;
   if (typeof rawContent === "string") {
@@ -1090,7 +1646,7 @@ expansionRouter.post("/events/webhook", async (req, res) => {
       const eventsTable = client.schema ? client.schema("startupcreme").from("events") : client.from("events");
       const { data: foundPost } = await postsTable.select("id, title, excerpt, content, status, locale, vertical, slug").eq("locale", normLocale).eq("vertical", normVertical).eq("slug", normSlug).maybeSingle();
       if (foundPost) existingPost = foundPost;
-      const { data: foundEvent } = await eventsTable.select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id").or(`application_url.eq.${cleanAppUrl},slug.eq.${normSlug}`).maybeSingle();
+      const { data: foundEvent } = await eventsTable.select("*").or(`application_url.eq.${cleanAppUrl},slug.eq.${normSlug}`).maybeSingle();
       if (foundEvent) existingEvent = foundEvent;
       if (!existingPost && existingEvent?.linked_post_id) {
         const { data: linkedP } = await postsTable.select("id, title, excerpt, content, status, locale, vertical, slug").eq("id", existingEvent.linked_post_id).maybeSingle();
@@ -1128,54 +1684,85 @@ expansionRouter.post("/events/webhook", async (req, res) => {
         }
       });
     }
-    let linkedPostId;
-    if (existingPost) {
-      linkedPostId = existingPost.id;
-    } else {
-      const postRow = {
-        locale: normLocale,
-        vertical: normVertical,
-        slug: normSlug,
-        title: effectiveTitle,
-        excerpt: validated.excerpt ? validated.excerpt.trim() : description.slice(0, 240),
-        content: jsonbContent,
-        status: resolvedStatus,
-        meta_description: validated.meta_description ? validated.meta_description.trim() : (validated.excerpt || description).slice(0, 160),
-        canonical_url: validated.canonical_url ? validated.canonical_url.trim() : null,
-        cover_image: validated.cover_image ? validated.cover_image.trim() : null,
-        source_url: validated.source_url ? validated.source_url.trim() : null,
-        source_name: validated.source_name ? validated.source_name.trim() : null,
-        ai_generated: Boolean(validated.ai_generated),
-        hide_ai_disclosure: Boolean(validated.hide_ai_disclosure),
-        author_name: validated.author_name || "Startup Cr\xE8me Editorial",
-        author_role: validated.author_role || "Principal Editor",
-        author_avatar: validated.author_avatar || null,
-        dual_silo: normVertical === "founders-mindset" ? false : Boolean(validated.dual_silo),
-        silo_badge: validated.silo_badge || null,
-        tags: validated.tags || [],
-        reading_time_minutes: validated.reading_time_minutes || 5,
-        word_count: validated.word_count || 800,
-        created_at: (/* @__PURE__ */ new Date()).toISOString(),
-        updated_at: (/* @__PURE__ */ new Date()).toISOString()
-      };
-      if (client) {
-        const postsTable = client.schema ? client.schema("startupcreme").from("posts") : client.from("posts");
-        let insertPostRes = await postsTable.insert(postRow).select("id, status").single();
-        if (insertPostRes.error && (insertPostRes.error.code === "PGRST204" || String(insertPostRes.error.message || "").includes("column"))) {
-          const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
-          insertPostRes = await postsTable.insert(legacyPostRow).select("id, status").single();
-        }
-        if (insertPostRes.error && insertPostRes.error.code === "22P02" && String(insertPostRes.error.message || "").includes("vertical")) {
-          const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
-          insertPostRes = await postsTable.insert({ ...legacyPostRow, vertical: "tech" }).select("id, status").single();
-        }
-        if (insertPostRes.error) throw insertPostRes.error;
-        linkedPostId = insertPostRes.data.id;
+    const shouldCreatePost = rawBody.create_post !== void 0 ? Boolean(rawBody.create_post) : Boolean(rawBody.content && typeof rawBody.content === "string" && rawBody.content.length > 50 && rawBody.content !== description);
+    let linkedPostId = null;
+    let linkedPostSnapshot = null;
+    if (shouldCreatePost) {
+      if (existingPost) {
+        linkedPostId = existingPost.id;
+        linkedPostSnapshot = {
+          id: existingPost.id,
+          locale: existingPost.locale,
+          vertical: existingPost.vertical,
+          slug: existingPost.slug,
+          title: existingPost.title,
+          status: existingPost.status,
+          canonical_url: existingPost.canonical_url,
+          source_name: existingPost.source_name,
+          source_url: existingPost.source_url,
+          ai_generated: Boolean(existingPost.ai_generated),
+          hide_ai_disclosure: Boolean(existingPost.hide_ai_disclosure)
+        };
       } else {
-        linkedPostId = `post-${Date.now()}`;
+        const postRow = {
+          locale: normLocale,
+          vertical: normVertical,
+          slug: normSlug,
+          title: effectiveTitle,
+          excerpt: validated.excerpt ? validated.excerpt.trim() : description.slice(0, 240),
+          content: jsonbContent,
+          status: resolvedStatus,
+          meta_description: validated.meta_description ? validated.meta_description.trim() : (validated.excerpt || description).slice(0, 160),
+          canonical_url: validated.canonical_url ? validated.canonical_url.trim() : null,
+          cover_image: validated.banner_image ? validated.banner_image.trim() : validated.cover_image ? validated.cover_image.trim() : null,
+          source_url: validated.source_url ? validated.source_url.trim() : null,
+          source_name: validated.source_name ? validated.source_name.trim() : null,
+          ai_generated: Boolean(validated.ai_generated),
+          hide_ai_disclosure: Boolean(validated.hide_ai_disclosure),
+          author_name: validated.author_name || "Startup Cr\xE8me Editorial",
+          author_role: validated.author_role || "Principal Editor",
+          author_avatar: validated.author_avatar || "/logo.png",
+          dual_silo: normVertical === "founders-mindset" ? false : Boolean(validated.dual_silo),
+          silo_badge: validated.silo_badge || null,
+          tags: validated.tags || [],
+          reading_time_minutes: validated.reading_time_minutes || 5,
+          word_count: validated.word_count || 800,
+          created_at: (/* @__PURE__ */ new Date()).toISOString(),
+          updated_at: (/* @__PURE__ */ new Date()).toISOString()
+        };
+        if (client) {
+          const postsTable = client.schema ? client.schema("startupcreme").from("posts") : client.from("posts");
+          let insertPostRes = await postsTable.insert(postRow).select("id, status").single();
+          if (insertPostRes.error && (insertPostRes.error.code === "PGRST204" || String(insertPostRes.error.message || "").includes("column"))) {
+            const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
+            insertPostRes = await postsTable.insert(legacyPostRow).select("id, status").single();
+          }
+          if (insertPostRes.error && insertPostRes.error.code === "22P02" && String(insertPostRes.error.message || "").includes("vertical")) {
+            const { source_url, source_name, ai_generated, hide_ai_disclosure, ...legacyPostRow } = postRow;
+            insertPostRes = await postsTable.insert({ ...legacyPostRow, vertical: "tech" }).select("id, status").single();
+          }
+          if (insertPostRes.error) throw insertPostRes.error;
+          linkedPostId = insertPostRes.data.id;
+        } else {
+          linkedPostId = `post-${Date.now()}`;
+        }
+        linkedPostSnapshot = {
+          id: linkedPostId,
+          locale: normLocale,
+          vertical: normVertical,
+          slug: normSlug,
+          title: effectiveTitle,
+          status: resolvedStatus,
+          canonical_url: validated.canonical_url ? validated.canonical_url.trim() : null,
+          source_name: validated.source_name ? validated.source_name.trim() : null,
+          source_url: validated.source_url ? validated.source_url.trim() : null,
+          ai_generated: Boolean(validated.ai_generated),
+          hide_ai_disclosure: Boolean(validated.hide_ai_disclosure)
+        };
       }
     }
     let eventId;
+    const normBannerImage = validated.banner_image?.trim() || validated.cover_image?.trim() || null;
     const eventRow = {
       title: effectiveEventTitle,
       slug: normSlug,
@@ -1185,24 +1772,58 @@ expansionRouter.post("/events/webhook", async (req, res) => {
       location: (validated.location || "Global (Remote)").trim(),
       deadline_date: new Date(validated.deadline_date).toISOString(),
       application_url: cleanAppUrl,
+      banner_image: normBannerImage,
       linked_post_id: linkedPostId
     };
     if (client) {
       const eventsTable = client.schema ? client.schema("startupcreme").from("events") : client.from("events");
       if (existingEvent) {
         eventId = existingEvent.id;
-        if (!existingEvent.linked_post_id) {
-          await eventsTable.update({ linked_post_id: linkedPostId }).eq("id", existingEvent.id);
+        const normalizedExisting = normalizeEventRecord(existingEvent);
+        const updatePayload = {};
+        if (normBannerImage && normBannerImage !== normalizedExisting.banner_image) {
+          updatePayload.banner_image = normBannerImage;
+        }
+        if (linkedPostId && !existingEvent.linked_post_id) {
+          updatePayload.linked_post_id = linkedPostId;
+        }
+        if (Object.keys(updatePayload).length > 0) {
+          try {
+            const { error: updateErr } = await eventsTable.update(updatePayload).eq("id", existingEvent.id);
+            if (updateErr && (String(updateErr.message || "").includes("banner_image") || updateErr.code === "PGRST204")) {
+              const { banner_image: _ignoredBanner, ...fallbackUpdate } = updatePayload;
+              if (normBannerImage) {
+                fallbackUpdate.description = encodeDescriptionWithBanner(
+                  existingEvent.description || description,
+                  normBannerImage
+                );
+              }
+              if (Object.keys(fallbackUpdate).length > 0) {
+                await eventsTable.update(fallbackUpdate).eq("id", existingEvent.id);
+              }
+            }
+          } catch {
+          }
         }
       } else {
-        let insertRes = await eventsTable.insert(eventRow).select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at").maybeSingle();
+        let safeEventRow = { ...eventRow };
+        let insertRes = await eventsTable.insert(safeEventRow).select("*").maybeSingle();
+        if (insertRes.error && (String(insertRes.error.message || "").includes("banner_image") || insertRes.error.code === "PGRST204")) {
+          const { banner_image: _ignoredBanner, ...legacyEventRow } = safeEventRow;
+          safeEventRow = {
+            ...legacyEventRow,
+            description: encodeDescriptionWithBanner(description, normBannerImage)
+          };
+          insertRes = await eventsTable.insert(safeEventRow).select("*").maybeSingle();
+        }
         if (insertRes.error && insertRes.error.code === "22P02" && String(insertRes.error.message || "").includes("opportunity_type")) {
           const fallbackOpp = validated.opportunity_type === "fellowship" ? "grant" : "accelerator";
-          insertRes = await eventsTable.insert({ ...eventRow, opportunity_type: fallbackOpp }).select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at").maybeSingle();
+          safeEventRow = { ...safeEventRow, opportunity_type: fallbackOpp };
+          insertRes = await eventsTable.insert(safeEventRow).select("*").maybeSingle();
         }
         if (insertRes.error && String(insertRes.error.message || "").includes("events_slug_key")) {
-          const fallbackRow = { ...eventRow, slug: `${normSlug}-${Date.now().toString(36)}` };
-          insertRes = await eventsTable.insert(fallbackRow).select("id, title, slug, application_url, opportunity_type, funding_amount, location, deadline_date, linked_post_id, created_at").single();
+          safeEventRow = { ...safeEventRow, slug: `${normSlug}-${Date.now().toString(36)}` };
+          insertRes = await eventsTable.insert(safeEventRow).select("*").single();
         }
         if (insertRes.error) throw insertRes.error;
         eventId = insertRes.data?.id || `event-${Date.now()}`;
@@ -1210,20 +1831,7 @@ expansionRouter.post("/events/webhook", async (req, res) => {
     } else {
       eventId = existingEvent?.id || `event-${Date.now()}`;
     }
-    const linkedPostSnapshot = {
-      id: linkedPostId,
-      locale: normLocale,
-      vertical: normVertical,
-      slug: normSlug,
-      title: effectiveTitle,
-      status: existingPost?.status || resolvedStatus,
-      canonical_url: existingPost?.canonical_url || (validated.canonical_url ? validated.canonical_url.trim() : null),
-      source_name: existingPost?.source_name || (validated.source_name ? validated.source_name.trim() : null),
-      source_url: existingPost?.source_url || (validated.source_url ? validated.source_url.trim() : null),
-      ai_generated: existingPost?.ai_generated !== void 0 ? Boolean(existingPost.ai_generated) : Boolean(validated.ai_generated),
-      hide_ai_disclosure: existingPost?.hide_ai_disclosure !== void 0 ? Boolean(existingPost.hide_ai_disclosure) : Boolean(validated.hide_ai_disclosure)
-    };
-    const memoryEvent = {
+    const memoryEvent = normalizeEventRecord({
       id: eventId,
       title: effectiveEventTitle,
       slug: normSlug,
@@ -1233,24 +1841,26 @@ expansionRouter.post("/events/webhook", async (req, res) => {
       location: validated.location || "Global (Remote)",
       deadline_date: new Date(validated.deadline_date).toISOString(),
       application_url: cleanAppUrl,
+      banner_image: normBannerImage,
       linked_post_id: linkedPostId,
       linked_post: linkedPostSnapshot,
       created_at: (/* @__PURE__ */ new Date()).toISOString()
-    };
+    });
     runtimeEvents = [
       memoryEvent,
       ...runtimeEvents.filter((e) => e.application_url !== cleanAppUrl && e.slug !== normSlug)
     ];
     return res.status(200).json({
       success: true,
-      message: "Event and post successfully processed",
+      message: linkedPostId ? "Event and post successfully processed" : "Standalone event & grant successfully published",
       post: linkedPostSnapshot,
       data: {
         post_id: linkedPostId,
         event_id: eventId,
-        status: linkedPostSnapshot.status,
+        status: linkedPostSnapshot ? linkedPostSnapshot.status : "published",
         event_title: effectiveEventTitle,
         application_url: cleanAppUrl,
+        banner_image: normBannerImage,
         opportunity_type: validated.opportunity_type,
         funding_amount: memoryEvent.funding_amount,
         deadline_date: memoryEvent.deadline_date,
@@ -1290,7 +1900,7 @@ expansionRouter.get("/events", async (req, res) => {
   if (client) {
     await purgeLegacyMockRowsIfNeeded(client);
     try {
-      let query = client.from("events").select("*, linked_post:posts!inner(*)").eq("linked_post.status", "published").order("deadline_date", { ascending: true });
+      let query = client.from("events").select("*, linked_post:posts(*)").order("deadline_date", { ascending: true });
       if (types.length === 1) {
         query = query.eq("opportunity_type", types[0]);
       } else if (types.length > 1) {
@@ -1302,41 +1912,27 @@ expansionRouter.get("/events", async (req, res) => {
         );
       }
       let { data, error } = await query;
-      if (error && error.code === "22P02" && types.length > 0) {
-        const baseline = types.filter(
-          (t) => ["grant", "accelerator", "pitch_competition", "conference"].includes(t)
-        );
-        if (baseline.length > 0) {
-          let retryQ = client.from("events").select("*, linked_post:posts!inner(*)").eq("linked_post.status", "published").order("deadline_date", { ascending: true });
-          if (baseline.length === 1) {
-            retryQ = retryQ.eq("opportunity_type", baseline[0]);
-          } else {
-            retryQ = retryQ.in("opportunity_type", baseline);
-          }
-          const retryRes = await retryQ;
-          if (!retryRes.error && Array.isArray(retryRes.data)) {
-            data = retryRes.data;
-            error = null;
-          }
-        }
-      }
       if (!error && Array.isArray(data)) {
-        const dbSlugs = new Set(data.map((d) => d.slug));
+        const publicEvents = data.filter((d) => {
+          if (!d.linked_post_id) return true;
+          return d.linked_post?.status === "published";
+        });
+        const dbSlugs = new Set(publicEvents.map((d) => d.slug));
         const matchingMemory = runtimeEvents.filter((m) => {
           if (dbSlugs.has(m.slug)) return false;
-          if (m.linked_post?.status !== "published") return false;
+          if (m.linked_post_id && m.linked_post?.status !== "published") return false;
           if (types.length > 0) {
             return types.includes(String(m.opportunity_type || "").toLowerCase());
           }
           return true;
         });
-        const combined = [...data, ...matchingMemory];
+        const combined = [...publicEvents, ...matchingMemory].map((ev) => normalizeEventRecord(ev));
         return res.json({ success: true, count: combined.length, events: combined });
       }
     } catch {
     }
   }
-  let filtered = runtimeEvents.filter((e) => e.linked_post?.status === "published");
+  let filtered = runtimeEvents.filter((e) => !e.linked_post_id || e.linked_post?.status === "published");
   if (types.length > 0) {
     filtered = filtered.filter(
       (e) => types.includes(String(e.opportunity_type || "").toLowerCase())
@@ -1348,28 +1944,213 @@ expansionRouter.get("/events", async (req, res) => {
       (e) => e.title.toLowerCase().includes(q) || e.description.toLowerCase().includes(q) || e.location.toLowerCase().includes(q)
     );
   }
-  return res.json({ success: true, count: filtered.length, events: filtered });
+  const normalizedFiltered = filtered.map((ev) => normalizeEventRecord(ev));
+  return res.json({ success: true, count: normalizedFiltered.length, events: normalizedFiltered });
 });
 expansionRouter.get("/events/:slug", async (req, res) => {
   const { slug } = req.params;
   const client = getSupabaseAdminClient();
   if (client) {
     try {
-      const { data, error } = await client.from("events").select("*, linked_post:posts!inner(*)").eq("slug", slug).eq("linked_post.status", "published").maybeSingle();
+      const { data, error } = await client.from("events").select("*, linked_post:posts(*)").eq("slug", slug).maybeSingle();
       if (!error && data) {
-        return res.json({ success: true, event: data });
+        if (!data.linked_post_id || data.linked_post?.status === "published") {
+          return res.json({ success: true, event: normalizeEventRecord(data) });
+        }
       }
     } catch {
     }
   }
   const found = runtimeEvents.find(
-    (e) => e.slug === slug && e.linked_post?.status === "published"
+    (e) => e.slug === slug && (!e.linked_post_id || e.linked_post?.status === "published")
   );
   if (found) {
-    return res.json({ success: true, event: found });
+    return res.json({ success: true, event: normalizeEventRecord(found) });
   }
   return res.status(404).json({ error: "Event not found" });
 });
+var handleUpdateEvent = async (req, res) => {
+  const adminUser = await requireRouteAdminAuth(req, res);
+  if (!adminUser) return;
+  const { id } = req.params;
+  const rawBody = req.body || {};
+  const normalizedInput = {
+    ...rawBody,
+    banner_image: typeof rawBody.banner_image === "string" && !rawBody.banner_image.trim() ? null : rawBody.banner_image,
+    funding_amount: typeof rawBody.funding_amount === "string" && !rawBody.funding_amount.trim() ? null : rawBody.funding_amount,
+    slug: typeof rawBody.slug === "string" && rawBody.slug.trim() ? rawBody.slug.trim() : void 0
+  };
+  const validation = EventSubmissionSchema.safeParse(normalizedInput);
+  if (!validation.success) {
+    return res.status(400).json({
+      success: false,
+      error: validation.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
+      issues: validation.error.issues
+    });
+  }
+  const data = validation.data;
+  const normTitle = data.title.trim();
+  const generatedSlug = normTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const normSlug = (data.slug?.trim() || generatedSlug || `event-${Date.now()}`).toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+  const normDescription = stripBannerMeta(data.description.trim());
+  const normBanner = typeof rawBody.banner_image === "string" && rawBody.banner_image.trim() || typeof rawBody.cover_image === "string" && rawBody.cover_image.trim() || null;
+  const normFunding = data.funding_amount ? data.funding_amount.trim() : null;
+  const normLocation = (data.location || "Global (Remote)").trim();
+  const normAppUrl = data.application_url.trim();
+  const normDeadline = new Date(data.deadline_date).toISOString();
+  const normVertical = data.vertical || "tech";
+  const normLocale = data.locale || "en-us";
+  const shouldCreatePost = Boolean(data.create_post);
+  const normContent = data.content?.trim() || normDescription;
+  const client = getSupabaseAdminClient();
+  let existingDbEvent = null;
+  if (client) {
+    try {
+      const eventsTable = client.schema ? client.schema("startupcreme").from("events") : client.from("events");
+      const postsTable = client.schema ? client.schema("startupcreme").from("posts") : client.from("posts");
+      const { data: foundEvent, error: findErr } = await eventsTable.select("*, linked_post:posts(*)").eq("id", id).maybeSingle();
+      if (findErr) throw findErr;
+      if (!foundEvent) {
+        const memoryOnly = runtimeEvents.find((e) => e.id === id);
+        if (!memoryOnly) {
+          return res.status(404).json({ success: false, error: "Event not found" });
+        }
+      } else {
+        existingDbEvent = foundEvent;
+      }
+      if (existingDbEvent) {
+        let linkedPostId = existingDbEvent.linked_post_id || null;
+        let linkedPostSnapshot = existingDbEvent.linked_post || null;
+        const jsonbContent = {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: normContent }]
+            }
+          ]
+        };
+        if (shouldCreatePost) {
+          if (linkedPostId) {
+            const { data: updatedPost } = await postsTable.update({
+              title: normTitle,
+              slug: normSlug,
+              vertical: normVertical,
+              locale: normLocale,
+              excerpt: normDescription.slice(0, 240),
+              content: jsonbContent,
+              cover_image: normBanner,
+              meta_description: normDescription.slice(0, 160),
+              status: "published",
+              updated_at: (/* @__PURE__ */ new Date()).toISOString()
+            }).eq("id", linkedPostId).select("*").maybeSingle();
+            if (updatedPost) linkedPostSnapshot = updatedPost;
+          } else {
+            const newPostPayload = {
+              locale: normLocale,
+              vertical: normVertical,
+              slug: normSlug,
+              title: normTitle,
+              excerpt: normDescription.slice(0, 240),
+              content: jsonbContent,
+              status: "published",
+              cover_image: normBanner,
+              meta_description: normDescription.slice(0, 160),
+              author_name: "Startup Cr\xE8me Editorial",
+              author_role: "Principal Editor",
+              author_avatar: "/logo.png",
+              tags: [],
+              reading_time_minutes: 4,
+              word_count: Math.max(200, normContent.split(/\s+/).length),
+              created_at: (/* @__PURE__ */ new Date()).toISOString(),
+              updated_at: (/* @__PURE__ */ new Date()).toISOString()
+            };
+            let postInsert = await postsTable.insert(newPostPayload).select("*").maybeSingle();
+            if (postInsert.error && String(postInsert.error.message || "").includes("posts_locale_vertical_slug_key")) {
+              postInsert = await postsTable.insert({ ...newPostPayload, slug: `${normSlug}-${Date.now().toString(36)}` }).select("*").maybeSingle();
+            }
+            if (!postInsert.error && postInsert.data) {
+              linkedPostId = postInsert.data.id;
+              linkedPostSnapshot = postInsert.data;
+            }
+          }
+        }
+        let updatePayload = {
+          title: normTitle,
+          slug: normSlug,
+          description: normDescription,
+          opportunity_type: data.opportunity_type,
+          funding_amount: normFunding,
+          location: normLocation,
+          deadline_date: normDeadline,
+          application_url: normAppUrl,
+          banner_image: normBanner,
+          linked_post_id: linkedPostId
+        };
+        let updateRes = await eventsTable.update(updatePayload).eq("id", id).select("*, linked_post:posts(*)").maybeSingle();
+        if (updateRes.error && (String(updateRes.error.message || "").includes("banner_image") || updateRes.error.code === "PGRST204")) {
+          const { banner_image: _ignoredBanner, ...legacyUpdate } = updatePayload;
+          updatePayload = {
+            ...legacyUpdate,
+            description: encodeDescriptionWithBanner(normDescription, normBanner)
+          };
+          updateRes = await eventsTable.update(updatePayload).eq("id", id).select("*, linked_post:posts(*)").maybeSingle();
+        }
+        if (updateRes.error && updateRes.error.code === "22P02" && String(updateRes.error.message || "").includes("opportunity_type")) {
+          const fallbackOpp = data.opportunity_type === "fellowship" ? "grant" : "accelerator";
+          updatePayload = { ...updatePayload, opportunity_type: fallbackOpp };
+          updateRes = await eventsTable.update(updatePayload).eq("id", id).select("*, linked_post:posts(*)").maybeSingle();
+        }
+        if (updateRes.error && String(updateRes.error.message || "").includes("events_slug_key")) {
+          return res.status(409).json({
+            success: false,
+            error: "Another opportunity already uses this URL slug. Please choose a unique slug."
+          });
+        }
+        if (updateRes.error) {
+          throw updateRes.error;
+        }
+        const normalizedUpdated = normalizeEventRecord({
+          ...updateRes.data || existingDbEvent,
+          banner_image: normBanner || updateRes.data?.banner_image || null,
+          description: normDescription,
+          linked_post: updateRes.data?.linked_post || linkedPostSnapshot || null
+        });
+        runtimeEvents = [
+          normalizedUpdated,
+          ...runtimeEvents.filter((e) => e.id !== id)
+        ];
+        return res.json({ success: true, event: normalizedUpdated });
+      }
+    } catch (err) {
+      console.error("[Events Update Error]:", err);
+      return res.status(500).json({
+        success: false,
+        error: err.message || "Database update failed for event"
+      });
+    }
+  }
+  const memIdx = runtimeEvents.findIndex((e) => e.id === id);
+  if (memIdx === -1) {
+    return res.status(404).json({ success: false, error: "Event not found" });
+  }
+  const updatedMemoryEvent = normalizeEventRecord({
+    ...runtimeEvents[memIdx],
+    title: normTitle,
+    slug: normSlug,
+    description: normDescription,
+    opportunity_type: data.opportunity_type,
+    funding_amount: normFunding,
+    location: normLocation,
+    deadline_date: normDeadline,
+    application_url: normAppUrl,
+    banner_image: normBanner
+  });
+  runtimeEvents = runtimeEvents.map((e) => e.id === id ? updatedMemoryEvent : e);
+  return res.json({ success: true, event: updatedMemoryEvent });
+};
+expansionRouter.patch("/events/:id", handleUpdateEvent);
+expansionRouter.put("/events/:id", handleUpdateEvent);
 expansionRouter.delete("/events/:id", async (req, res) => {
   const adminUser = await requireRouteAdminAuth(req, res);
   if (!adminUser) return;
@@ -1642,7 +2423,7 @@ editorialRouter.post("/drafts", requireEditorialAuth, async (req, res) => {
       hide_ai_disclosure: Boolean(payload.hide_ai_disclosure),
       author_name: payload.author_name || "Startup Cr\xE8me Editorial",
       author_role: payload.author_role || "Senior Analyst",
-      author_avatar: payload.author_avatar || null,
+      author_avatar: payload.author_avatar || "/logo.png",
       dual_silo: payload.vertical === "founders-mindset" ? false : payload.dual_silo || false,
       silo_badge: payload.vertical === "founders-mindset" ? null : payload.dual_silo ? "Dual Silo Analysis" : null,
       tags: payload.tags && payload.tags.length > 0 ? payload.tags : ["Editorial"],
@@ -2037,7 +2818,7 @@ async function resolvePageMetadata(reqPath, host, protocol) {
   }
   const baseUrl = `${normalizedProtocol}://${normalizedHost}`;
   const cleanPath = reqPath.split("?")[0].split("#")[0];
-  const fullUrl = `${baseUrl}${cleanPath.startsWith("/") ? cleanPath : "/" + cleanPath}`;
+  let fullUrl = `${baseUrl}${cleanPath.startsWith("/") ? cleanPath : "/" + cleanPath}`;
   const segments = cleanPath.split("/").filter(Boolean);
   let title = DEFAULT_TITLE;
   let description = DEFAULT_DESCRIPTION;
@@ -2104,20 +2885,135 @@ async function resolvePageMetadata(reqPath, host, protocol) {
       title = "The Startup & FinTech Directory | StartupCr\xE8me";
       description = "Curated directory of early-stage and growth startups across FinTech, AI, Cloud Infrastructure, and EdTech.";
       section = "Directory";
-    } else if ((lowerSlug === "rates" || cleanPath.includes("/markets/rates")) && !["false", "0", "no", "off"].includes(
+    } else if ((lowerSlug === "rates" || lowerSlug === "markets" || lowerSlug === "inflation" || lowerSlug === "inflation-rates" || cleanPath.includes("/markets/rates") || cleanPath.includes("/markets/inflation") || cleanPath.includes("/markets")) && !["false", "0", "no", "off"].includes(
       String(process.env.ENABLE_MARKETS ?? process.env.VITE_ENABLE_MARKETS ?? "true").trim().toLowerCase().replace(/^["']|["']$/g, "")
     )) {
-      title = "Macro Central Bank & Cloud Rate Trackers | StartupCr\xE8me";
-      description = "Live benchmark central bank interest rates and developer cloud infrastructure pricing index across AWS, Supabase, Vercel, and Cloudflare.";
+      title = "Macro Central Bank Interest Rates & 10-Year Inflation Rates Tracker | StartupCr\xE8me";
+      description = "Live institutional tracking of sovereign central bank policy rates and 10-year historical inflation rate trajectories (2017\u20132026), monetary easing cycles, and real yield curves across global economies.";
       section = "Markets";
+      coverImage = "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&q=80&w=1200&h=630";
+      const marketsJsonLd = {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Dataset",
+            "@id": `${baseUrl}/markets/rates#inflation-dataset`,
+            name: "10-Year Sovereign Inflation Rate Trajectory (2017\u20132026)",
+            description: "Annual headline consumer price index (CPI YoY %) historical dataset covering 8 benchmark economies from 2017 to 2026.",
+            url: `${baseUrl}/markets/rates#inflation-rates`,
+            temporalCoverage: "2017/2026",
+            spatialCoverage: [
+              "United States",
+              "Eurozone",
+              "Nigeria",
+              "United Kingdom",
+              "Japan",
+              "South Africa",
+              "Kenya",
+              "India"
+            ],
+            variableMeasured: "Annual Headline Consumer Price Index Inflation (YoY %)",
+            creator: {
+              "@type": "Organization",
+              name: "StartupCr\xE8me Financial & Technology Intelligence",
+              url: baseUrl
+            }
+          },
+          {
+            "@type": "FinancialService",
+            "@id": `${baseUrl}/markets/rates#interest-rates`,
+            name: "Global Central Bank Interest Rates Tracker",
+            description: "Real-time benchmark monetary policy rates and decision dates from US Fed, ECB, CBN, BoE, BoJ, SARB, CBK, and RBI.",
+            url: `${baseUrl}/markets/rates#central-bank-rates`,
+            provider: {
+              "@type": "Organization",
+              name: "StartupCr\xE8me",
+              url: baseUrl
+            }
+          }
+        ]
+      };
+      jsonLdScript = `<script type="application/ld+json">${JSON.stringify(marketsJsonLd)}</script>`;
     } else if (lowerSlug === "careers") {
       title = "Remote Startup Job & Fractional Talent Board | StartupCr\xE8me";
       description = "Curated remote software engineering, FinOps, financial modeling, and fractional CTO/CFO leadership roles.";
       section = "Careers";
-    } else if (lowerSlug === "events") {
+    } else if (lowerSlug === "events" && segments.length === 1) {
       title = "Grants, Accelerators & Startup Events | StartupCr\xE8me";
       description = "Curated non-dilutive grants, institutional venture accelerators, founder fellowships, and tech competitions for software engineers, fintech builders, and tech entrepreneurs.";
       section = "Events";
+      coverImage = "https://images.unsplash.com/photo-1553729459-efe14ef6055d?auto=format&fit=crop&q=80&w=1200&h=630";
+    } else if (segments[0] === "events" && segments.length >= 2) {
+      const eventSlug = decodeURIComponent(segments[1]).trim().toLowerCase();
+      title = "Grants, Accelerators & Startup Events | StartupCr\xE8me";
+      description = "Verified startup opportunity and non-dilutive funding engine.";
+      section = "Events";
+      coverImage = "https://images.unsplash.com/photo-1553729459-efe14ef6055d?auto=format&fit=crop&q=80&w=1200&h=630";
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+      if (supabaseUrl && supabaseKey) {
+        try {
+          const client = createClient3(supabaseUrl, supabaseKey, {
+            db: { schema: "startupcreme" },
+            auth: { persistSession: false, autoRefreshToken: false }
+          });
+          const { data: eventData } = await client.from("events").select("*, linked_post:posts(*)").eq("slug", eventSlug).maybeSingle();
+          if (eventData) {
+            const normalizedEvent = normalizeEventRecord(eventData);
+            title = `${normalizedEvent.title} | Grants & Events | StartupCr\xE8me`;
+            description = (normalizedEvent.description || "").replace(/\s+/g, " ").trim().slice(0, 180) || description;
+            fullUrl = `${baseUrl}/events/${normalizedEvent.slug}`;
+            if (normalizedEvent.banner_image && typeof normalizedEvent.banner_image === "string" && normalizedEvent.banner_image.trim()) {
+              coverImage = normalizedEvent.banner_image.trim();
+            } else if (normalizedEvent.linked_post?.cover_image) {
+              coverImage = normalizedEvent.linked_post.cover_image;
+            } else {
+              const oppType = String(normalizedEvent.opportunity_type || "").toLowerCase();
+              if (oppType === "grant") {
+                coverImage = "https://images.unsplash.com/photo-1553729459-efe14ef6055d?auto=format&fit=crop&q=80&w=1200&h=630";
+              } else if (oppType === "accelerator" || oppType === "incubator") {
+                coverImage = "https://images.unsplash.com/photo-1559136555-9303baea8ebd?auto=format&fit=crop&q=80&w=1200&h=630";
+              } else if (oppType === "fellowship") {
+                coverImage = "https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&q=80&w=1200&h=630";
+              } else if (oppType === "pitch_competition" || oppType === "hackathon") {
+                coverImage = "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&q=80&w=1200&h=630";
+              } else if (oppType === "conference") {
+                coverImage = "https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&q=80&w=1200&h=630";
+              }
+            }
+            const eventJsonLd = {
+              "@context": "https://schema.org",
+              "@type": "Event",
+              name: normalizedEvent.title,
+              description: normalizedEvent.description,
+              image: [ensureAbsoluteUrl(coverImage, baseUrl)],
+              url: fullUrl,
+              eventAttendanceMode: eventData.location?.toLowerCase().includes("remote") || eventData.location?.toLowerCase().includes("global") ? "https://schema.org/OnlineEventAttendanceMode" : "https://schema.org/OfflineEventAttendanceMode",
+              eventStatus: "https://schema.org/EventScheduled",
+              endDate: eventData.deadline_date,
+              location: {
+                "@type": "Place",
+                name: eventData.location || "Global (Remote)"
+              },
+              offers: {
+                "@type": "Offer",
+                price: "0",
+                priceCurrency: "USD",
+                url: eventData.application_url,
+                availability: "https://schema.org/InStock"
+              },
+              organizer: {
+                "@type": "Organization",
+                name: "StartupCr\xE8me Opportunity Engine",
+                url: baseUrl
+              }
+            };
+            jsonLdScript = `<script type="application/ld+json">${JSON.stringify(eventJsonLd)}</script>`;
+          }
+        } catch (evErr) {
+          console.warn("[Meta] Error resolving event metadata:", evErr);
+        }
+      }
     } else if (lowerSlug === "about" || lowerSlug === "about-us") {
       title = "About StartupCr\xE8me | Institutional Finance, Tech & AI Intelligence";
       description = "StartupCr\xE8me is a global guide dedicated to helping founders, software architects, and finance professionals build, fund, and scale companies in the age of AI. Built and operated by Habinsoft Technologies Limited and led by Chibueze ThankGod.";
@@ -2769,7 +3665,9 @@ async function generateDynamicSitemap(baseUrl = "https://www.startupcreme.com") 
     { path: "/discussion", priority: "0.85", changefreq: "hourly" },
     { path: "/directory", priority: "0.8", changefreq: "daily" },
     { path: "/careers", priority: "0.8", changefreq: "daily" },
-    { path: "/markets", priority: "0.8", changefreq: "hourly" },
+    { path: "/markets", priority: "0.9", changefreq: "hourly" },
+    { path: "/markets/rates", priority: "0.9", changefreq: "hourly" },
+    { path: "/markets/inflation", priority: "0.9", changefreq: "hourly" },
     { path: "/privacy", priority: "0.4", changefreq: "monthly" },
     { path: "/terms", priority: "0.4", changefreq: "monthly" }
   ];
@@ -2985,110 +3883,6 @@ Disallow: /webhooks/
 Sitemap: ${cleanBase}/sitemap.xml
 `;
 }
-function convertContentToMarkdown(content) {
-  if (!content) return "";
-  if (typeof content === "string") {
-    return content.trim();
-  }
-  if (typeof content === "object" && Array.isArray(content.content)) {
-    const renderNode = (node) => {
-      if (!node) return "";
-      if (node.type === "text") {
-        let text = node.text || "";
-        if (node.marks && Array.isArray(node.marks)) {
-          for (const mark of node.marks) {
-            if (mark.type === "bold") text = `**${text}**`;
-            else if (mark.type === "italic") text = `*${text}*`;
-            else if (mark.type === "code") text = `\`${text}\``;
-            else if (mark.type === "strike") text = `~~${text}~~`;
-            else if (mark.type === "link" && mark.attrs?.href) {
-              text = `[${text}](${mark.attrs.href})`;
-            }
-          }
-        }
-        return text;
-      }
-      const children = (node.content || []).map(renderNode).join("");
-      switch (node.type) {
-        case "heading": {
-          const level = Math.min(Math.max(node.attrs?.level || 1, 1), 6);
-          const prefix = "#".repeat(level);
-          return `
-
-${prefix} ${children}
-
-`;
-        }
-        case "paragraph":
-          return `
-
-${children}
-
-`;
-        case "blockquote":
-          return `
-
-> ${children.replace(/\n+/g, "\n> ")}
-
-`;
-        case "codeBlock": {
-          const lang = node.attrs?.language || "";
-          return `
-
-\`\`\`${lang}
-${children}
-\`\`\`
-
-`;
-        }
-        case "bulletList":
-          return `
-
-${(node.content || []).map((li) => `- ${(li.content || []).map(renderNode).join("").trim()}`).join("\n")}
-
-`;
-        case "orderedList":
-          return `
-
-${(node.content || []).map((li, idx) => `${idx + 1}. ${(li.content || []).map(renderNode).join("").trim()}`).join("\n")}
-
-`;
-        case "horizontalRule":
-          return "\n\n---\n\n";
-        case "image":
-          return `
-
-![${node.attrs?.alt || "image"}](${node.attrs?.src || ""})
-
-`;
-        case "table": {
-          const rows = node.content || [];
-          if (rows.length === 0) return "";
-          const renderedRows = rows.map((r) => {
-            const cells = (r.content || []).map(
-              (c) => (c.content || []).map(renderNode).join("").trim().replace(/\|/g, "\\|")
-            );
-            return `| ${cells.join(" | ")} |`;
-          });
-          if (renderedRows.length > 0) {
-            const colCount = (rows[0].content || []).length;
-            const divider = `| ${Array(colCount).fill("---").join(" | ")} |`;
-            renderedRows.splice(1, 0, divider);
-          }
-          return `
-
-${renderedRows.join("\n")}
-
-`;
-        }
-        default:
-          return children;
-      }
-    };
-    return content.content.map(renderNode).join("").replace(/\n{3,}/g, "\n\n").trim();
-  }
-  return String(content).trim();
-}
 async function generateLlmsTxt(baseUrl = "https://www.startupcreme.com") {
   const cleanBase = baseUrl.replace(/\/+$/, "");
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
@@ -3147,100 +3941,14 @@ ${opportunitiesList}
 - [Discussion Forum](${cleanBase}/discussion): Community debate and peer founder intelligence on valuations, tech stacks, and fundraising.
 - [Startup Directory](${cleanBase}/directory): Index of high-growth technology and financial companies.
 - [Founder Careers & Talent](${cleanBase}/careers): Executive leadership, founding engineer, and tech lead opportunities.
-- [Macro & Cloud Rates Tracker](${cleanBase}/markets): Real-time benchmarks for central bank interest rates (Fed, ECB, BoE, BoJ) and cloud compute pricing.
+- [Macro Central Bank Interest Rates & 10-Year Inflation Rates Tracker](${cleanBase}/markets/rates): Real-time benchmarks for sovereign central bank policy rates (Fed, ECB, BoE, BoJ, CBN, SARB, CBK, RBI) and 10-year historical sovereign inflation rate trajectories (2017\u20132026).
+- [10-Year Sovereign Inflation Rates Matrix](${cleanBase}/markets/rates#inflation-rates): Annual consumer price index inflation dataset, target tolerance bands, and disinflation cycle metrics across 8 global economies.
 
 ## Optional
 
 - [Full Machine-Readable Intelligence Archive](${cleanBase}/llms-full.txt): Complete consolidated markdown text of top published articles and playbooks for offline AI training and deep agent reasoning.
 - [Dynamic XML Sitemap](${cleanBase}/sitemap.xml): Complete machine-crawlable XML sitemap index.
 - [Robots Directives](${cleanBase}/robots.txt): Machine crawler access rules and crawl-delay specifications.
-`;
-}
-async function generateLlmsFullTxt(baseUrl = "https://www.startupcreme.com") {
-  const cleanBase = baseUrl.replace(/\/+$/, "");
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
-  let fullArticlesMarkdown = "";
-  let fullOpportunitiesMarkdown = "";
-  if (supabaseUrl && supabaseKey) {
-    try {
-      const client = createClient4(supabaseUrl, supabaseKey, {
-        db: { schema: "startupcreme" },
-        auth: { persistSession: false, autoRefreshToken: false }
-      });
-      const { data: postsData } = await client.from("posts").select("title, slug, locale, vertical, excerpt, content, author_name, author_role, reading_time_minutes, created_at, canonical_url").eq("status", "published").order("created_at", { ascending: false }).limit(25);
-      if (postsData && Array.isArray(postsData)) {
-        fullArticlesMarkdown = postsData.map((p) => {
-          const canonical = p.canonical_url || `${cleanBase}/${p.locale || "en-us"}/${p.vertical || "tech"}/${p.slug}`;
-          const bodyMd = convertContentToMarkdown(p.content);
-          return `---
-
-# ${p.title}
-
-- **Permalink**: ${canonical}
-- **Vertical**: ${p.vertical}
-- **Locale**: ${p.locale || "en-us"}
-- **Author**: ${p.author_name || "Startup Cr\xE8me Editorial"} (${p.author_role || "Editor"})
-- **Reading Time**: ${p.reading_time_minutes || 5} min read
-- **Published**: ${p.created_at ? p.created_at.split("T")[0] : "2026"}
-
-> **Executive Summary**: ${p.excerpt || "Comprehensive editorial intelligence."}
-
-${bodyMd}
-`;
-        }).join("\n\n");
-      }
-      const { data: eventsData } = await client.from("events").select("title, slug, opportunity_type, funding_amount, deadline_date, location, application_url, description, linked_post:posts!inner(status)").eq("is_approved", true).eq("linked_post.status", "published").order("deadline_date", { ascending: true }).limit(15);
-      if (eventsData && Array.isArray(eventsData)) {
-        fullOpportunitiesMarkdown = eventsData.map((e) => {
-          return `### ${e.title}
-- **Type**: ${e.opportunity_type.replace("_", " ").toUpperCase()}
-- **Funding Amount**: ${e.funding_amount || "Non-Dilutive"}
-- **Deadline**: ${e.deadline_date ? e.deadline_date.split("T")[0] : "Open / Rolling"}
-- **Location**: ${e.location || "Global / Remote"}
-- **Application URL**: ${e.application_url || `${cleanBase}/events`}
-
-${e.description || "Verified founder opportunity."}
-`;
-        }).join("\n\n");
-      }
-    } catch (err) {
-      console.warn("[llms-full.txt] Warning generating full markdown archive:", err);
-    }
-  }
-  return `# Startup Cr\xE8me \u2014 Consolidated Full Intelligence Archive (llms-full.txt)
-
-> Complete machine-readable repository of published founder playbooks, macro technology analyses, non-dilutive grant specifications, and venture research. Generated dynamically for LLM context ingestion and automated reasoning agents.
-
----
-
-## Table of Contents
-1. Editorial Playbooks & Deep Intelligence
-2. Verified Non-Dilutive Opportunities & Grants
-3. Platform Context & Operating Principles
-
----
-
-## 1. Editorial Playbooks & Deep Intelligence
-
-${fullArticlesMarkdown || "*(No published playbooks available)*"}
-
----
-
-## 2. Verified Non-Dilutive Opportunities & Grants
-
-${fullOpportunitiesMarkdown || "*(No current opportunities listed)*"}
-
----
-
-## 3. Platform Context & Operating Principles
-
-Startup Cr\xE8me operates under a zero-sponsored-editorial standard. All macroeconomic analyses, financial engineering frameworks, and technology systems evaluations are developed independently.
-
-- **Canonical Origin**: ${cleanBase}
-- **Sitemap**: ${cleanBase}/sitemap.xml
-- **Robots Directives**: ${cleanBase}/robots.txt
-- **Specification Index**: ${cleanBase}/llms.txt
 `;
 }
 
@@ -3359,79 +4067,44 @@ function getR2Config() {
 }
 function createApp(options) {
   const app2 = express();
+  app2.use(express.json({ limit: "10mb" }));
   app2.use((req, res, next) => {
-    const rawPath = req.path;
-    const rawHost = req.headers["x-forwarded-host"] || req.headers.host || "";
-    const hostStr = (Array.isArray(rawHost) ? rawHost[0] : rawHost).toLowerCase().split(":")[0];
-    const protoHeader = req.headers["x-forwarded-proto"];
-    const proto = (Array.isArray(protoHeader) ? protoHeader[0] : protoHeader || req.protocol || "https").toLowerCase();
-    const isLocalOrPreview = hostStr === "localhost" || hostStr === "127.0.0.1" || hostStr.endsWith(".local") || hostStr.includes("run.app") || hostStr.includes("vercel.app");
-    const isApex = hostStr === "startupcreme.com";
-    const isProdHttp = !isLocalOrPreview && hostStr.endsWith("startupcreme.com") && proto === "http";
-    if (isApex || isProdHttp) {
-      const queryString = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
-      return res.redirect(308, `https://www.startupcreme.com${rawPath}${queryString}`);
-    }
-    const isStaticOrCodePath = rawPath.startsWith("/api") || rawPath.startsWith("/@") || rawPath.startsWith("/src") || rawPath.startsWith("/node_modules") || rawPath.startsWith("/assets") || rawPath.startsWith("/dist") || rawPath.startsWith("/public") || /\.[a-zA-Z0-9_-]+$/i.test(rawPath);
-    if (!isStaticOrCodePath) {
-      let targetPath = rawPath;
-      let pathChanged = false;
-      if (targetPath.length > 1 && targetPath.endsWith("/")) {
-        targetPath = targetPath.replace(/\/+$/, "");
-        pathChanged = true;
-      }
-      if (targetPath !== targetPath.toLowerCase()) {
-        targetPath = targetPath.toLowerCase();
-        pathChanged = true;
-      }
-      if (pathChanged) {
-        const queryString = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
-        return res.redirect(308, `${targetPath}${queryString}`);
-      }
-    }
-    next();
-  });
-  app2.use((req, res, next) => {
-    const rawPath = req.path || "";
-    if (rawPath.startsWith("/src/")) {
-      const fullPath = path.join(process.cwd(), rawPath);
-      if (!fs.existsSync(fullPath)) {
-        const dir = path.dirname(fullPath);
-        const targetBase = path.basename(fullPath).toLowerCase();
-        if (fs.existsSync(dir)) {
-          try {
-            const files = fs.readdirSync(dir);
-            const matchedFile = files.find((f) => f.toLowerCase() === targetBase);
-            if (matchedFile) {
-              const queryPart = req.url.includes("?") ? "?" + req.url.split("?")[1] : "";
-              const newPath = path.posix.join(path.posix.dirname(rawPath), matchedFile);
-              req.url = newPath + queryPart;
-            }
-          } catch {
-          }
+    const isVercelApiRoute = req.url === "/api" || req.url === "/api/" || req.path === "/api" || req.path === "/api/";
+    if (isVercelApiRoute) {
+      const rawMatched = req.headers["x-matched-path"] || req.headers["x-forwarded-uri"] || req.headers["x-original-url"] || req.headers["x-rewrite-url"];
+      if (rawMatched && typeof rawMatched === "string") {
+        const cleanMatched = rawMatched.split("?")[0];
+        if (cleanMatched && cleanMatched !== "/api" && cleanMatched !== "/api/") {
+          const queryPart = req.url.includes("?") ? "?" + req.url.split("?")[1] : "";
+          req.url = cleanMatched + queryPart;
         }
       }
     }
     next();
   });
-  app2.use(compression({
-    threshold: 1024,
-    filter: (req, res) => {
-      if (req.headers["x-no-compression"]) return false;
-      return compression.filter(req, res);
-    }
-  }));
-  app2.use(express.json({ limit: "10mb" }));
-  app2.use((req, res, next) => {
-    const rawMatched = req.headers["x-matched-path"] || req.headers["x-forwarded-uri"] || req.headers["x-original-url"] || req.headers["x-rewrite-url"];
-    if (rawMatched && typeof rawMatched === "string") {
-      const cleanMatched = rawMatched.split("?")[0];
-      if (cleanMatched && cleanMatched !== "/api" && cleanMatched !== "/api/" && req.url !== cleanMatched) {
-        const queryPart = req.url.includes("?") ? "?" + req.url.split("?")[1] : "";
-        req.url = cleanMatched + queryPart;
-      }
-    }
+  app2.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
     next();
+  });
+  app2.use((req, res, next) => {
+    const method = req.method ? req.method.toUpperCase() : "GET";
+    if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+      return next();
+    }
+    const rawMatched = req.headers["x-matched-path"] || req.headers["x-forwarded-uri"] || req.headers["x-original-url"] || req.headers["x-rewrite-url"];
+    const candidatePath = (rawMatched ? rawMatched.split("?")[0] : req.path || req.url.split("?")[0] || "").toLowerCase();
+    const isApiRoute = candidatePath === "/api" || candidatePath.startsWith("/api/") || candidatePath === "/upload-image" || candidatePath.startsWith("/editorial") || candidatePath === "/health" || candidatePath === "/auth/profile";
+    if (isApiRoute) {
+      return next();
+    }
+    res.setHeader("Allow", "GET, HEAD, OPTIONS");
+    return res.status(405).json({
+      error: "Method Not Allowed",
+      message: `HTTP method ${method} is not allowed on non-API route '${candidatePath}'. Non-API routes only accept GET, HEAD, and OPTIONS requests.`,
+      allowedMethods: ["GET", "HEAD", "OPTIONS"]
+    });
   });
   const uploadsDir = path.join(process.cwd(), "public", "uploads");
   if (!fs.existsSync(uploadsDir)) {
@@ -3581,8 +4254,7 @@ function createApp(options) {
     return res.status(200).send(robots);
   });
   app2.get(["/llms.txt", "/llms"], async (req, res) => {
-    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400");
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
     let host = req.get("x-forwarded-host") || req.get("host") || "www.startupcreme.com";
     if (!host.includes("startupcreme.com")) {
       host = "www.startupcreme.com";
@@ -3595,33 +4267,13 @@ function createApp(options) {
     try {
       const llms = await generateLlmsTxt(baseUrl);
       return res.status(200).send(llms);
-    } catch (err) {
-      console.warn("Error generating dynamic llms.txt, using static fallback:", err);
+    } catch (llmErr) {
+      console.warn("llms.txt generation error, serving static fallback:", llmErr);
       const fallbackPath = path.resolve(process.cwd(), "public", "llms.txt");
       if (fs.existsSync(fallbackPath)) {
         return res.status(200).sendFile(fallbackPath);
       }
-      return res.status(500).send("# Startup Cr\xE8me\n\n> Financial and technology intelligence publication.");
-    }
-  });
-  app2.get(["/llms-full.txt", "/llms-full"], async (req, res) => {
-    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400");
-    let host = req.get("x-forwarded-host") || req.get("host") || "www.startupcreme.com";
-    if (!host.includes("startupcreme.com")) {
-      host = "www.startupcreme.com";
-    }
-    let protocol = req.get("x-forwarded-proto") || req.protocol || "https";
-    if (host.includes("startupcreme.com")) {
-      protocol = "https";
-    }
-    const baseUrl = `${protocol}://${host}`;
-    try {
-      const llmsFull = await generateLlmsFullTxt(baseUrl);
-      return res.status(200).send(llmsFull);
-    } catch (err) {
-      console.error("Error generating llms-full.txt:", err);
-      return res.status(500).send("# Startup Cr\xE8me \u2014 Full Archive\n\nError generating full text repository.");
+      return res.status(500).send("Error generating llms.txt");
     }
   });
   const handleMulterUpload = (req, res, next) => {
@@ -3833,7 +4485,7 @@ function createApp(options) {
       const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
       const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       if (!supabaseUrl || !supabaseKey) {
-        return res.redirect(308, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
+        return res.redirect(302, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
       }
       const client = createClient5(supabaseUrl, supabaseKey);
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slugOrId);
@@ -3846,10 +4498,10 @@ function createApp(options) {
       const { data: posts } = await query.limit(1);
       const post = posts?.[0];
       if (!post || !post.cover_image) {
-        return res.redirect(308, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
+        return res.redirect(302, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
       }
       if (post.cover_image.startsWith("http://") || post.cover_image.startsWith("https://")) {
-        return res.redirect(308, post.cover_image);
+        return res.redirect(302, post.cover_image);
       }
       if (post.cover_image.startsWith("data:image/")) {
         const match = post.cover_image.match(/^data:([^;]+);base64,(.+)$/);
@@ -3861,10 +4513,10 @@ function createApp(options) {
           return res.status(200).send(buffer);
         }
       }
-      return res.redirect(308, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
+      return res.redirect(302, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
     } catch (err) {
       console.error("Error serving cover image:", err);
-      res.redirect(308, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
+      res.redirect(302, "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200&h=630");
     }
   });
   if (options?.serveHtml !== false) {
@@ -3888,7 +4540,7 @@ function createApp(options) {
     };
     app2.get("*", async (req, res, next) => {
       const activePath = (req.url || req.path).split("?")[0].toLowerCase();
-      if (activePath.startsWith("/api") || activePath.startsWith("/@") || activePath.startsWith("/src") || activePath.startsWith("/node_modules") || activePath === "/sitemap.xml" || activePath === "/sitemap" || activePath === "/sitemap_index.xml" || activePath === "/robots.txt" || activePath === "/llms.txt" || activePath === "/llms" || activePath === "/llms-full.txt" || activePath === "/llms-full" || /\.(js|mjs|cjs|ts|tsx|jsx|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot|map|json|xml|txt)$/i.test(activePath)) {
+      if (activePath.startsWith("/api") || activePath === "/sitemap.xml" || activePath === "/sitemap" || activePath === "/sitemap_index.xml" || activePath === "/robots.txt" || activePath === "/llms.txt" || /\.(js|jsx|ts|tsx|mjs|cjs|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot|json|map|wasm)$/i.test(activePath)) {
         return next();
       }
       try {
@@ -3899,14 +4551,11 @@ function createApp(options) {
         if (Array.isArray(protocol)) protocol = protocol[0];
         const targetUrl = req.url || req.originalUrl;
         const dynamicHtml = await injectDynamicMetaTags(template, targetUrl, host, protocol);
-        const etag = `W/"${crypto3.createHash("md5").update(dynamicHtml).digest("hex")}"`;
-        res.setHeader("ETag", etag);
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=86400");
-        if (req.headers["if-none-match"] === etag) {
-          return res.status(304).end();
-        }
-        res.status(200).send(dynamicHtml);
+        const isDev = process.env.NODE_ENV !== "production";
+        res.status(200).set({
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": isDev ? "no-cache, no-store, must-revalidate" : "public, max-age=60, s-maxage=300, stale-while-revalidate=600"
+        }).send(dynamicHtml);
       } catch (err) {
         console.error("[SEO Render] Error rendering dynamic metadata:", err);
         next(err);

@@ -860,5 +860,17 @@ export function createApp(options?: CreateAppOptions): express.Express {
   return app;
 }
 
-export const app = createApp();
+let defaultAppInstance: express.Express | null = null;
+
+export function getApp(): express.Express {
+  if (!defaultAppInstance) {
+    defaultAppInstance = createApp();
+  }
+  return defaultAppInstance;
+}
+
+export const app = ((req: express.Request, res: express.Response, next: express.NextFunction) => {
+  return getApp()(req, res, next);
+}) as unknown as express.Express;
+
 export default app;

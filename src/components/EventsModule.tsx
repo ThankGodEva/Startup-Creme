@@ -9,6 +9,7 @@ import {
   MapPin,
   Clock,
   ArrowRight,
+  ArrowLeft,
   Filter,
   Trash2,
   Edit3,
@@ -27,7 +28,7 @@ import {
 import { EventOpportunity, UserProfile, Post } from '../types';
 import { store } from '../lib/store';
 import { getPostUrl, getEventUrl, getEventShareUrl } from '../lib/router';
-import { getEventBanner } from '../lib/eventsHelper';
+import { getEventBanner, normalizeEventRecord } from '../lib/eventsHelper';
 import { useHashAnchorScroll, Route } from '../hooks/useHashAnchorScroll';
 import { PublishEventModal } from './PublishEventModal';
 
@@ -68,6 +69,7 @@ export async function loader({ request }: { request?: Request } = {}) {
 interface EventsModuleProps {
   currentUser?: UserProfile | null;
   initialEventSlug?: string | null;
+  onSelectEventSlug?: (slug: string | null) => void;
   onSelectPost?: (post: Post) => void;
   onOpenAuth?: () => void;
 }
@@ -139,6 +141,7 @@ const formatDeadline = (dateStr?: string | null): string => {
 export const EventsModule: React.FC<EventsModuleProps> = ({
   currentUser,
   initialEventSlug,
+  onSelectEventSlug,
   onSelectPost,
   onOpenAuth,
 }) => {
@@ -149,35 +152,66 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
   const [selectedType, setSelectedType] = useState('all');
   const [deadlineFilter, setDeadlineFilter] = useState<TimelineFilter>('all');
   const [selectedEvent, setSelectedEvent] = useState<EventOpportunity | null>(null);
+  const [loadingSlugEvent, setLoadingSlugEvent] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState<EventOpportunity | null>(null);
   const [copiedEventId, setCopiedEventId] = useState<string | null>(null);
 
-  // Deep-linking: match initialEventSlug to an event on mount/load
+  // Sync URL slug (deep-link & browser Back/Forward) with the active full-page event view
   useEffect(() => {
-    if (!initialEventSlug || events.length === 0) return;
+    if (!initialEventSlug) {
+      setSelectedEvent(null);
+      setLoadingSlugEvent(false);
+      return;
+    }
+
     const match = events.find(
       (e) => e.slug === initialEventSlug || e.id === initialEventSlug
     );
     if (match) {
       setSelectedEvent(match);
+      setLoadingSlugEvent(false);
+      return;
     }
+
+    let cancelled = false;
+    setLoadingSlugEvent(true);
+    fetch(`/api/events/${encodeURIComponent(initialEventSlug)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (cancelled) return;
+        if (body?.success && body?.event) {
+          setSelectedEvent(normalizeEventRecord(body.event));
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoadingSlugEvent(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [initialEventSlug, events]);
 
   const openEvent = (item: EventOpportunity) => {
     setSelectedEvent(item);
+    onSelectEventSlug?.(item.slug || item.id);
     const eventUrl = getEventUrl(item);
     if (window.location.pathname !== eventUrl) {
       window.history.pushState({}, '', eventUrl);
     }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const closeEvent = () => {
     setSelectedEvent(null);
+    onSelectEventSlug?.(null);
     if (window.location.pathname.startsWith('/events/') || window.location.pathname.startsWith('/grants/')) {
       window.history.pushState({}, '', '/events#opportunities');
     }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleShareEvent = async (item: EventOpportunity, e?: React.MouseEvent) => {
@@ -389,7 +423,7 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
       await store.deleteEvent(id);
       setEvents((prev) => prev.filter((item) => item.id !== id));
       if (selectedEvent?.id === id) {
-        setSelectedEvent(null);
+        closeEvent();
       }
     } finally {
       setDeletingId(null);
@@ -397,6 +431,319 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
   };
 
   const allPosts = useMemo(() => store.getPosts(), [events]);
+
+  // Dedicated Full-Page Event / Grant View (replaces popup modal)
+  if (selectedEvent || (initialEventSlug && loadingSlugEvent)) {
+    if (!selectedEvent) {
+      return (
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-6 animate-pulse">
+          <div className="h-6 w-48 bg-slate-200 rounded-lg" />
+          <div className="aspect-21/9 w-full bg-slate-200 rounded-3xl" />
+          <div className="h-24 bg-slate-100 rounded-2xl" />
+        </div>
+      );
+    }
+
+    const daysLeft = getDaysRemaining(selectedEvent.deadline_date);
+    const isClosingSoon = daysLeft !== null && daysLeft >= 0 && daysLeft <= 14;
+    const isExpired = daysLeft !== null && daysLeft < 0;
+    const linkedPost =
+      selectedEvent.linked_post ||
+      allPosts.find((p) => p.id === selectedEvent.linked_post_id);
+
+    return (
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-8 text-left">
+        {/* Top Navigation Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <button
+            type="button"
+            onClick={closeEvent}
+            className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 hover:text-amber-700 transition-colors cursor-pointer group"
+          >
+            <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-0.5" />
+            <span>Back to Grants, Accelerators & Events</span>
+          </button>
+
+          <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400">
+            <span>/events</span>
+            <span aria-hidden="true">/</span>
+            <span className="text-amber-700 font-semibold truncate max-w-[240px]">
+              {selectedEvent.slug || selectedEvent.id.slice(0, 8)}
+            </span>
+          </div>
+        </div>
+
+        {/* Main Opportunity Article Card */}
+        <article className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+          {/* Hero Banner */}
+          <div className="relative aspect-video sm:aspect-21/9 w-full overflow-hidden bg-slate-900">
+            <img
+              src={getEventBanner(selectedEvent)}
+              alt={selectedEvent.title}
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/45 to-transparent" />
+
+            {/* Status Pill Top-Right */}
+            <div className="absolute top-4 right-4 sm:top-6 sm:right-6">
+              {daysLeft !== null ? (
+                <span
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-semibold backdrop-blur-xs shadow-xs ${
+                    isExpired
+                      ? 'bg-slate-900/85 text-slate-300 border border-white/20'
+                      : isClosingSoon
+                      ? 'bg-rose-900/85 text-rose-200 border border-rose-400/40'
+                      : 'bg-emerald-900/85 text-emerald-200 border border-emerald-400/40'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  {isExpired
+                    ? 'Expired'
+                    : daysLeft === 0
+                    ? 'Closes Today'
+                    : `${daysLeft}d left`}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-semibold bg-blue-900/85 backdrop-blur-xs text-blue-200 border border-blue-400/40 shadow-xs">
+                  <Clock className="w-3.5 h-3.5" />
+                  Rolling Admissions
+                </span>
+              )}
+            </div>
+
+            {/* Overlaid Header */}
+            <div className="absolute bottom-5 left-6 right-6 sm:bottom-8 sm:left-8 sm:right-8">
+              <div className="flex flex-wrap items-center gap-2.5 mb-2.5">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono uppercase font-bold tracking-wider bg-slate-900/90 text-amber-400 border border-amber-400/40 backdrop-blur-xs shadow-xs">
+                  <Award className="w-3.5 h-3.5" />
+                  <span>{formatOpportunityType(selectedEvent.opportunity_type)}</span>
+                </span>
+                {selectedEvent.funding_amount && (
+                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-950/90 border border-emerald-500/40 text-emerald-300 text-[11px] font-mono font-bold">
+                    <DollarSign className="w-3.5 h-3.5" />
+                    <span>{selectedEvent.funding_amount}</span>
+                  </span>
+                )}
+              </div>
+              <h1 className="font-serif text-2xl sm:text-4xl font-extrabold text-white leading-tight drop-shadow-xs">
+                {selectedEvent.title}
+              </h1>
+            </div>
+          </div>
+
+          <div className="p-6 sm:p-8 lg:p-10 space-y-8">
+            {/* Share Opportunity Bar */}
+            <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950 font-mono uppercase tracking-wider">
+                <Share2 className="w-3.5 h-3.5 text-amber-700" />
+                <span>Share Opportunity</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                    `${selectedEvent.title} - ${getEventShareUrl(selectedEvent)}`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-emerald-700 hover:border-emerald-300 text-[11px] font-medium transition-colors"
+                >
+                  WhatsApp
+                </a>
+                <a
+                  href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(
+                    getEventShareUrl(selectedEvent)
+                  )}&text=${encodeURIComponent(
+                    `${selectedEvent.title} | Grants & Events on @startupcreme`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-sky-600 hover:border-sky-300 text-[11px] font-medium transition-colors"
+                >
+                  X / Twitter
+                </a>
+                <a
+                  href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(
+                    getEventShareUrl(selectedEvent)
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-blue-700 hover:border-blue-300 text-[11px] font-medium transition-colors"
+                >
+                  LinkedIn
+                </a>
+                <button
+                  type="button"
+                  onClick={() => handleShareEvent(selectedEvent)}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                    copiedEventId === selectedEvent.id
+                      ? 'bg-emerald-600 text-white border border-emerald-600'
+                      : 'bg-amber-600 hover:bg-amber-700 text-white border border-amber-600'
+                  }`}
+                >
+                  {copiedEventId === selectedEvent.id ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy Link</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Two-Column Editorial Page Layout */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Left 2 Columns: Description + Companion Article */}
+              <div className="lg:col-span-2 space-y-6">
+                <div>
+                  <h2 className="font-serif text-lg font-bold text-slate-900 mb-3">
+                    Opportunity Brief & Scope
+                  </h2>
+                  <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
+                    {selectedEvent.description}
+                  </p>
+                </div>
+
+                {linkedPost ? (
+                  <div className="p-5 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <div className="text-[10px] font-mono text-amber-800 uppercase font-semibold mb-1">
+                        Linked Editorial Article
+                      </div>
+                      <div className="font-serif text-base font-bold text-slate-900">
+                        {linkedPost.title}
+                      </div>
+                    </div>
+                    {onSelectPost && (
+                      <button
+                        type="button"
+                        onClick={() => onSelectPost(linkedPost)}
+                        className="px-4 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold shrink-0 transition-colors cursor-pointer"
+                      >
+                        Read Full Analysis
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3 text-xs text-slate-600">
+                    <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>
+                      <strong>Verified Standalone Opportunity:</strong> This grant/event is curated directly without requiring a companion editorial article.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Right Column: Key Metadata & Apply CTA */}
+              <aside className="space-y-4">
+                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-4 text-xs">
+                  <div>
+                    <span className="text-slate-500 block text-[10px] uppercase font-mono mb-0.5">
+                      Funding / Grant
+                    </span>
+                    <span className="font-bold text-emerald-700 text-base font-mono">
+                      {selectedEvent.funding_amount || 'Non-Specified'}
+                    </span>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-200/80">
+                    <span className="text-slate-500 block text-[10px] uppercase font-mono mb-0.5">
+                      Application Deadline
+                    </span>
+                    <span className="font-semibold text-slate-900 font-mono text-sm">
+                      {formatDeadline(selectedEvent.deadline_date)}
+                    </span>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-200/80">
+                    <span className="text-slate-500 block text-[10px] uppercase font-mono mb-0.5">
+                      Location & Scope
+                    </span>
+                    <span className="font-semibold text-slate-900 text-sm">
+                      {selectedEvent.location || 'Global (Remote)'}
+                    </span>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-200/80">
+                    <span className="text-slate-500 block text-[10px] uppercase font-mono mb-0.5">
+                      Category
+                    </span>
+                    <span className="font-semibold text-slate-900 text-sm">
+                      {formatOpportunityType(selectedEvent.opportunity_type)}
+                    </span>
+                  </div>
+
+                  <div className="pt-3">
+                    <a
+                      href={selectedEvent.application_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full px-5 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs"
+                    >
+                      <span>Open Application Portal</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                </div>
+
+                {isAdmin && (
+                  <div className="p-4 bg-white rounded-2xl border border-slate-200 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingEvent(selectedEvent);
+                        setShowPublishModal(true);
+                      }}
+                      className="flex-1 px-3 py-2 rounded-xl text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Edit Event</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={deletingId === selectedEvent.id}
+                      onClick={(e) => handleDeleteEvent(selectedEvent.id, e)}
+                      className="px-3 py-2 rounded-xl text-rose-700 hover:bg-rose-50 border border-rose-200 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </aside>
+            </div>
+          </div>
+        </article>
+
+        {/* Admin Manual Opportunity Publishing & Editing Modal */}
+        <PublishEventModal
+          isOpen={showPublishModal}
+          eventToEdit={editingEvent}
+          onClose={() => {
+            setShowPublishModal(false);
+            setEditingEvent(null);
+          }}
+          onSuccess={(savedEvent) => {
+            setEvents((prev) =>
+              prev.some((e) => e.id === savedEvent.id)
+                ? prev.map((e) => (e.id === savedEvent.id ? savedEvent : e))
+                : [savedEvent, ...prev]
+            );
+            setSelectedEvent(savedEvent);
+            onSelectEventSlug?.(savedEvent.slug || savedEvent.id);
+            const nextUrl = getEventUrl(savedEvent);
+            if (window.location.pathname !== nextUrl) {
+              window.history.replaceState({}, '', nextUrl);
+            }
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-8">
@@ -780,234 +1127,6 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
         </div>
       )}
 
-      {/* Event Details Modal */}
-      {selectedEvent && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl text-left">
-            {/* Modal Banner Hero */}
-            <div className="relative aspect-video sm:aspect-21/9 w-full overflow-hidden bg-slate-900">
-              <img
-                src={getEventBanner(selectedEvent)}
-                alt={selectedEvent.title}
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent" />
-
-              {/* Close Button on Banner */}
-              <button
-                type="button"
-                onClick={closeEvent}
-                className="absolute top-4 right-4 p-2 rounded-xl bg-slate-950/60 hover:bg-slate-950/90 text-white backdrop-blur-xs transition-colors cursor-pointer border border-white/20"
-                aria-label="Close modal"
-              >
-                ✕
-              </button>
-
-              {/* Overlaid Badges */}
-              <div className="absolute bottom-4 left-6 right-6">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono uppercase font-bold tracking-wider bg-slate-900/90 text-amber-400 border border-amber-400/40 backdrop-blur-xs shadow-xs">
-                    {formatOpportunityType(selectedEvent.opportunity_type)}
-                  </span>
-                  <span className="text-xs font-mono text-slate-300">
-                    ID: {selectedEvent.id.slice(0, 8)}...
-                  </span>
-                </div>
-                <h2 className="font-serif text-xl sm:text-2xl font-bold text-white leading-snug drop-shadow-xs">
-                  {selectedEvent.title}
-                </h2>
-              </div>
-            </div>
-
-            <div className="p-6 sm:p-8 space-y-6">
-              {/* Share Opportunity Bar */}
-              <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950 font-mono uppercase tracking-wider">
-                  <Share2 className="w-3.5 h-3.5 text-amber-700" />
-                  <span>Share Opportunity</span>
-                </div>
-
-                {/* Social Share & Copy Link Buttons */}
-                <div className="flex flex-wrap items-center gap-2">
-                  <a
-                    href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                      `${selectedEvent.title} - ${getEventShareUrl(selectedEvent)}`
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-emerald-700 hover:border-emerald-300 text-[11px] font-medium transition-colors"
-                  >
-                    WhatsApp
-                  </a>
-                  <a
-                    href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(
-                      getEventShareUrl(selectedEvent)
-                    )}&text=${encodeURIComponent(
-                      `${selectedEvent.title} | Grants & Events on @startupcreme`
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-sky-600 hover:border-sky-300 text-[11px] font-medium transition-colors"
-                  >
-                    X / Twitter
-                  </a>
-                  <a
-                    href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(
-                      getEventShareUrl(selectedEvent)
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-blue-700 hover:border-blue-300 text-[11px] font-medium transition-colors"
-                  >
-                    LinkedIn
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => handleShareEvent(selectedEvent)}
-                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
-                      copiedEventId === selectedEvent.id
-                        ? 'bg-emerald-600 text-white border border-emerald-600'
-                        : 'bg-amber-600 hover:bg-amber-700 text-white border border-amber-600'
-                    }`}
-                  >
-                    {copiedEventId === selectedEvent.id ? (
-                      <>
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Copied!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copy Link</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Key stats row */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-200/80 text-xs">
-                <div>
-                  <span className="text-slate-500 block text-[10px] uppercase font-mono">Funding / Grant</span>
-                  <span className="font-bold text-emerald-700 text-sm font-mono">
-                    {selectedEvent.funding_amount || 'Non-Specified'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px] uppercase font-mono">Application Deadline</span>
-                  <span className="font-semibold text-slate-900 font-mono">
-                    {formatDeadline(selectedEvent.deadline_date)}
-                  </span>
-                </div>
-                <div className="col-span-2 sm:col-span-1">
-                  <span className="text-slate-500 block text-[10px] uppercase font-mono">Location & Scope</span>
-                  <span className="font-semibold text-slate-900">
-                    {selectedEvent.location || 'Global (Remote)'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Description */}
-              <div>
-                <h4 className="font-serif text-sm font-bold text-slate-900 mb-2">
-                  Opportunity Brief & Scope
-                </h4>
-                <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-line">
-                  {selectedEvent.description}
-                </p>
-              </div>
-
-              {/* Linked Post Analysis OR Standalone Status */}
-              {(() => {
-                const linkedPost =
-                  selectedEvent.linked_post ||
-                  allPosts.find((p) => p.id === selectedEvent.linked_post_id);
-                if (linkedPost) {
-                  return (
-                    <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 flex items-center justify-between gap-4">
-                      <div>
-                        <div className="text-[10px] font-mono text-amber-800 uppercase font-semibold">
-                          Linked Editorial Article
-                        </div>
-                        <div className="font-serif text-sm font-bold text-slate-900 line-clamp-1">
-                          {linkedPost.title}
-                        </div>
-                      </div>
-                      {onSelectPost && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onSelectPost(linkedPost);
-                            closeEvent();
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold shrink-0 transition-colors cursor-pointer"
-                        >
-                          Read Analysis
-                        </button>
-                      )}
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3 text-xs text-slate-600">
-                    <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span>
-                      <strong>Verified Standalone Opportunity:</strong> This grant/event is curated directly without requiring a companion editorial article.
-                    </span>
-                  </div>
-                );
-              })()}
-
-              {/* Modal Bottom Actions */}
-              <div className="pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
-                <a
-                  href={selectedEvent.application_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
-                >
-                  <span>Open Application Portal</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-
-                <div className="flex items-center gap-2">
-                  {isAdmin && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingEvent(selectedEvent);
-                          setShowPublishModal(true);
-                        }}
-                        className="px-3.5 py-2 rounded-xl text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        <span>Edit Event</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => handleDeleteEvent(selectedEvent.id, e)}
-                        className="px-3.5 py-2 rounded-xl text-rose-700 hover:bg-rose-50 border border-rose-200 text-xs font-semibold transition-colors cursor-pointer"
-                      >
-                        Delete Event
-                      </button>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    onClick={closeEvent}
-                    className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Admin Manual Opportunity Publishing & Editing Modal */}
       <PublishEventModal
         isOpen={showPublishModal}
@@ -1024,6 +1143,7 @@ export const EventsModule: React.FC<EventsModuleProps> = ({
           );
           if (selectedEvent && selectedEvent.id === savedEvent.id) {
             setSelectedEvent(savedEvent);
+            onSelectEventSlug?.(savedEvent.slug || savedEvent.id);
             const nextUrl = getEventUrl(savedEvent);
             if (window.location.pathname !== nextUrl) {
               window.history.replaceState({}, '', nextUrl);
